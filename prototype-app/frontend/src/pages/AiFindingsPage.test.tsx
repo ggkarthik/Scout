@@ -56,6 +56,30 @@ describe('AiFindingsPage', () => {
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/findings/ai/finding-1?returnTo=%2Ffindings%2Fai'));
   });
 
+  it('reads severity and nativeKind filters from the URL when arriving from the severity grid', async () => {
+    const listFindings = vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({
+      items: [buildFinding()],
+      page: 0,
+      size: 100,
+      total: 1,
+    });
+
+    renderWithProviders(<AiFindingsPage />, { route: '/findings/ai?severity=HIGH&nativeKind=AWS_BEDROCK_GUARDRAIL' });
+
+    await screen.findByText('AIF-101B8AF0');
+
+    await waitFor(() => expect(listFindings).toHaveBeenCalledWith(
+      undefined,
+      'OPEN',
+      0,
+      100,
+      undefined,
+      undefined,
+      'HIGH',
+      'AWS_BEDROCK_GUARDRAIL',
+    ));
+  });
+
   it('shows an empty state when no findings match the filters', async () => {
     vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({ items: [], page: 0, size: 100, total: 0 });
 

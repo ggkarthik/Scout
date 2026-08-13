@@ -14,6 +14,8 @@ public record SoftwareIdentityVersionResponse(
         long assetCount,
         long componentCount,
         long openFindingCount,
+        long criticalFindingCount,
+        long highFindingCount,
         long openVulnerabilityCount,
         Instant lastObservedAt
 ) {

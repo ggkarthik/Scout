@@ -63,13 +63,29 @@ public class AiSecurityController {
     @GetMapping("/artifacts")
     public PageResponse<ArtifactResponse> artifacts(
             @RequestParam(required = false) String artifactType,
+            @RequestParam(required = false) String nativeKind,
             @RequestParam(required = false) String provider,
             @RequestParam(required = false) String subscription,
+            @RequestParam(required = false) String severity,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size
     ) {
         Tenant tenant = tenant();
-        return apiService.artifacts(tenant, artifactType, provider, subscription, page, size);
+        return apiService.artifacts(tenant, artifactType, nativeKind, provider, subscription, severity, page, size);
+    }
+
+    @GetMapping("/artifact-summaries")
+    public PageResponse<AiSecurityApiService.ArtifactSummaryResponse> artifactSummaries(
+            @RequestParam(required = false) String artifactType,
+            @RequestParam(required = false) String nativeKind,
+            @RequestParam(required = false) String provider,
+            @RequestParam(required = false) String subscription,
+            @RequestParam(required = false) String severity,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size
+    ) {
+        Tenant tenant = tenant();
+        return apiService.artifactSummaries(tenant, artifactType, nativeKind, provider, subscription, severity, page, size);
     }
 
     @GetMapping("/artifacts/{artifactId}")
@@ -85,9 +101,26 @@ public class AiSecurityController {
     }
 
     @GetMapping("/graph")
-    public GraphResponse graph(@RequestParam(required = false) UUID rootArtifactId) {
+    public GraphResponse graph(
+            @RequestParam(required = false) UUID rootArtifactId,
+            @RequestParam(defaultValue = "1") int depth
+    ) {
         Tenant tenant = tenant();
-        return apiService.graph(tenant, rootArtifactId);
+        return apiService.graph(tenant, rootArtifactId, depth);
+    }
+
+    @GetMapping("/severity-grid")
+    public AiSecurityApiService.SeverityGridResponse severityGrid() {
+        Tenant tenant = tenant();
+        return apiService.severityGrid(tenant);
+    }
+
+    @GetMapping("/top-risk-artifacts")
+    public List<AiSecurityApiService.TopRiskArtifact> topRiskArtifacts(
+            @RequestParam(defaultValue = "5") int limit
+    ) {
+        Tenant tenant = tenant();
+        return apiService.topRiskArtifacts(tenant, limit);
     }
 
     @GetMapping("/findings")
@@ -96,11 +129,13 @@ public class AiSecurityController {
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String provider,
             @RequestParam(required = false) String subscription,
+            @RequestParam(required = false) String severity,
+            @RequestParam(required = false) String nativeKind,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size
     ) {
         Tenant tenant = tenant();
-        return apiService.findings(tenant, policyId, status, provider, subscription, page, size);
+        return apiService.findings(tenant, policyId, status, provider, subscription, severity, nativeKind, page, size);
     }
 
     @GetMapping("/findings/{findingId}")

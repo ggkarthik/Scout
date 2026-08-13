@@ -849,6 +849,41 @@ class AiSecurityObservationPostgresIntegrationTest {
         });
     }
 
+    @Test
+    void persistsAndProjectsPiiClassificationFields() {
+        Tenant tenant = provision("Pii Co", "pii-co");
+        UUID connectorId = connectorService.save(
+                tenant,
+                new AiSecurityAwsConnectorService.ConnectorConfigRequest(
+                        "123456789012", null, null, List.of("us-east-1"), true)
+        ).id();
+        UUID runId = syncRunFacade.start(tenant).getId();
+        Instant scannedAt = Instant.parse("2026-08-01T00:00:00Z");
+        ArtifactObservation bucket = new ArtifactObservation(
+                "arn:aws:s3:::pii-bucket",
+                "SUPPORTING_RESOURCE",
+                "AWS_S3_BUCKET",
+                "pii-bucket",
+                Map.of("public", false),
+                "SCANNED_PII_FOUND",
+                "AWS_MACIE",
+                List.of("EMAIL_ADDRESS", "NAME"),
+                2,
+                scannedAt);
+        observationService.ingest(tenant, envelope(
+                tenant, connectorId, runId, "pii-hash-1", ScopeStatus.COMPLETE, List.of(bucket)));
+
+        var page = aiSecurityApiService.artifacts(tenant, null, 0, 10);
+        var artifact = page.items().stream()
+                .filter(item -> item.providerResourceId().equals("arn:aws:s3:::pii-bucket"))
+                .findFirst().orElseThrow();
+        assertEquals("SCANNED_PII_FOUND", artifact.piiScanStatus());
+        assertEquals("AWS_MACIE", artifact.piiSource());
+        assertEquals(List.of("EMAIL_ADDRESS", "NAME"), artifact.piiInfoTypes());
+        assertEquals(2, artifact.piiFindingCount());
+        assertEquals(scannedAt, artifact.piiLastScannedAt());
+    }
+
     private ObservationEnvelopeV1 raiEnvelope(
             Tenant tenant, UUID connectorId, UUID runId, String hash, Map<String, Object> attributes
     ) {

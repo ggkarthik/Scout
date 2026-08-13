@@ -64,6 +64,9 @@ const AiPolicyDetailPage = React.lazy(async () => ({
 const AiInventoryPage = React.lazy(async () => ({
   default: (await import('./pages/AiInventoryPage')).AiInventoryPage
 }));
+const AiInventoryAssetsPage = React.lazy(async () => ({
+  default: (await import('./pages/AiInventoryAssetsPage')).AiInventoryAssetsPage
+}));
 const AiAssetDetailPage = React.lazy(async () => ({
   default: (await import('./pages/AiAssetDetailPage')).AiAssetDetailPage
 }));
@@ -1138,6 +1141,7 @@ function AppShell() {
               <Route path="/vuln-repo/org-cves/:cveId/software" element={<VulnRepoCveSoftwarePage />} />
               <Route path="/vuln-repo/org-cves/:cveId?" element={<VulnRepoWorkbenchRoute />} />
               <Route path="/inventory/hosts/:assetId" element={<InventoryHostAssetRoute />} />
+              <Route path="/inventory/ai/assets" element={<AiSecurityRoute><AiInventoryAssetsPage /></AiSecurityRoute>} />
               <Route path="/inventory/ai/:assetId" element={<InventoryAiAssetRoute />} />
               <Route path="/inventory/software-identities/:softwareIdentityId" element={<SoftwareIdentityDetailRoute />} />
               <Route path="/inventory/:inventoryView?" element={<InventoryRoute />} />

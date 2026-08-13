@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import { MultiGroupBy, type MultiGroupByOption } from '../components/MultiGroupBy';
 import { PageFreshnessStatus, latestFreshnessValue } from '../components/PageFreshnessStatus';
 import { api } from '../api/client';
+import { FindingSeverityChips } from '../features/findings/components/FindingSeverityChips';
 import { pathForInventoryHostAsset, pathForConnectView } from '../app/routes';
 import type { Asset, HostAssetDetail } from '../features/inventory/api-types';
 import { formatInventorySourceSystem } from '../features/inventory/helpers';
@@ -37,6 +38,8 @@ type HostInventoryRecord = {
   deployedSoftwareCount: number;
   eolSoftwareCount: number;
   openFindingCount: number;
+  criticalFindingCount: number;
+  highFindingCount: number;
   applicableCveCount: number;
   isOnline: boolean;
 };
@@ -166,7 +169,7 @@ function hostGroupValues(record: HostInventoryRecord, key: string): string[] {
 }
 
 function toInventoryRecord(asset: Asset, detail: HostAssetDetail): HostInventoryRecord {
-  const openFindingCount = detail.findings.filter((finding) => (finding.status ?? '').toUpperCase() !== 'RESOLVED').length;
+  const openFindings = detail.findings.filter((finding) => (finding.status ?? '').toUpperCase() !== 'RESOLVED');
   const isOnline = (detail.host.state ?? asset.state ?? '').toUpperCase() === 'ACTIVE';
   return {
     asset,
@@ -174,7 +177,9 @@ function toInventoryRecord(asset: Asset, detail: HostAssetDetail): HostInventory
     operatingSystem: inferOperatingSystem(detail),
     deployedSoftwareCount: detail.software.length,
     eolSoftwareCount: detail.software.filter((software) => software.isEol === true).length,
-    openFindingCount,
+    openFindingCount: openFindings.length,
+    criticalFindingCount: openFindings.filter((finding) => (finding.severity ?? '').toUpperCase() === 'CRITICAL').length,
+    highFindingCount: openFindings.filter((finding) => (finding.severity ?? '').toUpperCase() === 'HIGH').length,
     applicableCveCount: detail.applicableCves.length,
     isOnline
   };
@@ -303,7 +308,13 @@ function HostRow({
       <td>{record.detail.host.supportGroup ?? '-'}</td>
       <td>{record.deployedSoftwareCount.toLocaleString()}</td>
       <td>{record.applicableCveCount.toLocaleString()}</td>
-      <td>{record.openFindingCount.toLocaleString()}</td>
+      <td>
+        <FindingSeverityChips
+          critical={record.criticalFindingCount}
+          high={record.highFindingCount}
+          other={Math.max(0, record.openFindingCount - record.criticalFindingCount - record.highFindingCount)}
+        />
+      </td>
       <td>
         <span className={`status-pill ${record.isOnline ? 'status-active' : 'status-inactive'}`}>
           {record.isOnline ? 'Online' : formatHostState(record.detail.host.state)}

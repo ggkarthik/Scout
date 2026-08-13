@@ -2,9 +2,24 @@ export type AiArtifactType = 'AI_AGENT' | 'AI_MODEL' | 'OTHER_AI_ARTIFACT';
 
 export type AiSecuritySummary = {
   artifactCounts: Record<string, number>;
+  nativeKindCounts: Record<string, number>;
+  providerCounts: Record<string, number>;
   openFindings: number;
   incompleteScopes: number;
   lastCompleteSnapshotAt: string | null;
+};
+
+export type AiSeverityGridRow = {
+  nativeKind: string;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  total: number;
+};
+
+export type AiSeverityGrid = {
+  rows: AiSeverityGridRow[];
 };
 
 export type AiGridSystem = {
@@ -33,6 +48,22 @@ export type AiGridCoverage = {
   notApplicable: number;
   stale: number;
   unsupported: number;
+  decisionReachabilityPercent: number;
+  ownerFacingDecisionReachabilityPercent: number;
+  artifactsFailing: number;
+};
+
+export type AiTopRiskArtifact = {
+  id: string;
+  name: string;
+  nativeKind: string;
+  provider: string;
+  accountId: string;
+  criticalCount: number;
+  highCount: number;
+  mediumCount: number;
+  lowCount: number;
+  score: number;
 };
 
 export type AiGridCoverageDimension = {
@@ -181,6 +212,25 @@ export type AiSecurityArtifact = {
   environment: string | null;
   firstObservedAt: string;
   lastObservedAt: string;
+  piiScanStatus: 'NOT_APPLICABLE' | 'NOT_SCANNED' | 'SCANNED_CLEAN' | 'SCANNED_PII_FOUND' | 'LOOKUP_FAILED';
+  piiSource: 'AWS_MACIE' | 'AZURE_PURVIEW' | null;
+  piiInfoTypes: string[];
+  piiFindingCount: number;
+  piiLastScannedAt: string | null;
+};
+
+export type AiArtifactSummary = {
+  id: string;
+  name: string;
+  nativeKind: string;
+  provider: string;
+  accountId: string;
+  region: string;
+  criticalFindings: number;
+  highFindings: number;
+  totalFindings: number;
+  policiesFailed: number;
+  policiesTotal: number;
 };
 
 export type AiSecurityPage<T> = {

@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type BomFetchPayload, type BomIngestionResult, type BomType, type CbomComponent, type CbomRiskFinding, type IngestionJob } from '../api/client';
 import { useGithubSbomSourcesQuery, useSyncRunsQuery } from '../features/connect/queries';
 import type { GithubSbomSource, SyncRun } from '../features/connect/types';
+import { FindingSeverityChips } from '../features/findings/components/FindingSeverityChips';
 import { RUN_QUEUE_REFRESH_INTERVAL_MS } from '../lib/polling';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -726,7 +727,13 @@ export function BomManagementPage({
                             <td>{displayValue(component.state)}</td>
                             <td>{displayValue(component.storageLocation)}</td>
                             <td>{formatScore(component.riskScore)}</td>
-                            <td>{component.openFindingCount === 0 ? '—' : `${component.openFindingCount} open`}</td>
+                            <td>
+                              <FindingSeverityChips
+                                critical={component.criticalFindingCount}
+                                high={component.highFindingCount}
+                                other={Math.max(0, component.openFindingCount - component.criticalFindingCount - component.highFindingCount)}
+                              />
+                            </td>
                           </tr>
                         ))}
                         {(cbomComponentsQuery.data ?? []).length === 0 && (

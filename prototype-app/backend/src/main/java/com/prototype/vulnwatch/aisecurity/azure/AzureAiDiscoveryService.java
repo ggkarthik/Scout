@@ -62,6 +62,8 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
     private final boolean enabled;
     private final boolean foundryAgentsEnabled;
     private final boolean searchDataPlaneEnabled;
+    private final boolean purviewPiiEnabled;
+    private final AzurePurviewClassificationClient purview;
 
     public AzureAiDiscoveryService(
             AiSecurityAzureConnectorService connectors,
@@ -77,9 +79,11 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
             AiGridProviderCallCounter providerCalls,
             AiGridRunMetricsService runMetrics,
             ObjectMapper objectMapper,
+            AzurePurviewClassificationClient purview,
             @Value("${app.ai-security.azure.enabled:false}") boolean enabled,
             @Value("${app.ai-security.azure.foundry-agents.enabled:false}") boolean foundryAgentsEnabled,
-            @Value("${app.ai-security.azure.search-data-plane.enabled:false}") boolean searchDataPlaneEnabled
+            @Value("${app.ai-security.azure.search-data-plane.enabled:false}") boolean searchDataPlaneEnabled,
+            @Value("${app.ai-security.azure.purview-pii.enabled:false}") boolean purviewPiiEnabled
     ) {
         this.connectors = connectors;
         this.credentials = credentials;
@@ -94,9 +98,11 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         this.providerCalls = providerCalls;
         this.runMetrics = runMetrics;
         this.objectMapper = objectMapper;
+        this.purview = purview;
         this.enabled = enabled;
         this.foundryAgentsEnabled = foundryAgentsEnabled;
         this.searchDataPlaneEnabled = searchDataPlaneEnabled;
+        this.purviewPiiEnabled = purviewPiiEnabled;
     }
 
     @Override
@@ -151,7 +157,7 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
                             foundryAgentsEnabled);
                     Map<String, AzureResource> allResources = index(snapshot.resources());
                     for (String family : families) {
-                        for (ScopePayload payload : payloads(family, connector, snapshot, allResources)) {
+                        for (ScopePayload payload : payloads(family, connector, credential, snapshot, allResources)) {
                             observations.ingest(tenant, envelope(tenant, connector, run.getId(), payload));
                             metrics.recordScope(payload.family(), payload.status().name());
                             observed += payload.artifacts().size();
@@ -195,12 +201,17 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         if (searchDataPlaneEnabled) {
             families.addAll(SEARCH_DATA_FAMILIES);
         }
+        if (purviewPiiEnabled) {
+            families.add("AZURE_STORAGE_ACCOUNTS");
+            families.add("AZURE_FOUNDRY_CONNECTIONS");
+        }
         return List.copyOf(families);
     }
 
     private List<ScopePayload> payloads(
             String family,
             ConnectorSecret connector,
+            TokenCredential credential,
             AzureAiManagementClient.DiscoverySnapshot snapshot,
             Map<String, AzureResource> allResources
     ) {
@@ -220,7 +231,7 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         }
         List<ScopePayload> payloads = new ArrayList<>();
         for (String region : regions) {
-            payloads.add(payload(family, region, snapshot, allResources));
+            payloads.add(payload(family, region, snapshot, allResources, connector, credential));
         }
         return payloads;
     }
@@ -229,7 +240,9 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
             String family,
             String region,
             AzureAiManagementClient.DiscoverySnapshot snapshot,
-            Map<String, AzureResource> allResources
+            Map<String, AzureResource> allResources,
+            ConnectorSecret connector,
+            TokenCredential credential
     ) {
         if (killSwitches.isResourceFamilyDisabled(family)) {
             return unsupported(family, region, "DISABLED_BY_KILL_SWITCH",
@@ -302,6 +315,9 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         if ("AZURE_FOUNDRY_AGENTS".equals(family)) {
             addFoundryAgentModelRelationships(artifacts, relationships, included, resources, snapshot);
         }
+        if ("AZURE_STORAGE_ACCOUNTS".equals(family)) {
+            addStorageAccountPiiLinkage(artifacts, relationships, included, resources, snapshot, connector, credential);
+        }
 
         if (failure == null) {
             return new ScopePayload(family, region, ScopeStatus.COMPLETE, artifacts, relationships, List.of());
@@ -329,6 +345,114 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
                 nativeKind(family),
                 resource.name() == null ? resource.id() : resource.name(),
                 attributes(resource, family, snapshot)));
+    }
+
+    private void addArtifact(
+            List<ArtifactObservation> artifacts,
+            Set<String> included,
+            AzureResource resource,
+            String family,
+            AzureAiManagementClient.DiscoverySnapshot snapshot,
+            AzurePurviewClassificationClient.PiiLookupResult pii
+    ) {
+        if (resource == null || resource.id() == null || !included.add(resource.id())) {
+            return;
+        }
+        artifacts.add(new ArtifactObservation(
+                resource.id(),
+                artifactType(family),
+                nativeKind(family),
+                resource.name() == null ? resource.id() : resource.name(),
+                attributes(resource, family, snapshot),
+                pii.status(), pii.source(), pii.infoTypes(), pii.findingCount(), pii.lastScannedAt()));
+    }
+
+    /**
+     * Links AI artifacts to the Storage Accounts they read from and attaches read-only Purview
+     * classification results. Only two known reference shapes are resolved — the Azure AI Search
+     * data-source managed-identity connection string, and Foundry project blob/data-lake
+     * connections — both control-plane definition reads. A key/secret-based Search connection
+     * string is deliberately left unresolved rather than parsed.
+     */
+    private void addStorageAccountPiiLinkage(
+            List<ArtifactObservation> artifacts,
+            List<RelationshipObservation> relationships,
+            Set<String> included,
+            List<AzureResource> storageAccountsInRegion,
+            AzureAiManagementClient.DiscoverySnapshot snapshot,
+            ConnectorSecret connector,
+            TokenCredential credential
+    ) {
+        if (storageAccountsInRegion.isEmpty()) return;
+        Map<String, AzureResource> storageById = new LinkedHashMap<>();
+        for (AzureResource account : storageAccountsInRegion) {
+            storageById.put(account.id().toLowerCase(Locale.ROOT), account);
+        }
+
+        for (AzureResource dataSource : snapshot.resources().getOrDefault("AZURE_SEARCH_DATA_SOURCES", List.of())) {
+            String storageAccountId = managedIdentityStorageAccountId(
+                    text(dataSource.properties().path("credentials").path("connectionString")));
+            linkStorageAccount(artifacts, relationships, included, storageById, storageAccountId,
+                    dataSource, "AZURE_SEARCH_DATA_SOURCES", "Azure AI Search definition API",
+                    "credentials.connectionString", snapshot, connector, credential);
+        }
+
+        for (AzureResource connection : snapshot.resources().getOrDefault("AZURE_FOUNDRY_CONNECTIONS", List.of())) {
+            String category = text(connection.properties().path("category"));
+            if (!"AzureBlob".equalsIgnoreCase(category) && !"AzureDataLakeGen2".equalsIgnoreCase(category)) {
+                continue;
+            }
+            String storageAccountId = text(connection.properties().path("metadata").path("ResourceId"));
+            if (storageAccountId == null) {
+                storageAccountId = text(connection.properties().path("target"));
+            }
+            linkStorageAccount(artifacts, relationships, included, storageById, storageAccountId,
+                    connection, "AZURE_FOUNDRY_CONNECTIONS", "Azure AI Foundry project connections API",
+                    "properties.metadata.ResourceId", snapshot, connector, credential);
+        }
+    }
+
+    private void linkStorageAccount(
+            List<ArtifactObservation> artifacts,
+            List<RelationshipObservation> relationships,
+            Set<String> included,
+            Map<String, AzureResource> storageById,
+            String storageAccountId,
+            AzureResource source,
+            String sourceFamily,
+            String sourceApi,
+            String field,
+            AzureAiManagementClient.DiscoverySnapshot snapshot,
+            ConnectorSecret connector,
+            TokenCredential credential
+    ) {
+        if (storageAccountId == null) return;
+        AzureResource account = storageById.get(storageAccountId.toLowerCase(Locale.ROOT));
+        if (account == null) return;
+        var pii = purviewPiiEnabled
+                ? purview.lookup(credential, connector.purviewAccountName(), account.name())
+                : new AzurePurviewClassificationClient.PiiLookupResult("NOT_SCANNED", null, List.of(), 0, null);
+        addArtifact(artifacts, included, account, "AZURE_STORAGE_ACCOUNTS", snapshot, pii);
+        addArtifact(artifacts, included, source, sourceFamily, snapshot);
+        relationships.add(direct(source.id(), account.id(), "READS_FROM_STORAGE_ACCOUNT", sourceApi, field));
+    }
+
+    /**
+     * Extracts the Storage Account resource ID from an Azure AI Search data-source connection
+     * string, but only the managed-identity form (`ResourceId=/subscriptions/...;`). Any other
+     * form (a key or SAS-based connection string) is left completely unparsed and unresolved —
+     * that string may contain a secret and must never be logged, stored, or inspected further.
+     */
+    private String managedIdentityStorageAccountId(String connectionString) {
+        if (connectionString == null) return null;
+        for (String part : connectionString.split(";")) {
+            String trimmed = part.trim();
+            if (trimmed.regionMatches(true, 0, "ResourceId=", 0, "ResourceId=".length())) {
+                String resourceId = trimmed.substring("ResourceId=".length()).trim();
+                return resourceId.isBlank() ? null : resourceId;
+            }
+        }
+        return null;
     }
 
     private Map<String, Object> attributes(
@@ -373,6 +497,15 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
             values.put("scaleType", nullToEmpty(text(resource.properties().path("scaleSettings").path("scaleType"))));
             values.put("capacity", resource.sku().path("capacity").asInt(0));
             values.put("raiPolicyName", nullToEmpty(text(resource.properties().path("raiPolicyName"))));
+            values.put("versionUpgradeOption", nullToEmpty(text(resource.properties().path("versionUpgradeOption"))));
+            values.put("modelFormat", nullToEmpty(text(resource.properties().path("model").path("format"))));
+            values.put("modelPublisher", nullToEmpty(text(resource.properties().path("model").path("publisher"))));
+        }
+        if ("AZURE_ML_MODELS".equals(family)) {
+            values.put("modelType", nullToEmpty(text(resource.properties().path("modelType"))));
+            values.put("jobName", nullToEmpty(text(resource.properties().path("jobName"))));
+            values.put("datastoreId", nullToEmpty(text(resource.properties().path("datastoreId"))));
+            values.put("description", nullToEmpty(text(resource.properties().path("description"))));
         }
         if ("AZURE_RAI_POLICIES".equals(family)) {
             AzureRaiPolicyAnalyzer.Analysis analysis = raiPolicyAnalyzer.analyze(resource.properties());

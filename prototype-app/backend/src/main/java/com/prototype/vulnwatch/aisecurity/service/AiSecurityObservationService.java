@@ -37,7 +37,8 @@ public class AiSecurityObservationService {
             "USES_MANAGED_IDENTITY", "HAS_PRIVATE_ENDPOINT", "USES_KEY_VAULT_KEY",
             "CONTAINS_RESOURCE", "HAS_DEPLOYMENT", "RUNS_PIPELINE", "HAS_CHANNEL",
             "HAS_ROLE_ASSIGNMENT", "CONTAINS", "USES_EXECUTION_ROLE", "USES_NETWORK",
-            "USES_ENDPOINT_CONFIGURATION", "PRODUCES_MODEL", "USES_DATA_CONNECTION");
+            "USES_ENDPOINT_CONFIGURATION", "PRODUCES_MODEL", "USES_DATA_CONNECTION",
+            "READS_FROM_STORAGE_ACCOUNT");
 
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
@@ -253,14 +254,21 @@ public class AiSecurityObservationService {
                 .addValue("nativeKind", artifact.nativeKind())
                 .addValue("name", artifact.name())
                 .addValue("attributes", json(artifact.attributes()))
+                .addValue("piiScanStatus", artifact.piiScanStatus())
+                .addValue("piiSource", artifact.piiSource())
+                .addValue("piiInfoTypes", json(artifact.piiInfoTypes()))
+                .addValue("piiFindingCount", artifact.piiFindingCount())
+                .addValue("piiLastScannedAt", artifact.piiLastScannedAt() == null ? null : timestamp(artifact.piiLastScannedAt()))
                 .addValue("observedAt", timestamp(envelope.observedAt()));
         return jdbc.queryForObject("""
                 insert into ai_security_artifacts (
                     id, tenant_id, provider, provider_resource_id, artifact_type, native_kind, name,
-                    account_id, region, active, attributes_json, first_observed_at, last_observed_at
+                    account_id, region, active, attributes_json, first_observed_at, last_observed_at,
+                    pii_scan_status, pii_source, pii_info_types, pii_finding_count, pii_last_scanned_at
                 ) values (
                     :id, :tenantId, :provider, :providerResourceId, :artifactType, :nativeKind, :name,
-                    :accountId, :region, true, cast(:attributes as jsonb), :observedAt, :observedAt
+                    :accountId, :region, true, cast(:attributes as jsonb), :observedAt, :observedAt,
+                    :piiScanStatus, :piiSource, cast(:piiInfoTypes as jsonb), :piiFindingCount, :piiLastScannedAt
                 ) on conflict (tenant_id, provider, provider_resource_id) do update
                     set artifact_type = excluded.artifact_type,
                         native_kind = excluded.native_kind,
@@ -270,7 +278,12 @@ public class AiSecurityObservationService {
                         active = true,
                         attributes_json = ai_security_artifacts.attributes_json || excluded.attributes_json,
                         last_observed_at = excluded.last_observed_at,
-                        deactivated_at = null
+                        deactivated_at = null,
+                        pii_scan_status = excluded.pii_scan_status,
+                        pii_source = excluded.pii_source,
+                        pii_info_types = excluded.pii_info_types,
+                        pii_finding_count = excluded.pii_finding_count,
+                        pii_last_scanned_at = excluded.pii_last_scanned_at
                 returning id
                 """, params, UUID.class);
     }

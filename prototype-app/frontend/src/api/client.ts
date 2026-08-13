@@ -250,6 +250,8 @@ export type BomComponentSummaryItem = {
   correlationState: 'APPLICABLE' | 'NOT_APPLICABLE' | 'UNKNOWN' | 'UNCHECKED';
   riskLevel: string;
   findingCount: number;
+  criticalFindingCount: number;
+  highFindingCount: number;
 };
 
 export type ApplicationCveItem = {
@@ -497,6 +499,7 @@ export type CampaignAiResponse = {
 };
 import { resolveApiBase } from './base';
 import type {
+  AiArtifactSummary,
   AiSecurityArtifact,
   AiSecurityConnectionTest,
   AiSecurityConnectorConfig,
@@ -512,6 +515,8 @@ import type {
   AiSecurityRun,
   AiSecurityScope,
   AiSecuritySummary,
+  AiSeverityGrid,
+  AiTopRiskArtifact,
   AiGridSystem,
   AiGridCoverage,
   AiGridCoverageDimension,
@@ -1419,17 +1424,41 @@ export const api = {
     size = 50,
     provider?: 'AWS' | 'AZURE',
     subscription?: string,
+    nativeKind?: string,
+    severity?: string,
   ) => {
     const params = new URLSearchParams({ page: String(page), size: String(size) });
     if (artifactType) params.set('artifactType', artifactType);
     if (provider) params.set('provider', provider);
     if (subscription) params.set('subscription', subscription);
+    if (nativeKind) params.set('nativeKind', nativeKind);
+    if (severity) params.set('severity', severity);
     return request<AiSecurityPage<AiSecurityArtifact>>(`/ai-security/artifacts?${params.toString()}`);
+  },
+  listAiArtifactSummaries: (
+    artifactType?: string,
+    page = 0,
+    size = 50,
+    provider?: 'AWS' | 'AZURE',
+    subscription?: string,
+    nativeKind?: string,
+    severity?: string,
+  ) => {
+    const params = new URLSearchParams({ page: String(page), size: String(size) });
+    if (artifactType) params.set('artifactType', artifactType);
+    if (provider) params.set('provider', provider);
+    if (subscription) params.set('subscription', subscription);
+    if (nativeKind) params.set('nativeKind', nativeKind);
+    if (severity) params.set('severity', severity);
+    return request<AiSecurityPage<AiArtifactSummary>>(`/ai-security/artifact-summaries?${params.toString()}`);
   },
   getAiSecurityArtifact: (artifactId: string) =>
     request<AiSecurityArtifact>(`/ai-security/artifacts/${encodeURIComponent(artifactId)}`),
-  getAiSecurityGraph: (rootArtifactId?: string) => {
-    const suffix = rootArtifactId ? `?rootArtifactId=${encodeURIComponent(rootArtifactId)}` : '';
+  getAiSecurityGraph: (rootArtifactId?: string, depth?: number) => {
+    const params = new URLSearchParams();
+    if (rootArtifactId) params.set('rootArtifactId', rootArtifactId);
+    if (depth) params.set('depth', String(depth));
+    const suffix = params.toString() ? `?${params.toString()}` : '';
     return request<AiSecurityGraph>(`/ai-security/graph${suffix}`);
   },
   listAiSecurityFindings: (
@@ -1439,14 +1468,21 @@ export const api = {
     size = 50,
     provider?: 'AWS' | 'AZURE',
     subscription?: string,
+    severity?: string,
+    nativeKind?: string,
   ) => {
     const params = new URLSearchParams({ page: String(page), size: String(size) });
     if (policyId) params.set('policyId', policyId);
     if (status) params.set('status', status);
     if (provider) params.set('provider', provider);
     if (subscription) params.set('subscription', subscription);
+    if (severity) params.set('severity', severity);
+    if (nativeKind) params.set('nativeKind', nativeKind);
     return request<AiSecurityPage<AiSecurityFinding>>(`/ai-security/findings?${params.toString()}`);
   },
+  getAiSeverityGrid: () => request<AiSeverityGrid>('/ai-security/severity-grid'),
+  getAiTopRiskArtifacts: (limit = 5) =>
+    request<AiTopRiskArtifact[]>(`/ai-security/top-risk-artifacts?limit=${limit}`),
   getAiSecurityFinding: (findingId: string) =>
     request<AiSecurityFinding>(`/ai-security/findings/${encodeURIComponent(findingId)}`),
   updateFindingWorkflow: (findingId: string, payload: Record<string, unknown>) =>

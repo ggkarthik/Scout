@@ -31,6 +31,7 @@ import {
   useSoftwareIdentityFunnelQuery
 } from '../features/software-identities/queries';
 import { EolBadge } from '../components/EolBadge';
+import { FindingSeverityChips } from '../features/findings/components/FindingSeverityChips';
 import { InventoryShell } from '../features/inventory/InventoryShell';
 import type {
   SoftwareIdentityCoverage,
@@ -361,7 +362,13 @@ function ExpandedVersionRows({ identityId, vendor, onAssetsClick, onCvesClick }:
               <span className="panel-caption">0</span>
             )}
           </td>
-          <td className="panel-caption">{v.openFindingCount}</td>
+          <td>
+            <FindingSeverityChips
+              critical={v.criticalFindingCount}
+              high={v.highFindingCount}
+              other={Math.max(0, v.openFindingCount - v.criticalFindingCount - v.highFindingCount)}
+            />
+          </td>
           <td>
             <div className="si-eol-cell">
               <EolBadge isEol={v.isEol} daysRemaining={v.eolDaysRemaining} eolDate={v.eolDate} />
@@ -939,19 +946,16 @@ export function SoftwareIdentitiesPage() {
                         <td>
                           <div className="si-identity-name-cell">
                             <span className={`si-expand-toggle${isExpanded ? ' si-expand-toggle-open' : ''}`}>▶</span>
-                            <div>
-                              <button
-                                type="button"
-                                className="btn-link inventory-primary-text"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  navigate(pathForSoftwareIdentityDetail(identity.id));
-                                }}
-                              >
-                                {identity.displayName}
-                              </button>
-                              <div className="panel-caption mono">{identity.normalizedKey}</div>
-                            </div>
+                            <button
+                              type="button"
+                              className="btn-link inventory-primary-text"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                navigate(pathForSoftwareIdentityDetail(identity.id));
+                              }}
+                            >
+                              {identity.displayName}
+                            </button>
                           </div>
                         </td>
                         <td>
@@ -997,7 +1001,13 @@ export function SoftwareIdentitiesPage() {
                             <span className="panel-caption">0</span>
                           )}
                         </td>
-                        <td>{identity.openFindingCount.toLocaleString()}</td>
+                        <td>
+                          <FindingSeverityChips
+                            critical={identity.criticalFindingCount}
+                            high={identity.highFindingCount}
+                            other={Math.max(0, identity.openFindingCount - identity.criticalFindingCount - identity.highFindingCount)}
+                          />
+                        </td>
                         <td>
                           <span className={eolSummaryClass(identity)}>
                             {eolSummaryLabel(identity)}

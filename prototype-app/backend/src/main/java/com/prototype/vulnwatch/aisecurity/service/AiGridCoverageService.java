@@ -163,6 +163,7 @@ public class AiGridCoverageService {
                            count(*) filter (where evidence_readiness = 'READY') evidence_ready,
                            count(*) filter (where decision = 'PASS') evaluated_pass,
                            count(*) filter (where decision = 'FAIL') evaluated_fail,
+                           count(distinct artifact_id) filter (where decision = 'FAIL') artifacts_failing,
                            count(*) filter (where decision in ('PASS','FAIL')
                                                 and selection in ('REQUIRED','ENABLED')) owner_facing_decisions,
                            count(*) filter (where selection in ('REQUIRED','ENABLED')
@@ -291,7 +292,7 @@ public class AiGridCoverageService {
                 rs.getLong("evaluated_pass"), rs.getLong("evaluated_fail"), rs.getLong("no_decision"),
                 rs.getLong("not_applicable"), rs.getLong("stale"), rs.getLong("unsupported"),
                 rs.getLong("applicable_not_enabled"), percentage(decisions, expected),
-                percentage(rs.getLong("owner_facing_decisions"), ownerExpected));
+                percentage(rs.getLong("owner_facing_decisions"), ownerExpected), rs.getLong("artifacts_failing"));
     }
 
     private static double percentage(long numerator, long denominator) {
@@ -307,9 +308,9 @@ public class AiGridCoverageService {
                            long tenantDisabled, long evidenceReady, long evaluatedPass, long evaluatedFail,
                            long noDecision, long notApplicable, long stale, long unsupported,
                            long applicableNotEnabled, double decisionReachabilityPercent,
-                           double ownerFacingDecisionReachabilityPercent) {
+                           double ownerFacingDecisionReachabilityPercent, long artifactsFailing) {
         static Coverage empty() {
-            return new Coverage(null, null, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+            return new Coverage(null, null, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         }
     }
     public record CoverageItem(UUID runId, UUID artifactId, String artifactType, String nativeKind,

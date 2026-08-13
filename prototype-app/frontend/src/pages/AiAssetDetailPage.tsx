@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import React from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
-import { pathForInventoryView, pathForPolicyDetail } from '../app/routes';
+import { pathForInventoryAiAsset, pathForInventoryView, pathForPolicyDetail } from '../app/routes';
+import { AiDependencyGraph } from '../features/ai-security/AiDependencyGraph';
 import { useActor } from '../features/auth/context';
 import { hasRole } from '../features/auth/roles';
 import { formatLabel, severityClassName } from '../features/cve-workbench/formatting';
@@ -27,11 +28,27 @@ function formatTimestamp(value?: string | null): string {
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
 }
 
+function formatFactItem(item: unknown): string {
+  if (item == null) return '—';
+  if (typeof item !== 'object') return String(item);
+  const entries = Object.entries(item as Record<string, unknown>).filter(([, v]) => v != null && v !== '');
+  if (entries.length === 0) return '—';
+  return entries.map(([key, entryValue]) => `${key}: ${entryValue}`).join(' · ');
+}
+
 function formatFactValue(value: unknown): string {
-  if (Array.isArray(value)) return value.length === 0 ? 'None' : `${value.length} item${value.length === 1 ? '' : 's'}`;
-  if (typeof value === 'object' && value != null) return JSON.stringify(value);
+  if (Array.isArray(value)) return value.length === 0 ? 'None' : value.map(formatFactItem).join(', ');
+  if (typeof value === 'object' && value != null) return formatFactItem(value);
   if (value == null || value === '') return 'Not observed';
   return String(value);
+}
+
+const ATTRIBUTE_LABEL_OVERRIDES: Record<string, string> = {
+  dataSourceAccessCount: 'Access to data sources',
+};
+
+function formatAttributeLabel(key: string): string {
+  return ATTRIBUTE_LABEL_OVERRIDES[key] ?? key.replace(/([A-Z_])/g, ' $1');
 }
 
 export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
@@ -77,8 +94,12 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
   });
   const graphQuery = useQuery({
     queryKey: ['ai-security-graph', artifactId],
-    queryFn: () => api.getAiSecurityGraph(artifactId),
+    queryFn: () => api.getAiSecurityGraph(artifactId, 2),
   });
+  const handleGraphNodeClick = React.useCallback((clickedArtifactId: string) => {
+    if (clickedArtifactId === artifactId) return;
+    navigate(pathForInventoryAiAsset(clickedArtifactId, `${location.pathname}${location.search}`));
+  }, [artifactId, navigate, location.pathname, location.search]);
   const postureQuery = useQuery({
     queryKey: ['ai-asset-posture', artifactId],
     queryFn: () => api.getAiAssetPosture(artifactId),
@@ -98,6 +119,13 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
     () => (findingsQuery.data?.items ?? []).filter((finding) => finding.artifactId === artifactId),
     [findingsQuery.data, artifactId],
   );
+  const findingsCountByArtifactId = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const finding of findingsQuery.data?.items ?? []) {
+      counts[finding.artifactId] = (counts[finding.artifactId] ?? 0) + 1;
+    }
+    return counts;
+  }, [findingsQuery.data]);
   const openFindings = React.useMemo(
     () => artifactFindings.filter((finding) => finding.status === 'OPEN'),
     [artifactFindings],
@@ -126,7 +154,7 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
   const overviewSecondaryFields = React.useMemo<OverviewField[]>(() => {
     if (!artifact) return [];
     return Object.entries(artifact.attributes).map(([key, value]) => ({
-      label: key.replace(/([A-Z_])/g, ' $1'),
+      label: formatAttributeLabel(key),
       value: formatFactValue(value),
     }));
   }, [artifact]);
@@ -375,22 +403,13 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
             ) : (graphQuery.data?.edges.length ?? 0) === 0 ? (
               <div className="empty-state"><p>No active relationships observed for this asset.</p></div>
             ) : (
-              <div className="ai-security-graph" aria-label="AI artifact relationship graph">
-                {graphQuery.data?.edges.map((edge) => (
-                  <div className="ai-security-graph-edge" key={edge.id}>
-                    <span>{edge.sourceName}</span>
-                    <strong>{edge.relationshipType.replace(/_/g, ' ')}</strong>
-                    <span>{edge.targetName}</span>
-                    <small className="panel-caption">
-                      {edge.attributes.confidence === 'INFERRED' ? 'Inferred reference' : 'Directly observed'}
-                      {typeof (edge.attributes.evidence as Record<string, unknown> | undefined)?.sourceApi === 'string'
-                        ? ` · ${(edge.attributes.evidence as Record<string, unknown>).sourceApi}`
-                        : ''}
-                    </small>
-                  </div>
-                ))}
-                {graphQuery.data?.truncated && <p className="panel-caption">Graph capped for safe rendering.</p>}
-              </div>
+              <AiDependencyGraph
+                graph={graphQuery.data!}
+                rootArtifactId={artifactId}
+                onNodeClick={handleGraphNodeClick}
+                findingsCountByArtifactId={findingsCountByArtifactId}
+                policies={policiesQuery.data ?? []}
+              />
             )
           )}
         </div>

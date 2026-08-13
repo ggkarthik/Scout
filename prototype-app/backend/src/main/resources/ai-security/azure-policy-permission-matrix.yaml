@@ -103,6 +103,18 @@ family_permissions:
     api_version: "2022-04-01"
     role: Reader
     actions: [Microsoft.Authorization/roleAssignments/read]
+  AZURE_STORAGE_ACCOUNTS:
+    api_version: "2023-01-01"
+    role: Reader
+    actions: [Microsoft.Storage/storageAccounts/read]
+  AZURE_FOUNDRY_CONNECTIONS:
+    api_version: "2025-06-01"
+    role: Reader
+    actions: [Microsoft.CognitiveServices/accounts/projects/read]
+  AZURE_PURVIEW_CLASSIFICATION:
+    api_version: "2023-09-01"
+    role: Purview Data Reader (granted within Purview's own collection permissions, not ARM RBAC)
+    actions: [Microsoft.Purview/accounts/read]
 policies:
   - id: AZURE_RAI_POLICY_NON_BLOCKING_FILTER
     version: 1.0.0

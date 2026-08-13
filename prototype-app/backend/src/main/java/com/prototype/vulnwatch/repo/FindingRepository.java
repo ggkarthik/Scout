@@ -356,6 +356,26 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
             """, nativeQuery = true)
     List<Object[]> countOpenByEcosystemPackageForTenant(@Param("tenantId") UUID tenantId);
 
+    /** Same grouping as countOpenByEcosystemPackageForTenant, broken out by resolved severity
+     *  (severity_override, then the linked vulnerability's severity, then a risk_score bucket —
+     *  the same resolution FindingProjectionRefreshService uses) so the BOM Components Findings
+     *  column can show a critical/high/other breakdown instead of one flat count. */
+    @Query(value = """
+            SELECT lower(ic.ecosystem), lower(ic.package_name),
+                   upper(coalesce(f.severity_override, v.severity,
+                       case when f.risk_score >= 9 then 'CRITICAL'
+                            when f.risk_score >= 7 then 'HIGH'
+                            when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end)) AS resolved_severity,
+                   count(f.id)
+            FROM findings f
+            JOIN inventory_components ic ON ic.id = f.component_id
+            LEFT JOIN vulnerabilities v ON v.id = f.vulnerability_id
+            WHERE f.tenant_id = :tenantId
+              AND f.status = 'OPEN'
+            GROUP BY lower(ic.ecosystem), lower(ic.package_name), resolved_severity
+            """, nativeQuery = true)
+    List<Object[]> countOpenByEcosystemPackageAndSeverityForTenant(@Param("tenantId") UUID tenantId);
+
     /** Count open findings grouped by resolved asset type and severity, for the Grid Exposure widget.
      *  Covers both direct asset findings (f.asset_id) and component-scoped findings
      *  (f.component_id -> inventory_components.asset_id). */

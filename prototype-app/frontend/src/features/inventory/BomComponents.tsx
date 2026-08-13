@@ -1,6 +1,7 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api, type ApplicationRiskSummary, type BomComponentSummaryItem } from '../../api/client';
+import { FindingSeverityChips } from '../findings/components/FindingSeverityChips';
 import { BomComponentDetailPanel } from './BomComponentDetailPanel';
 import { ApplicationDetailPanel } from './ApplicationDetailPanel';
 
@@ -466,9 +467,11 @@ export function BomComponents() {
                           : <span className="panel-caption">—</span>}
                       </td>
                       <td>
-                        {c.findingCount > 0
-                          ? <span style={{ fontWeight: 600, color: 'var(--accent)' }}>{c.findingCount}</span>
-                          : <span className="panel-caption">—</span>}
+                        <FindingSeverityChips
+                          critical={c.criticalFindingCount}
+                          high={c.highFindingCount}
+                          other={Math.max(0, c.findingCount - c.criticalFindingCount - c.highFindingCount)}
+                        />
                       </td>
                       <td><CorrelationPill state={c.correlationState} /></td>
                       <td>

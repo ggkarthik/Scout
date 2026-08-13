@@ -100,6 +100,8 @@ public class AzureAiManagementClient {
 
         collectRequestedChild(credential, requested, resources.get("AZURE_AI_ACCOUNTS"),
                 "projects", "AZURE_FOUNDRY_PROJECTS", resources, failures);
+        collectRequestedChild(credential, requested, resources.get("AZURE_FOUNDRY_PROJECTS"),
+                "connections", "AZURE_FOUNDRY_CONNECTIONS", resources, failures);
         collectRequestedChild(credential, requested, resources.get("AZURE_AI_ACCOUNTS"),
                 "deployments", "AZURE_FOUNDRY_DEPLOYMENTS", resources, failures);
         collectRequestedChild(credential, requested, resources.get("AZURE_AI_ACCOUNTS"),
@@ -549,6 +551,8 @@ public class AzureAiManagementClient {
         if (normalized.equals("microsoft.cognitiveservices/accounts/projects")) return "AZURE_FOUNDRY_PROJECTS";
         if (normalized.equals("microsoft.cognitiveservices/accounts/deployments")) return "AZURE_FOUNDRY_DEPLOYMENTS";
         if (normalized.equals("microsoft.cognitiveservices/accounts/raipolicies")) return "AZURE_RAI_POLICIES";
+        if (normalized.equals("microsoft.cognitiveservices/accounts/projects/connections")) return "AZURE_FOUNDRY_CONNECTIONS";
+        if (normalized.equals("microsoft.storage/storageaccounts")) return "AZURE_STORAGE_ACCOUNTS";
         if (normalized.contains("/agentdeployments")) return "AZURE_FOUNDRY_AGENTS";
         if (normalized.equals("microsoft.foundry/projects/agents")) return "AZURE_FOUNDRY_AGENTS";
         if (normalized.equals("microsoft.machinelearningservices/workspaces")) return "AZURE_ML_WORKSPACES";

@@ -329,6 +329,18 @@ public class BomInventoryReadService {
                         row -> ((String) row[0]) + ":" + ((String) row[1]),
                         row -> (Long) row[2]
                 ));
+        Map<String, Long> criticalFindingCountByPackageKey = new HashMap<>();
+        Map<String, Long> highFindingCountByPackageKey = new HashMap<>();
+        findingRepository.countOpenByEcosystemPackageAndSeverityForTenant(tenant.getId()).forEach(row -> {
+            String key = ((String) row[0]) + ":" + ((String) row[1]);
+            String severity = (String) row[2];
+            long count = (Long) row[3];
+            if ("CRITICAL".equals(severity)) {
+                criticalFindingCountByPackageKey.merge(key, count, Long::sum);
+            } else if ("HIGH".equals(severity)) {
+                highFindingCountByPackageKey.merge(key, count, Long::sum);
+            }
+        });
 
         List<BomComponentSummaryResponse> summaries = new ArrayList<>();
         inventoryComponents.forEach(c -> {
@@ -364,6 +376,8 @@ public class BomInventoryReadService {
 
             String pkgKey = (c.getEcosystem() != null ? c.getEcosystem().toLowerCase() : "") + ":" + c.getPackageName().toLowerCase();
             int findingCount = findingCountByPackageKey.getOrDefault(pkgKey, 0L).intValue();
+            int criticalFindingCount = criticalFindingCountByPackageKey.getOrDefault(pkgKey, 0L).intValue();
+            int highFindingCount = highFindingCountByPackageKey.getOrDefault(pkgKey, 0L).intValue();
 
             summaries.add(new BomComponentSummaryResponse(
                     c.getId().toString(),
@@ -380,7 +394,9 @@ public class BomInventoryReadService {
                     critical, high, medium, low, applicable.size(),
                     correlationState,
                     toApplicationRiskLevel(score),
-                    findingCount
+                    findingCount,
+                    criticalFindingCount,
+                    highFindingCount
             ));
         });
 
@@ -429,7 +445,9 @@ public class BomInventoryReadService {
                     0, 0, 0, 0, vulnerabilityCount,
                     vulnerabilityCount > 0 ? "APPLICABLE" : "UNCHECKED",
                     vulnerabilityCount > 0 ? "HIGH" : "NONE",
-                    workflowCountByComponent.getOrDefault(component.getId(), 0)
+                    workflowCountByComponent.getOrDefault(component.getId(), 0),
+                    0,
+                    0
             ));
         });
 

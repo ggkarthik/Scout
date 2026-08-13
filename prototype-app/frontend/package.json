@@ -13,9 +13,11 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^3.1.1",
     "@sentry/react": "^10.51.0",
     "@tanstack/react-query": "^5.95.2",
     "@tanstack/react-table": "^8.21.3",
+    "@xyflow/react": "^12.11.2",
     "docx": "^9.6.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
