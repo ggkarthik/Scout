@@ -212,7 +212,7 @@ public class AiGridSnapshotService {
         copy(attributes, "outboundAuthType", "mcp.outbound_auth_type", facts);
         copy(attributes, "status", "mcp.target_status", facts);
         copy(attributes, "publicContentAccess", "data.public_content_access_configured", facts);
-        if (piiScanStatus != null) {
+        if (piiScanStatus != null && !"NOT_APPLICABLE".equals(piiScanStatus)) {
             facts.put("data.source_sensitivity", canonicalMapper.valueToTree(sensitivityState(piiScanStatus)));
         }
         if ("SCANNED_PII_FOUND".equals(piiScanStatus)) {
