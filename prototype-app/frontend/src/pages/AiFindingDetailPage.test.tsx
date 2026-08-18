@@ -101,6 +101,11 @@ function buildArtifact(overrides: Partial<AiSecurityArtifact> = {}): AiSecurityA
     ownerConfidenceMethodVersion: null,
     businessCriticality: null,
     environment: null,
+    piiScanStatus: 'NOT_APPLICABLE',
+    piiSource: null,
+    piiInfoTypes: [],
+    piiFindingCount: 0,
+    piiLastScannedAt: null,
     ...overrides,
   };
 }

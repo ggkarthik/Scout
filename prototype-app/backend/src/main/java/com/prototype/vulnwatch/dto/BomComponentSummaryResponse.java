@@ -21,5 +21,7 @@ public record BomComponentSummaryResponse(
         int totalCveCount,
         String correlationState,
         String riskLevel,
-        int findingCount
+        int findingCount,
+        int criticalFindingCount,
+        int highFindingCount
 ) {}

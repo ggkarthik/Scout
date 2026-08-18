@@ -18,6 +18,7 @@ import com.prototype.vulnwatch.aisecurity.service.AiGridRunMetricsService;
 import com.prototype.vulnwatch.domain.SyncRun;
 import com.prototype.vulnwatch.domain.Tenant;
 import java.net.URLDecoder;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -29,6 +30,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.awscore.exception.AwsServiceException;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
@@ -37,9 +41,22 @@ import software.amazon.awssdk.core.interceptor.ExecutionAttributes;
 import software.amazon.awssdk.core.interceptor.ExecutionInterceptor;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.bedrock.BedrockClient;
+import software.amazon.awssdk.services.bedrock.model.GetCustomModelRequest;
+import software.amazon.awssdk.services.bedrock.model.GetCustomModelResponse;
+import software.amazon.awssdk.services.bedrock.model.GetFoundationModelRequest;
+import software.amazon.awssdk.services.bedrock.model.GetFoundationModelResponse;
 import software.amazon.awssdk.services.bedrock.model.GetGuardrailRequest;
+import software.amazon.awssdk.services.bedrock.model.GetGuardrailResponse;
+import software.amazon.awssdk.services.bedrock.model.GetImportedModelRequest;
+import software.amazon.awssdk.services.bedrock.model.GetImportedModelResponse;
 import software.amazon.awssdk.services.bedrock.model.GetModelInvocationLoggingConfigurationRequest;
 import software.amazon.awssdk.services.bedrock.model.GuardrailContentFilter;
+import software.amazon.awssdk.services.bedrock.model.GuardrailContextualGroundingFilter;
+import software.amazon.awssdk.services.bedrock.model.GuardrailManagedWords;
+import software.amazon.awssdk.services.bedrock.model.GuardrailPiiEntity;
+import software.amazon.awssdk.services.bedrock.model.GuardrailRegex;
+import software.amazon.awssdk.services.bedrock.model.GuardrailTopic;
+import software.amazon.awssdk.services.bedrock.model.GuardrailWord;
 import software.amazon.awssdk.services.bedrock.model.ListGuardrailsRequest;
 import software.amazon.awssdk.services.bedrock.model.ListCustomModelsRequest;
 import software.amazon.awssdk.services.bedrock.model.ListImportedModelsRequest;
@@ -57,6 +74,11 @@ import software.amazon.awssdk.services.bedrockagent.model.ListDataSourcesRequest
 import software.amazon.awssdk.services.bedrockagent.model.ListKnowledgeBasesRequest;
 import software.amazon.awssdk.services.bedrockagent.model.ListFlowsRequest;
 import software.amazon.awssdk.services.bedrockagent.model.ListPromptsRequest;
+import software.amazon.awssdk.services.bedrockagentcorecontrol.BedrockAgentCoreControlClient;
+import software.amazon.awssdk.services.bedrockagentcorecontrol.model.GetGatewayRequest;
+import software.amazon.awssdk.services.bedrockagentcorecontrol.model.GetGatewayTargetRequest;
+import software.amazon.awssdk.services.bedrockagentcorecontrol.model.ListGatewayTargetsRequest;
+import software.amazon.awssdk.services.bedrockagentcorecontrol.model.ListGatewaysRequest;
 import software.amazon.awssdk.services.iam.IamClient;
 import software.amazon.awssdk.services.iam.model.GetPolicyRequest;
 import software.amazon.awssdk.services.iam.model.GetPolicyVersionRequest;
@@ -66,6 +88,7 @@ import software.amazon.awssdk.services.iam.model.ListRolePoliciesRequest;
 import software.amazon.awssdk.services.lambda.LambdaClient;
 import software.amazon.awssdk.services.lambda.model.GetFunctionUrlConfigRequest;
 import software.amazon.awssdk.services.lambda.model.ResourceNotFoundException;
+import software.amazon.awssdk.services.macie2.Macie2Client;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetBucketPolicyStatusRequest;
 import software.amazon.awssdk.services.sagemaker.SageMakerClient;
@@ -90,6 +113,8 @@ import software.amazon.awssdk.services.sagemaker.model.ListTransformJobsRequest;
 @Service
 public class AwsBedrockDiscoveryService {
 
+    private static final Logger LOG = LoggerFactory.getLogger(AwsBedrockDiscoveryService.class);
+
     private final AiSecurityAwsConnectorService connectorService;
     private final AiSecurityObservationService observationService;
     private final AiSecuritySyncRunFacade syncRunFacade;
@@ -98,6 +123,8 @@ public class AwsBedrockDiscoveryService {
     private final AiGridBudgetService budgets;
     private final AiGridProviderCallCounter providerCalls;
     private final AiGridRunMetricsService runMetrics;
+    private final AwsMaciePiiLookupService maciePiiLookupService;
+    private final boolean maciePiiEnabled;
     private final ExecutionInterceptor providerCallInterceptor = new ExecutionInterceptor() {
         @Override
         public void beforeTransmission(Context.BeforeTransmission context, ExecutionAttributes executionAttributes) {
@@ -113,7 +140,9 @@ public class AwsBedrockDiscoveryService {
             AiSecurityAwsAdmissionService admissionService,
             AiGridBudgetService budgets,
             AiGridProviderCallCounter providerCalls,
-            AiGridRunMetricsService runMetrics
+            AiGridRunMetricsService runMetrics,
+            AwsMaciePiiLookupService maciePiiLookupService,
+            @Value("${app.ai-security.aws.macie-pii.enabled:false}") boolean maciePiiEnabled
     ) {
         this.connectorService = connectorService;
         this.observationService = observationService;
@@ -123,6 +152,8 @@ public class AwsBedrockDiscoveryService {
         this.budgets = budgets;
         this.providerCalls = providerCalls;
         this.runMetrics = runMetrics;
+        this.maciePiiLookupService = maciePiiLookupService;
+        this.maciePiiEnabled = maciePiiEnabled;
     }
 
     public DiscoveryResult discover(Tenant tenant, UUID connectorId) {
@@ -140,8 +171,9 @@ public class AwsBedrockDiscoveryService {
         try (var measurement = providerCalls.begin()) {
             try {
                 budgets.admit(tenant, run.getId(), "AWS", List.of(
-                        "BEDROCK_AGENTS", "IAM_GLOBAL", "LAMBDA_URLS", "BEDROCK_KNOWLEDGE_BASES",
-                        "S3_EXPOSURE", "BEDROCK_GUARDRAILS", "BEDROCK_INVOCATION_LOGGING",
+                        "BEDROCK_AGENTS", "IAM_GLOBAL", "LAMBDA_URLS", "BEDROCK_KNOWLEDGE_BASES", "BEDROCK_DATA_SOURCES", "BEDROCK_DATA_STORES",
+                        "AWS_AGENTCORE_GATEWAYS", "AWS_AGENTCORE_GATEWAY_TARGETS",
+                        "S3_EXPOSURE", "AWS_MACIE_PII", "BEDROCK_GUARDRAILS", "BEDROCK_INVOCATION_LOGGING",
                         "SAGEMAKER_DOMAINS", "SAGEMAKER_SPACES", "SAGEMAKER_MODEL_REGISTRY",
                         "SAGEMAKER_ENDPOINTS", "SAGEMAKER_ENDPOINT_CONFIGURATIONS", "SAGEMAKER_JOBS",
                         "SAGEMAKER_PIPELINES", "SAGEMAKER_COMPUTE", "SAGEMAKER_EXECUTION_ROLES",
@@ -197,6 +229,7 @@ public class AwsBedrockDiscoveryService {
         collectIam(config, credentials, region, agents, scopes);
         collectLambdaUrls(config, credentials, region, agents, scopes);
         collectKnowledgeBases(config, credentials, region, agents, scopes);
+        collectAgentCoreGateways(config, credentials, region, scopes);
         collectGuardrails(config, credentials, region, agents, scopes);
         collectInvocationLogging(config, credentials, region, scopes);
         collectDeployableBedrockResources(config, credentials, region, scopes);
@@ -210,6 +243,7 @@ public class AwsBedrockDiscoveryService {
         List<ArtifactObservation> models = new ArrayList<>(), profiles = new ArrayList<>(), jobs = new ArrayList<>(),
                 prompts = new ArrayList<>(), flows = new ArrayList<>();
         List<RelationshipObservation> relationships = new ArrayList<>();
+        Map<String, GetFoundationModelResponse> foundationModelCache = new HashMap<>();
         try (BedrockClient bedrock = BedrockClient.builder().region(region).credentialsProvider(credentials)
                 .overrideConfiguration(c -> c.addExecutionInterceptor(providerCallInterceptor)).build();
              BedrockAgentClient agent = BedrockAgentClient.builder().region(region).credentialsProvider(credentials)
@@ -218,22 +252,75 @@ public class AwsBedrockDiscoveryService {
             do {
                 var page = bedrock.listCustomModels(ListCustomModelsRequest.builder().nextToken(token).build());
                 for (var model : page.modelSummaries()) {
-                    models.add(new ArtifactObservation(model.modelArn(), "AI_MODEL", "AWS_BEDROCK_CUSTOM_MODEL", model.modelName(),
-                            Map.of("status", model.modelStatusAsString(), "baseModelArn", safeValue(model.baseModelArn()), "customizationType", safeValue(model.customizationTypeAsString()))));
+                    Map<String, Object> attributes = new LinkedHashMap<>();
+                    attributes.put("status", model.modelStatusAsString());
+                    attributes.put("baseModelArn", safeValue(model.baseModelArn()));
+                    attributes.put("customizationType", safeValue(model.customizationTypeAsString()));
+                    attributes.put("ownerAccountId", safeValue(model.ownerAccountId()));
+                    try {
+                        GetCustomModelResponse detail = bedrock.getCustomModel(
+                                GetCustomModelRequest.builder().modelIdentifier(model.modelArn()).build());
+                        attributes.put("modelKmsKeyArn", safeValue(detail.modelKmsKeyArn()));
+                        attributes.put("trainingDataS3Uri", detail.trainingDataConfig() == null
+                                ? "" : safeValue(detail.trainingDataConfig().s3Uri()));
+                        attributes.put("validationDataS3Uris", detail.validationDataConfig() == null
+                                || !detail.validationDataConfig().hasValidators() ? List.of()
+                                : detail.validationDataConfig().validators().stream()
+                                        .map(v -> v.s3Uri()).toList());
+                        attributes.put("failureMessage", safeValue(detail.failureMessage()));
+                    } catch (Exception ex) {
+                        LOG.warn("bedrock:GetCustomModel enrichment unavailable for {}: {}: {}",
+                                model.modelArn(), ex.getClass().getName(), ex.getMessage());
+                    }
+                    models.add(new ArtifactObservation(
+                            model.modelArn(), "AI_MODEL", "AWS_BEDROCK_CUSTOM_MODEL", model.modelName(), attributes));
+                    if (hasText(model.baseModelArn())) {
+                        String baseModelArn = model.baseModelArn();
+                        String baseModelName = baseModelArn.contains("/")
+                                ? baseModelArn.substring(baseModelArn.lastIndexOf('/') + 1) : baseModelArn;
+                        models.add(foundationModelArtifact(bedrock, foundationModelCache,
+                                baseModelArn, baseModelArn, baseModelName, "referencedByCustomModel"));
+                        relationships.add(new RelationshipObservation(
+                                model.modelArn(), baseModelArn, "USES_MODEL", Map.of()));
+                    }
                 }
                 token = page.nextToken();
             } while (hasText(token));
             token = null;
             do {
                 var page = bedrock.listImportedModels(ListImportedModelsRequest.builder().nextToken(token).build());
-                for (var model : page.modelSummaries()) models.add(new ArtifactObservation(model.modelArn(), "AI_MODEL", "AWS_BEDROCK_IMPORTED_MODEL", model.modelName(), Map.of("architecture", safeValue(model.modelArchitecture()))));
+                for (var model : page.modelSummaries()) {
+                    Map<String, Object> attributes = new LinkedHashMap<>();
+                    attributes.put("architecture", safeValue(model.modelArchitecture()));
+                    attributes.put("instructSupported", model.instructSupported());
+                    try {
+                        GetImportedModelResponse detail = bedrock.getImportedModel(
+                                GetImportedModelRequest.builder().modelIdentifier(model.modelArn()).build());
+                        attributes.put("modelKmsKeyArn", safeValue(detail.modelKmsKeyArn()));
+                        attributes.put("modelDataS3Uri", detail.modelDataSource() == null
+                                || detail.modelDataSource().s3DataSource() == null ? ""
+                                : safeValue(detail.modelDataSource().s3DataSource().s3Uri()));
+                    } catch (Exception ex) {
+                        LOG.warn("bedrock:GetImportedModel enrichment unavailable for {}: {}: {}",
+                                model.modelArn(), ex.getClass().getName(), ex.getMessage());
+                    }
+                    models.add(new ArtifactObservation(
+                            model.modelArn(), "AI_MODEL", "AWS_BEDROCK_IMPORTED_MODEL", model.modelName(), attributes));
+                }
                 token = page.nextToken();
             } while (hasText(token));
             token = null;
             do {
                 var page = bedrock.listProvisionedModelThroughputs(ListProvisionedModelThroughputsRequest.builder().nextToken(token).build());
                 for (var throughput : page.provisionedModelSummaries()) {
-                    models.add(new ArtifactObservation(throughput.provisionedModelArn(), "AI_MODEL", "AWS_BEDROCK_PROVISIONED_MODEL", throughput.provisionedModelName(), Map.of("status", throughput.statusAsString(), "modelArn", safeValue(throughput.modelArn()))));
+                    Map<String, Object> attributes = new LinkedHashMap<>();
+                    attributes.put("status", throughput.statusAsString());
+                    attributes.put("modelArn", safeValue(throughput.modelArn()));
+                    attributes.put("commitmentDuration", safeValue(throughput.commitmentDurationAsString()));
+                    attributes.put("commitmentExpirationTime", throughput.commitmentExpirationTime() == null
+                            ? "" : throughput.commitmentExpirationTime().toString());
+                    models.add(new ArtifactObservation(throughput.provisionedModelArn(), "AI_MODEL",
+                            "AWS_BEDROCK_PROVISIONED_MODEL", throughput.provisionedModelName(), attributes));
                     if (hasText(throughput.modelArn())) relationships.add(new RelationshipObservation(throughput.provisionedModelArn(), throughput.modelArn(), "USES_MODEL", Map.of()));
                 }
                 token = page.nextToken();
@@ -274,7 +361,7 @@ public class AwsBedrockDiscoveryService {
             } while (hasText(token));
             scopes.add(complete("BEDROCK_FLOWS", flows, List.of()));
         } catch (Exception ex) {
-            List<String> permissions = List.of("bedrock:ListCustomModels", "bedrock:ListImportedModels", "bedrock:ListProvisionedModelThroughputs", "bedrock:ListInferenceProfiles", "bedrock:ListModelCustomizationJobs", "bedrock:ListPrompts", "bedrock:ListFlows");
+            List<String> permissions = List.of("bedrock:ListCustomModels", "bedrock:ListImportedModels", "bedrock:ListProvisionedModelThroughputs", "bedrock:ListInferenceProfiles", "bedrock:ListModelCustomizationJobs", "bedrock:ListPrompts", "bedrock:ListFlows", "bedrock:GetFoundationModel", "bedrock:GetCustomModel", "bedrock:GetImportedModel");
             for (String family : List.of("BEDROCK_DEPLOYABLE_MODELS", "BEDROCK_INFERENCE_PROFILES", "BEDROCK_MODEL_CUSTOMIZATION_JOBS", "BEDROCK_PROMPTS", "BEDROCK_FLOWS")) scopes.add(failed(family, ex, permissions));
         }
     }
@@ -431,7 +518,11 @@ public class AwsBedrockDiscoveryService {
         List<ArtifactObservation> artifacts = new ArrayList<>();
         List<RelationshipObservation> relationships = new ArrayList<>();
         Map<String, AgentFact> facts = new LinkedHashMap<>();
+        Map<String, GetFoundationModelResponse> foundationModelCache = new HashMap<>();
         try (BedrockAgentClient client = BedrockAgentClient.builder()
+                .region(region).credentialsProvider(credentials)
+                .overrideConfiguration(c -> c.addExecutionInterceptor(providerCallInterceptor)).build();
+             BedrockClient bedrock = BedrockClient.builder()
                 .region(region).credentialsProvider(credentials)
                 .overrideConfiguration(c -> c.addExecutionInterceptor(providerCallInterceptor)).build()) {
             String token = null;
@@ -454,7 +545,8 @@ public class AwsBedrockDiscoveryService {
                     artifacts.add(new ArtifactObservation(
                             agentArn, "AI_AGENT", "AWS_BEDROCK_AGENT", summary.agentName(), attributes));
                     facts.put(summary.agentId(), new AgentFact(
-                            summary.agentId(), agentArn, agent.agentResourceRoleArn(), agent.foundationModel(),
+                            summary.agentId(), summary.agentName(), agentArn, agent.agentResourceRoleArn(),
+                            agent.foundationModel(),
                             guardrailAttached ? agent.guardrailConfiguration().guardrailIdentifier() : null));
 
                     if (hasText(agent.foundationModel())) {
@@ -462,9 +554,8 @@ public class AwsBedrockDiscoveryService {
                         String modelResourceId = modelId.startsWith("arn:")
                                 ? modelId
                                 : "bedrock:model:" + region.id() + ":" + modelId;
-                        artifacts.add(new ArtifactObservation(
-                                modelResourceId, "AI_MODEL", "AWS_BEDROCK_MODEL", modelId,
-                                Map.of("referencedByAgent", true)));
+                        artifacts.add(foundationModelArtifact(bedrock, foundationModelCache,
+                                modelResourceId, modelId, modelId, "referencedByAgent"));
                         relationships.add(new RelationshipObservation(
                                 agentArn, modelResourceId, "USES_MODEL", Map.of()));
                     }
@@ -561,12 +652,19 @@ public class AwsBedrockDiscoveryService {
             List<ScopePayload> scopes
     ) {
         List<ArtifactObservation> kbArtifacts = new ArrayList<>();
+        List<ArtifactObservation> dataSourceArtifacts = new ArrayList<>();
+        List<ArtifactObservation> dataStoreArtifacts = new ArrayList<>();
         List<ArtifactObservation> exposureArtifacts = new ArrayList<>();
-        List<RelationshipObservation> relationships = new ArrayList<>();
+        List<RelationshipObservation> knowledgeRelationships = new ArrayList<>();
+        List<RelationshipObservation> dataSourceRelationships = new ArrayList<>();
+        List<RelationshipObservation> dataStoreRelationships = new ArrayList<>();
+        Map<String, Integer> dataSourceCountByKbId = new HashMap<>();
         try (BedrockAgentClient bedrock = BedrockAgentClient.builder()
                 .region(region).credentialsProvider(credentials)
                 .overrideConfiguration(c -> c.addExecutionInterceptor(providerCallInterceptor)).build();
              S3Client s3 = S3Client.builder().region(region).credentialsProvider(credentials)
+                     .overrideConfiguration(c -> c.addExecutionInterceptor(providerCallInterceptor)).build();
+             Macie2Client macie = Macie2Client.builder().region(region).credentialsProvider(credentials)
                      .overrideConfiguration(c -> c.addExecutionInterceptor(providerCallInterceptor)).build()) {
             String token = null;
             do {
@@ -575,14 +673,31 @@ public class AwsBedrockDiscoveryService {
                     String kbArn = arn(config, region, "knowledge-base/" + summary.knowledgeBaseId());
                     boolean anyPublic = false;
                     List<String> buckets = new ArrayList<>();
+                    int dataSourceCount = 0;
                     String dataToken = null;
                     do {
                         var dataSources = bedrock.listDataSources(ListDataSourcesRequest.builder()
                                 .knowledgeBaseId(summary.knowledgeBaseId()).nextToken(dataToken).build());
+                        dataSourceCount += dataSources.dataSourceSummaries().size();
                         for (var source : dataSources.dataSourceSummaries()) {
                             var detail = bedrock.getDataSource(GetDataSourceRequest.builder()
                                     .knowledgeBaseId(summary.knowledgeBaseId())
                                     .dataSourceId(source.dataSourceId()).build()).dataSource();
+                            String dataSourceId = kbArn + "/data-source/" + source.dataSourceId();
+                            Map<String, Object> sourceAttributes = new LinkedHashMap<>();
+                            sourceAttributes.put("sourceType", detail.dataSourceConfiguration() == null
+                                    ? "UNKNOWN" : detail.dataSourceConfiguration().typeAsString());
+                            sourceAttributes.put("status", detail.statusAsString());
+                            sourceAttributes.put("deletionPolicy", detail.dataDeletionPolicyAsString());
+                            sourceAttributes.put("ingestionConfigurationPresent",
+                                    detail.dataSourceConfiguration() != null);
+                            dataSourceArtifacts.add(new ArtifactObservation(
+                                    dataSourceId, "DATA_SOURCE", "AWS_BEDROCK_DATA_SOURCE",
+                                    source.name() == null ? source.dataSourceId() : source.name(), sourceAttributes));
+                            dataSourceRelationships.add(new RelationshipObservation(
+                                    kbArn, dataSourceId, "USES_DATA_SOURCE", Map.of(
+                                    "confidence", "DIRECT", "evidence", Map.of(
+                                    "sourceApi", "Bedrock GetDataSource", "field", "knowledgeBaseId"))));
                             if (detail.dataSourceConfiguration() != null
                                     && detail.dataSourceConfiguration().s3Configuration() != null) {
                                 String bucketArn = detail.dataSourceConfiguration().s3Configuration().bucketArn();
@@ -590,11 +705,21 @@ public class AwsBedrockDiscoveryService {
                                 boolean isPublic = isBucketPublic(s3, bucketName);
                                 anyPublic |= isPublic;
                                 buckets.add(bucketArn);
+                                var pii = maciePiiEnabled
+                                        ? maciePiiLookupService.lookup(macie, bucketName)
+                                        : new AwsMaciePiiLookupService.PiiLookupResult("NOT_SCANNED", null, List.of(), 0, null);
                                 exposureArtifacts.add(new ArtifactObservation(
                                         bucketArn, "SUPPORTING_RESOURCE", "AWS_S3_BUCKET", bucketName,
-                                        Map.of("public", isPublic)));
-                                relationships.add(new RelationshipObservation(
-                                        kbArn, bucketArn, "READS_FROM_S3", Map.of("dataSourceId", source.dataSourceId())));
+                                        Map.of("public", isPublic),
+                                        pii.status(), pii.source(), pii.infoTypes(), pii.findingCount(), pii.lastScannedAt()));
+                                dataStoreArtifacts.add(new ArtifactObservation(
+                                        bucketArn, "DATA_STORE", "AWS_S3_BUCKET", bucketName,
+                                        Map.of("storeType", "S3", "publicContentAccess", isPublic),
+                                        pii.status(), pii.source(), pii.infoTypes(), pii.findingCount(), pii.lastScannedAt()));
+                                dataStoreRelationships.add(new RelationshipObservation(
+                                        dataSourceId, bucketArn, "BACKED_BY_DATA_STORE", Map.of(
+                                        "confidence", "DIRECT", "evidence", Map.of(
+                                        "sourceApi", "Bedrock GetDataSource", "field", "s3Configuration.bucketArn"))));
                             }
                         }
                         dataToken = dataSources.nextToken();
@@ -603,8 +728,10 @@ public class AwsBedrockDiscoveryService {
                     attributes.put("status", summary.statusAsString());
                     attributes.put("s3Public", anyPublic);
                     attributes.put("s3Buckets", buckets);
+                    attributes.put("dataSourceCount", dataSourceCount);
                     kbArtifacts.add(new ArtifactObservation(
                             kbArn, "KNOWLEDGE_BASE", "AWS_BEDROCK_KNOWLEDGE_BASE", summary.name(), attributes));
+                    dataSourceCountByKbId.put(summary.knowledgeBaseId(), dataSourceCount);
                 }
                 token = response.nextToken();
             } while (hasText(token));
@@ -612,18 +739,120 @@ public class AwsBedrockDiscoveryService {
             for (AgentFact agent : agents.facts().values()) {
                 var attached = bedrock.listAgentKnowledgeBases(ListAgentKnowledgeBasesRequest.builder()
                         .agentId(agent.id()).agentVersion("DRAFT").build());
+                int agentDataSourceAccessCount = 0;
                 for (var kb : attached.agentKnowledgeBaseSummaries()) {
-                    relationships.add(new RelationshipObservation(
+                    knowledgeRelationships.add(new RelationshipObservation(
                             agent.arn(), arn(config, region, "knowledge-base/" + kb.knowledgeBaseId()),
                             "USES_KNOWLEDGE_BASE", Map.of()));
+                    agentDataSourceAccessCount += dataSourceCountByKbId.getOrDefault(kb.knowledgeBaseId(), 0);
                 }
+                kbArtifacts.add(agentUpdate(agent, Map.of("dataSourceAccessCount", agentDataSourceAccessCount)));
             }
-            scopes.add(complete("BEDROCK_KNOWLEDGE_BASES", kbArtifacts, relationships));
+            scopes.add(complete("BEDROCK_KNOWLEDGE_BASES", kbArtifacts, knowledgeRelationships));
+            scopes.add(complete("BEDROCK_DATA_SOURCES", dataSourceArtifacts, dataSourceRelationships));
+            scopes.add(complete("BEDROCK_DATA_STORES", dataStoreArtifacts, dataStoreRelationships));
             scopes.add(complete("S3_EXPOSURE", exposureArtifacts, List.of()));
+            if (maciePiiEnabled) {
+                scopes.add(complete("AWS_MACIE_PII", List.of(), List.of()));
+            }
         } catch (Exception ex) {
             scopes.add(failed("BEDROCK_KNOWLEDGE_BASES", ex, List.of(
                     "bedrock:ListKnowledgeBases", "bedrock:ListDataSources", "bedrock:GetDataSource")));
+            scopes.add(failed("BEDROCK_DATA_SOURCES", ex, List.of("bedrock:ListDataSources", "bedrock:GetDataSource")));
+            scopes.add(failed("BEDROCK_DATA_STORES", ex, List.of("bedrock:GetDataSource")));
             scopes.add(failed("S3_EXPOSURE", ex, List.of("s3:GetBucketPolicyStatus")));
+            if (maciePiiEnabled) {
+                scopes.add(failed("AWS_MACIE_PII", ex, List.of(
+                        "macie2:GetMacieSession", "macie2:ListFindings", "macie2:GetFindings")));
+            }
+        }
+    }
+
+    /** AgentCore control-plane inventory. It deliberately does not contact gateway or target endpoints. */
+    private void collectAgentCoreGateways(
+            ConnectorSecret config, AwsCredentialsProvider credentials, Region region, List<ScopePayload> scopes
+    ) {
+        List<ArtifactObservation> gateways = new ArrayList<>();
+        List<ArtifactObservation> targets = new ArrayList<>();
+        List<ArtifactObservation> servers = new ArrayList<>();
+        List<RelationshipObservation> targetRelationships = new ArrayList<>();
+        try (BedrockAgentCoreControlClient client = BedrockAgentCoreControlClient.builder()
+                .region(region).credentialsProvider(credentials)
+                .overrideConfiguration(c -> c.addExecutionInterceptor(providerCallInterceptor)).build()) {
+            String gatewayToken = null;
+            do {
+                var page = client.listGateways(ListGatewaysRequest.builder().nextToken(gatewayToken).build());
+                for (var summary : page.items()) {
+                    var gateway = client.getGateway(GetGatewayRequest.builder().gatewayIdentifier(summary.gatewayId()).build());
+                    String gatewayId = gateway.gatewayArn() == null ? arn(config, region, "gateway/" + summary.gatewayId()) : gateway.gatewayArn();
+                    Map<String, Object> attributes = new LinkedHashMap<>();
+                    attributes.put("status", gateway.statusAsString());
+                    attributes.put("protocol", gateway.protocolTypeAsString());
+                    attributes.put("inboundAuthType", gateway.authorizerTypeAsString());
+                    attributes.put("endpointHost", httpsAuthority(gateway.gatewayUrl()));
+                    gateways.add(new ArtifactObservation(gatewayId, "MCP_GATEWAY", "AWS_AGENTCORE_GATEWAY",
+                            gateway.name() == null ? summary.gatewayId() : gateway.name(), attributes));
+                    String targetToken = null;
+                    do {
+                        var targetPage = client.listGatewayTargets(ListGatewayTargetsRequest.builder()
+                                .gatewayIdentifier(summary.gatewayId()).nextToken(targetToken).build());
+                        for (var targetSummary : targetPage.items()) {
+                            var target = client.getGatewayTarget(GetGatewayTargetRequest.builder()
+                                    .gatewayIdentifier(summary.gatewayId()).targetId(targetSummary.targetId()).build());
+                            String targetId = gatewayId + "/target/" + target.targetId();
+                            String subtype = target.targetConfiguration() == null || target.targetConfiguration().type() == null
+                                    ? "UNKNOWN" : target.targetConfiguration().type().toString();
+                            Map<String, Object> targetAttributes = new LinkedHashMap<>();
+                            targetAttributes.put("status", target.statusAsString());
+                            targetAttributes.put("configurationSubtype", subtype);
+                            targetAttributes.put("lastSynchronizedAt", target.lastSynchronizedAt() == null
+                                    ? null : target.lastSynchronizedAt().toString());
+                            targetAttributes.put("outboundAuthType", target.hasCredentialProviderConfigurations()
+                                    ? target.credentialProviderConfigurations().stream().findFirst()
+                                    .map(value -> value.credentialProviderTypeAsString()).orElse("UNKNOWN") : "NONE");
+                            targets.add(new ArtifactObservation(targetId, "MCP_TARGET", "AWS_AGENTCORE_GATEWAY_TARGET",
+                                    target.name() == null ? target.targetId() : target.name(), targetAttributes));
+                            targetRelationships.add(new RelationshipObservation(gatewayId, targetId, "CONTAINS_MCP_TARGET", Map.of(
+                                    "confidence", "DIRECT", "evidence", Map.of("sourceApi", "AgentCore GetGatewayTarget", "field", "gatewayArn"))));
+                            String endpoint = target.targetConfiguration() == null || target.targetConfiguration().mcp() == null
+                                    || target.targetConfiguration().mcp().mcpServer() == null ? null
+                                    : httpsAuthority(target.targetConfiguration().mcp().mcpServer().endpoint());
+                            if (endpoint != null) {
+                                String serverId = targetId + "/mcp-server/" + sha256(endpoint).substring(0, 24);
+                                servers.add(new ArtifactObservation(serverId, "MCP_SERVER", "AWS_AGENTCORE_MCP_SERVER", endpoint,
+                                        Map.of("endpointHost", endpoint, "endpointExposure", "EXTERNAL_ENDPOINT")));
+                                targetRelationships.add(new RelationshipObservation(targetId, serverId, "ROUTES_TO", Map.of(
+                                        "confidence", "DIRECT", "evidence", Map.of("sourceApi", "AgentCore GetGatewayTarget", "field", "targetConfiguration.mcp.mcpServer.endpoint"))));
+                            }
+                        }
+                        targetToken = targetPage.nextToken();
+                    } while (hasText(targetToken));
+                }
+                gatewayToken = page.nextToken();
+            } while (hasText(gatewayToken));
+            scopes.add(complete("AWS_AGENTCORE_GATEWAYS", gateways, List.of()));
+            scopes.add(complete("AWS_AGENTCORE_GATEWAY_TARGETS", concat(targets, servers), targetRelationships));
+        } catch (Exception ex) {
+            scopes.add(failed("AWS_AGENTCORE_GATEWAYS", ex, List.of("bedrock-agentcore:ListGateways", "bedrock-agentcore:GetGateway")));
+            scopes.add(failed("AWS_AGENTCORE_GATEWAY_TARGETS", ex, List.of("bedrock-agentcore:ListGatewayTargets", "bedrock-agentcore:GetGatewayTarget")));
+        }
+    }
+
+    private List<ArtifactObservation> concat(List<ArtifactObservation> first, List<ArtifactObservation> second) {
+        List<ArtifactObservation> all = new ArrayList<>(first);
+        all.addAll(second);
+        return all;
+    }
+
+    /** Returns only a normalized HTTPS authority; malicious URLs are inert and never fetched. */
+    static String httpsAuthority(String value) {
+        if (value == null || value.isBlank() || value.length() > 2_048) return null;
+        try {
+            URI uri = URI.create(value.trim());
+            if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null) return null;
+            return uri.getHost().toLowerCase(Locale.ROOT) + (uri.getPort() < 0 ? "" : ":" + uri.getPort());
+        } catch (IllegalArgumentException ignored) {
+            return null;
         }
     }
 
@@ -652,7 +881,7 @@ public class AwsBedrockDiscoveryService {
                     minimumStrength.put(summary.id(), strength);
                     artifacts.add(new ArtifactObservation(
                             summary.arn(), "OTHER_AI_ARTIFACT", "AWS_BEDROCK_GUARDRAIL", summary.name(),
-                            Map.of("minimumStrength", strength, "status", summary.statusAsString())));
+                            guardrailAttributes(detail, strength)));
                 }
                 token = response.nextToken();
             } while (hasText(token));
@@ -792,6 +1021,111 @@ public class AwsBedrockDiscoveryService {
         }
     }
 
+    /** Captures the bounded structural GetGuardrail metadata — content filters, denied
+     *  topics, word/profanity filters, PII/sensitive-info entities, contextual grounding filters,
+     *  topics, filter counts, and KMS key — instead of just the status/minimumStrength scalar summary,
+     *  so the AI asset detail page's Observed Facts panel (a generic renderer over this map) shows
+     *  the real guardrail configuration rather than two fields. */
+    Map<String, Object> guardrailAttributes(GetGuardrailResponse detail, String strength) {
+        Map<String, Object> attributes = new LinkedHashMap<>();
+        attributes.put("status", detail.statusAsString());
+        attributes.put("minimumStrength", strength);
+        if (hasText(detail.version())) {
+            attributes.put("version", detail.version());
+        }
+        if (detail.createdAt() != null) {
+            attributes.put("createdAt", detail.createdAt().toString());
+        }
+        if (detail.updatedAt() != null) {
+            attributes.put("updatedAt", detail.updatedAt().toString());
+        }
+        if (hasText(detail.kmsKeyArn())) {
+            attributes.put("kmsKeyArn", detail.kmsKeyArn());
+        }
+        List<GuardrailContentFilter> contentFilters = detail.contentPolicy() == null
+                ? List.of() : detail.contentPolicy().filters();
+        if (contentFilters != null && !contentFilters.isEmpty()) {
+            attributes.put("contentFilterCount", contentFilters.size());
+            attributes.put("contentFilters", contentFilters.stream()
+                    .map(f -> entryMap(
+                            "type", f.typeAsString(),
+                            "inputStrength", f.inputStrengthAsString(),
+                            "outputStrength", f.outputStrengthAsString(),
+                            "inputEnabled", f.inputEnabled(),
+                            "outputEnabled", f.outputEnabled()))
+                    .toList());
+        }
+
+        List<GuardrailTopic> deniedTopics = detail.topicPolicy() == null
+                ? List.of() : detail.topicPolicy().topics();
+        if (deniedTopics != null && !deniedTopics.isEmpty()) {
+            attributes.put("deniedTopicCount", deniedTopics.size());
+            attributes.put("deniedTopics", deniedTopics.stream()
+                    .map(t -> entryMap(
+                            "name", t.name(),
+                            "inputAction", t.inputActionAsString(),
+                            "outputAction", t.outputActionAsString()))
+                    .toList());
+        }
+
+        if (detail.wordPolicy() != null) {
+            List<GuardrailWord> words = detail.wordPolicy().words();
+            if (words != null && !words.isEmpty()) {
+                attributes.put("customWordFilterCount", words.size());
+            }
+            List<GuardrailManagedWords> managedWordLists = detail.wordPolicy().managedWordLists();
+            if (managedWordLists != null && !managedWordLists.isEmpty()) {
+                attributes.put("profanityFilterEnabled", true);
+            }
+        }
+
+        if (detail.sensitiveInformationPolicy() != null) {
+            List<GuardrailPiiEntity> piiEntities = detail.sensitiveInformationPolicy().piiEntities();
+            if (piiEntities != null && !piiEntities.isEmpty()) {
+                attributes.put("piiEntityCount", piiEntities.size());
+                attributes.put("piiEntities", piiEntities.stream()
+                        .map(e -> entryMap(
+                                "type", e.typeAsString(),
+                                "inputAction", e.inputActionAsString(),
+                                "outputAction", e.outputActionAsString()))
+                        .toList());
+            }
+            List<GuardrailRegex> regexes = detail.sensitiveInformationPolicy().regexes();
+            if (regexes != null && !regexes.isEmpty()) {
+                attributes.put("sensitiveRegexCount", regexes.size());
+            }
+        }
+
+        if (detail.contextualGroundingPolicy() != null) {
+            List<GuardrailContextualGroundingFilter> groundingFilters = detail.contextualGroundingPolicy().filters();
+            if (groundingFilters != null && !groundingFilters.isEmpty()) {
+                attributes.put("contextualGroundingFilterCount", groundingFilters.size());
+                attributes.put("contextualGroundingFilters", groundingFilters.stream()
+                        .map(f -> entryMap(
+                                "type", f.typeAsString(),
+                                "threshold", f.threshold(),
+                                "action", f.actionAsString()))
+                        .toList());
+            }
+        }
+
+        return attributes;
+    }
+
+    /** Builds a map from alternating key/value pairs, skipping any pair whose value is null —
+     *  the AWS SDK's per-direction action/strength accessors return null when a guardrail
+     *  predates that field, and Map.of() throws NPE on a null value. */
+    private Map<String, Object> entryMap(Object... keyValuePairs) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        for (int i = 0; i < keyValuePairs.length; i += 2) {
+            Object value = keyValuePairs[i + 1];
+            if (value != null) {
+                map.put((String) keyValuePairs[i], value);
+            }
+        }
+        return map;
+    }
+
     private String minimumStrength(List<GuardrailContentFilter> filters) {
         List<String> order = List.of("NONE", "LOW", "MEDIUM", "HIGH");
         int minimum = order.indexOf("HIGH");
@@ -891,7 +1225,7 @@ public class AwsBedrockDiscoveryService {
     }
 
     private ArtifactObservation agentUpdate(AgentFact agent, Map<String, Object> attributes) {
-        return new ArtifactObservation(agent.arn(), "AI_AGENT", "AWS_BEDROCK_AGENT", agent.id(), attributes);
+        return new ArtifactObservation(agent.arn(), "AI_AGENT", "AWS_BEDROCK_AGENT", agent.name(), attributes);
     }
 
     /** Relationship evidence is metadata-only: an API name and the allowlisted reference field. */
@@ -942,8 +1276,50 @@ public class AwsBedrockDiscoveryService {
         return value == null ? "" : value;
     }
 
+    /** Best-effort: a permission gap or transient failure here must not fail the whole scope. */
+    private Map<String, Object> foundationModelFacts(
+            BedrockClient bedrock, Map<String, GetFoundationModelResponse> cache, String modelIdentifier) {
+        try {
+            GetFoundationModelResponse response = cache.get(modelIdentifier);
+            if (response == null) {
+                response = bedrock.getFoundationModel(
+                        GetFoundationModelRequest.builder().modelIdentifier(modelIdentifier).build());
+                cache.put(modelIdentifier, response);
+            }
+            var details = response.modelDetails();
+            Map<String, Object> facts = new LinkedHashMap<>();
+            facts.put("providerName", safeValue(details.providerName()));
+            facts.put("modelLifecycleStatus",
+                    details.modelLifecycle() == null ? "" : details.modelLifecycle().statusAsString());
+            facts.put("inputModalities", details.inputModalitiesAsStrings());
+            facts.put("outputModalities", details.outputModalitiesAsStrings());
+            facts.put("customizationsSupported", details.customizationsSupportedAsStrings());
+            facts.put("inferenceTypesSupported", details.inferenceTypesSupportedAsStrings());
+            return facts;
+        } catch (Exception ex) {
+            LOG.warn("bedrock:GetFoundationModel enrichment unavailable for {}: {}: {}",
+                    modelIdentifier, ex.getClass().getName(), ex.getMessage());
+            return Map.of();
+        }
+    }
+
+    private ArtifactObservation foundationModelArtifact(
+            BedrockClient bedrock,
+            Map<String, GetFoundationModelResponse> cache,
+            String modelResourceId,
+            String apiModelIdentifier,
+            String displayName,
+            String referenceFlagKey
+    ) {
+        Map<String, Object> attributes = new LinkedHashMap<>();
+        attributes.put(referenceFlagKey, true);
+        attributes.putAll(foundationModelFacts(bedrock, cache, apiModelIdentifier));
+        return new ArtifactObservation(modelResourceId, "AI_MODEL", "AWS_BEDROCK_MODEL", displayName, attributes);
+    }
+
     private record AgentFact(
             String id,
+            String name,
             String arn,
             String roleArn,
             String modelId,

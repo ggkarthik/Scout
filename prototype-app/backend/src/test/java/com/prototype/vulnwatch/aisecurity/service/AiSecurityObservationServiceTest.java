@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.aisecurity.service;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -9,11 +10,13 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ObservationEnvelopeV1;
+import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ArtifactObservation;
 import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ScopeStatus;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.service.TenantSchemaExecutionService;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.RowMapper;
@@ -30,7 +33,8 @@ class AiSecurityObservationServiceTest {
             new ObjectMapper(),
             mock(TenantSchemaExecutionService.class),
             mock(TransactionTemplate.class),
-            runs);
+            runs,
+            new AiSecurityMetadataSanitizer());
 
     @Test
     void requiresAzureProviderTenantAssertionBeforeTenantExecution() {
@@ -56,6 +60,17 @@ class AiSecurityObservationServiceTest {
                         tenant, envelope(tenant, "different-entra-tenant")));
         assertDoesNotThrow(() -> service.validateCurrentTenantOwnership(
                 tenant, envelope(tenant, "CONFIGURED-ENTRA-TENANT")));
+    }
+
+    @Test
+    void defaultsKnowledgeAndDataSensitivityToUnknown() {
+        var source = new ArtifactObservation("source-1", "DATA_SOURCE", "AZURE_SEARCH_DATA_SOURCES",
+                "source", Map.of("sourceType", "AZURE_BLOB"));
+        var agent = new ArtifactObservation("agent-1", "AI_AGENT", "AWS_BEDROCK_AGENT",
+                "agent", Map.of("status", "PREPARED"));
+
+        assertEquals("UNKNOWN", source.piiScanStatus());
+        assertEquals("NOT_APPLICABLE", agent.piiScanStatus());
     }
 
     private Tenant tenant() {

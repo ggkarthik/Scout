@@ -105,8 +105,31 @@ public final class AiSecurityContracts {
             String artifactType,
             String nativeKind,
             String name,
-            Map<String, Object> attributes
+            Map<String, Object> attributes,
+            String piiScanStatus,
+            String piiSource,
+            List<String> piiInfoTypes,
+            int piiFindingCount,
+            Instant piiLastScannedAt
     ) {
+        /** No PII lookup applies to this artifact (it has no linked storage to check). */
+        public ArtifactObservation(
+                String providerResourceId,
+                String artifactType,
+                String nativeKind,
+                String name,
+                Map<String, Object> attributes
+        ) {
+            this(providerResourceId, artifactType, nativeKind, name, attributes,
+                    defaultPiiScanStatus(artifactType), null, List.of(), 0, null);
+        }
+    }
+
+    private static String defaultPiiScanStatus(String artifactType) {
+        return switch (artifactType == null ? "" : artifactType) {
+            case "KNOWLEDGE_BASE", "DATA_SOURCE", "DATA_STORE", "SEARCH_INDEX" -> "UNKNOWN";
+            default -> "NOT_APPLICABLE";
+        };
     }
 
     public record RelationshipObservation(

@@ -10,12 +10,14 @@ export function AiFindingsPage() {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const policyId = searchParams.get('policyId') ?? undefined;
+  const severity = searchParams.get('severity') ?? undefined;
+  const nativeKind = searchParams.get('nativeKind') ?? undefined;
   const [status, setStatus] = React.useState('OPEN');
   const [provider, setProvider] = React.useState<'' | 'AWS' | 'AZURE'>('');
   const [subscription, setSubscription] = React.useState('');
   const deferredSubscription = React.useDeferredValue(subscription.trim());
   const findingsQuery = useQuery({
-    queryKey: ['ai-security-findings', policyId, status, provider, deferredSubscription],
+    queryKey: ['ai-security-findings', policyId, status, provider, deferredSubscription, severity, nativeKind],
     queryFn: () => api.listAiSecurityFindings(
       policyId,
       status || undefined,
@@ -23,6 +25,8 @@ export function AiFindingsPage() {
       100,
       provider || undefined,
       deferredSubscription || undefined,
+      severity,
+      nativeKind,
     ),
   });
   const actionQueueQuery = useQuery({

@@ -24,6 +24,8 @@ public record SoftwareIdentitySummaryResponse(
         long nearEolComponentCount,
         long unknownEolComponentCount,
         long openFindingCount,
+        long criticalFindingCount,
+        long highFindingCount,
         long openVulnerabilityCount,
         Instant lastObservedAt
 ) {

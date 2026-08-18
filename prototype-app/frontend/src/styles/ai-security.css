@@ -120,6 +120,17 @@
   width: fit-content;
 }
 
+.ai-security-pill-row--scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+}
+
+.ai-security-pill-row--scroll .ai-security-pill {
+  flex: 0 0 auto;
+}
+
 .ai-security-pill {
   display: inline-flex;
   align-items: center;
@@ -377,6 +388,141 @@
   color: color-mix(in srgb, #0e7490 82%, var(--text));
   font-size: 0.58rem;
   letter-spacing: 0.04em;
+}
+
+.ai-dependency-graph {
+  position: relative;
+  height: 420px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+
+.ai-dependency-graph-popup {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 5;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  width: min(280px, 80%);
+  height: 100%;
+  overflow-y: auto;
+  padding: 14px;
+  border-left: 1px solid var(--border);
+  background: var(--panel-solid);
+  box-shadow: -8px 0 16px -12px color-mix(in srgb, #000 40%, transparent);
+}
+
+.ai-dependency-graph-popup-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.ai-dependency-graph-popup-title {
+  display: grid;
+  overflow: hidden;
+  gap: 2px;
+  flex: 1;
+}
+
+.ai-dependency-graph-popup-title strong {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-dependency-graph-popup-title small {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.ai-dependency-graph-popup-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 10px;
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.ai-dependency-graph-popup-facts dt {
+  color: var(--muted);
+}
+
+.ai-dependency-graph-popup-facts dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-dependency-graph-popup-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.ai-dependency-graph-popup-status.is-inactive {
+  color: var(--muted);
+}
+
+.ai-dependency-graph-popup-cta {
+  align-self: start;
+  justify-self: start;
+  min-height: 20px;
+  padding: 2px 10px;
+}
+
+.ai-dependency-graph .react-flow__edge-path {
+  stroke: color-mix(in srgb, #0e7490 55%, var(--border));
+}
+
+.ai-dependency-graph .react-flow__edge-text {
+  fill: var(--muted);
+  font-size: 0.62rem;
+}
+
+.ai-dependency-graph-node {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, #0e7490 22%, var(--border));
+  border-radius: var(--radius-md);
+  background: linear-gradient(90deg, var(--panel-muted), color-mix(in srgb, #0e7490 6%, var(--panel-muted)));
+  font-size: 0.78rem;
+}
+
+.ai-dependency-graph-node--root {
+  border-color: color-mix(in srgb, #0e7490 70%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, #0e7490 25%, transparent);
+}
+
+.ai-dependency-graph-node--inactive {
+  opacity: 0.6;
+}
+
+.ai-dependency-graph-node-text {
+  display: grid;
+  overflow: hidden;
+  gap: 2px;
+}
+
+.ai-dependency-graph-node-text strong {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-dependency-graph-node-text small {
+  color: var(--muted);
+  font-size: 0.62rem;
 }
 
 .ai-security-empty {
@@ -718,4 +864,143 @@
   .ai-connector-layout {
     animation: none;
   }
+}
+
+/* A fraction of the default grid-exposure-table sizing (padding/font/min-width/row height) —
+   used on the AI Inventory severity grid, which has more rows than the exposure dashboard's
+   coarse asset-domain grid and needs to stay compact. table-layout: fixed + an explicit
+   label-column width keep the severity columns from being squeezed off to the side. */
+.ai-severity-grid--compact .grid-exposure-table {
+  table-layout: fixed;
+  margin-top: 4px;
+}
+
+.ai-severity-grid--compact .grid-exposure-table th {
+  padding: 3px 4px;
+  font-size: 0.65rem;
+  line-height: 1.2;
+}
+
+.ai-severity-grid--compact .grid-exposure-table th:first-child {
+  width: 20%;
+}
+
+.ai-severity-grid--compact .grid-exposure-row-label {
+  width: 20%;
+  padding: 2px 4px;
+  font-size: 0.8rem;
+  line-height: 1.2;
+  white-space: normal;
+}
+
+.ai-severity-grid--compact .grid-exposure-cell {
+  padding: 0;
+}
+
+/* The row/label chrome stays tight, but the count itself — the number analysts actually
+   read — stays large and legible. */
+.ai-severity-grid--compact .grid-exposure-cell-btn {
+  min-width: 0;
+  width: 100%;
+  padding: 3px 2px;
+  font-size: 1.2rem;
+  line-height: 1.2;
+  border-radius: 3px;
+}
+
+.ai-severity-grid--compact .grid-exposure-total {
+  padding: 2px;
+  font-size: 0.95rem;
+}
+
+/* Severity Grid shares its row with the By Provider and Coverage Gaps widgets, rather than
+   those two sitting below it in the widgets grid — the grid keeps most of the row's width
+   since it has far more to show than either widget. */
+.inventory-shell.ai-security-page .ai-severity-grid-row {
+  display: grid;
+  grid-template-columns: 3fr 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.inventory-shell.ai-security-page .ai-severity-grid-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.inventory-shell.ai-security-page .ai-severity-grid-side .fpl-widget {
+  width: 100%;
+}
+
+@media (max-width: 900px) {
+  .inventory-shell.ai-security-page .ai-severity-grid-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Policy Coverage & Risk, Top 5 Assets at Risk, and Findings by Severity share one row-based
+   grid below the severity grid row — three per row on wide screens, collapsing to two and
+   then one as the viewport narrows. By Provider and Coverage Gaps sit beside the severity
+   grid instead (.ai-severity-grid-row/.ai-severity-grid-side above). */
+.inventory-shell.ai-security-page .fpl-widgets {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+@media (max-width: 1100px) {
+  .inventory-shell.ai-security-page .fpl-widgets {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .inventory-shell.ai-security-page .fpl-widgets {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* The shared .panel-header renders as a full-width shaded band, which reads as an oversized
+   "banner" for a section whose header has no right-side actions to balance it — flatten it
+   for the AI Inventory page specifically (scoped via InventoryShell's own class, which no
+   other AI Security page uses) rather than touching the shared .panel-header class. */
+.inventory-shell.ai-security-page .panel-header {
+  padding: 6px 10px;
+  background: transparent;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Findings column on the AI asset inventory list: one colored chip per severity bucket
+   (critical/high/medium+low) holding that bucket's count directly, instead of a text
+   breakdown — the color already tells you which bucket you're looking at. */
+.finding-severity-chips {
+  display: flex;
+  gap: 4px;
+}
+
+.finding-severity-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  font-weight: 700;
+  font-size: 0.8rem;
+}
+
+.finding-severity-chip--critical {
+  background: #dc2626;
+  color: #fff;
+}
+
+.finding-severity-chip--high {
+  background: #b45309;
+  color: #fff;
+}
+
+.finding-severity-chip--other {
+  background: #fed7aa;
+  color: #7c2d12;
 }

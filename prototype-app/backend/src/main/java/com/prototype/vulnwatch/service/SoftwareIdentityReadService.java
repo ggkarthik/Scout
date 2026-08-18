@@ -33,6 +33,17 @@ public class SoftwareIdentityReadService {
     private static final int MAX_PAGE_SIZE = 200;
     private static final int DETAIL_ASSET_LIMIT = 200;
 
+    /** Mirrors the severity resolution used by FindingProjectionRefreshService (severity_override,
+     * then the linked vulnerability's severity, then a risk_score bucket) so finding counts broken
+     * out by severity here agree with the findings list elsewhere in the product. Assumes the query
+     * aliases the findings row as "f" and its (optionally) joined vulnerabilities row as "v". */
+    private static final String RESOLVED_SEVERITY_SQL = """
+            upper(coalesce(f.severity_override, v.severity,
+                case when f.risk_score >= 9 then 'CRITICAL'
+                     when f.risk_score >= 7 then 'HIGH'
+                     when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end))
+            """;
+
     private final NamedParameterJdbcTemplate jdbcTemplate;
     private final SoftwareIdentitySummaryProjectionService projectionService;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
@@ -212,6 +223,8 @@ public class SoftwareIdentityReadService {
                             rs.getLong("asset_count"),
                             rs.getLong("component_count"),
                             rs.getLong("open_finding_count"),
+                            rs.getLong("critical_finding_count"),
+                            rs.getLong("high_finding_count"),
                             rs.getLong("open_vulnerability_count"),
                             getInstant(rs, "last_observed_at")
                     )
@@ -303,6 +316,8 @@ public class SoftwareIdentityReadService {
                 row.nearEolComponentCount(),
                 row.unknownEolComponentCount(),
                 counts.openFindingCount(),
+                counts.criticalFindingCount(),
+                counts.highFindingCount(),
                 counts.openVulnerabilityCount(),
                 row.lastObservedAt()
         );
@@ -579,6 +594,12 @@ public class SoftwareIdentityReadService {
                 SELECT
                     ic.software_identity_id,
                     COUNT(DISTINCT f.id) AS open_finding_count,
+                    COUNT(DISTINCT CASE WHEN
+                """ + RESOLVED_SEVERITY_SQL + """
+                        = 'CRITICAL' THEN f.id END) AS critical_finding_count,
+                    COUNT(DISTINCT CASE WHEN
+                """ + RESOLVED_SEVERITY_SQL + """
+                        = 'HIGH' THEN f.id END) AS high_finding_count,
                     COUNT(DISTINCT CASE
                         WHEN cvs.applicability_state = 'APPLICABLE'
                          AND upper(coalesce(cvs.impact_state, 'UNKNOWN')) NOT IN ('FIXED', 'NOT_IMPACTED')
@@ -588,6 +609,8 @@ public class SoftwareIdentityReadService {
                 LEFT JOIN findings f
                     ON f.component_id = ic.id
                    AND f.status = 'OPEN'
+                LEFT JOIN vulnerabilities v
+                    ON v.id = f.vulnerability_id
                 """ + (assetScopedVulnerabilities ? """
                 LEFT JOIN inventory_components exposure_ic
                     ON exposure_ic.asset_id = ic.asset_id
@@ -604,6 +627,8 @@ public class SoftwareIdentityReadService {
                     getUuid(rs, "software_identity_id"),
                     new ExposureCounts(
                             rs.getLong("open_finding_count"),
+                            rs.getLong("critical_finding_count"),
+                            rs.getLong("high_finding_count"),
                             rs.getLong("open_vulnerability_count")
                     )
             );
@@ -737,12 +762,20 @@ public class SoftwareIdentityReadService {
                     COUNT(DISTINCT fc.asset_id) AS asset_count,
                     COUNT(DISTINCT fc.component_id) AS component_count,
                     COUNT(DISTINCT f.id) AS open_finding_count,
+                    COUNT(DISTINCT CASE WHEN
+                """ + RESOLVED_SEVERITY_SQL + """
+                        = 'CRITICAL' THEN f.id END) AS critical_finding_count,
+                    COUNT(DISTINCT CASE WHEN
+                """ + RESOLVED_SEVERITY_SQL + """
+                        = 'HIGH' THEN f.id END) AS high_finding_count,
                     COUNT(DISTINCT f.vulnerability_id) AS open_vulnerability_count,
                     MAX(fc.last_observed_at) AS last_observed_at
                 FROM filtered_components fc
                 LEFT JOIN findings f
                     ON f.component_id = fc.component_id
                    AND f.status = 'OPEN'
+                LEFT JOIN vulnerabilities v
+                    ON v.id = f.vulnerability_id
                 GROUP BY COALESCE(NULLIF(trim(fc.version), ''), '(unknown)')
                 ORDER BY
                     COUNT(DISTINCT fc.component_id) DESC,
@@ -888,8 +921,8 @@ public class SoftwareIdentityReadService {
     private record OsFilter(String pattern, String sql) {
     }
 
-    private record ExposureCounts(long openFindingCount, long openVulnerabilityCount) {
-        private static final ExposureCounts ZERO = new ExposureCounts(0L, 0L);
+    private record ExposureCounts(long openFindingCount, long criticalFindingCount, long highFindingCount, long openVulnerabilityCount) {
+        private static final ExposureCounts ZERO = new ExposureCounts(0L, 0L, 0L, 0L);
     }
 
     private record SoftwareIdentityProjectionRow(

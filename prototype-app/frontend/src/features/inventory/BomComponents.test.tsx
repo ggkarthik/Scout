@@ -25,6 +25,8 @@ function buildComponent(overrides: Partial<BomComponentSummaryItem> = {}): BomCo
     correlationState: 'UNCHECKED',
     riskLevel: 'NONE',
     findingCount: 0,
+    criticalFindingCount: 0,
+    highFindingCount: 0,
     ...overrides,
   };
 }
@@ -89,6 +91,26 @@ describe('BomComponents', () => {
       expect(screen.getByText('left-pad')).toBeInTheDocument();
       expect(screen.getByText('right-pad')).toBeInTheDocument();
     });
+  });
+
+  it('renders the Findings column as critical/high/other severity chips', async () => {
+    vi.spyOn(api, 'listBomComponents').mockResolvedValue([
+      buildComponent({
+        componentId: 'comp-1',
+        packageName: 'left-pad',
+        findingCount: 4,
+        criticalFindingCount: 1,
+        highFindingCount: 2,
+      }),
+    ]);
+
+    renderWithProviders(<BomComponents />);
+    const row = (await screen.findByText('left-pad')).closest('tr') as HTMLElement;
+
+    // other = findingCount(4) - critical(1) - high(2) = 1
+    expect(within(row).getByTitle('Critical')).toHaveTextContent('1');
+    expect(within(row).getByTitle('High')).toHaveTextContent('2');
+    expect(within(row).getByTitle('Medium / Low')).toHaveTextContent('1');
   });
 
   it('still allows the Vulnerable card to filter the table', async () => {

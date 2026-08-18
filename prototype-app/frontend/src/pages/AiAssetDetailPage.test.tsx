@@ -1,6 +1,7 @@
 import { screen, fireEvent } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../api/client';
+import { mockElementDimensionsForReactFlow } from '../features/ai-security/test-support';
 import type { AiSecurityArtifact, AiSecurityFinding, AiSecurityPolicy } from '../features/ai-security/types';
 import { renderWithProviders } from '../test/test-utils';
 import { AiAssetDetailPage } from './AiAssetDetailPage';
@@ -27,6 +28,11 @@ function buildArtifact(overrides: Partial<AiSecurityArtifact> = {}): AiSecurityA
     ownerConfidenceMethodVersion: null,
     businessCriticality: null,
     environment: null,
+    piiScanStatus: 'NOT_APPLICABLE',
+    piiSource: null,
+    piiInfoTypes: [],
+    piiFindingCount: 0,
+    piiLastScannedAt: null,
     ...overrides,
   };
 }
@@ -96,6 +102,50 @@ describe('AiAssetDetailPage', () => {
     expect(screen.queryByText('Public bot endpoint exposed')).not.toBeInTheDocument();
   });
 
+  it('renders array-of-object observed attributes (e.g. guardrail content filters) as readable summaries, not "N items"', async () => {
+    vi.spyOn(api, 'getAiSecurityArtifact').mockResolvedValue(buildArtifact({
+      artifactType: 'OTHER_AI_ARTIFACT',
+      nativeKind: 'AWS_BEDROCK_GUARDRAIL',
+      attributes: {
+        status: 'READY',
+        minimumStrength: 'HIGH',
+        contentFilterCount: 1,
+        contentFilters: [
+          { type: 'HATE', inputStrength: 'HIGH', outputStrength: 'HIGH' },
+        ],
+        deniedTopics: [],
+      },
+    }));
+    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([]);
+    vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({ items: [], page: 0, size: 200, total: 0 });
+    vi.spyOn(api, 'getAiSecurityGraph').mockResolvedValue({ nodes: [], edges: [], truncated: false });
+
+    renderWithProviders(<AiAssetDetailPage artifactId="artifact-1" />);
+
+    expect(await screen.findByText('Observed facts')).toBeInTheDocument();
+    // A one-item array of an object renders its fields inline instead of collapsing to "1 item".
+    expect(screen.getByText(/type: HATE/)).toBeInTheDocument();
+    expect(screen.getByText(/inputStrength: HIGH/)).toBeInTheDocument();
+    expect(screen.queryByText('1 item')).not.toBeInTheDocument();
+    // An empty array still renders as "None", not an empty/garbled string.
+    expect(screen.getByText('None')).toBeInTheDocument();
+  });
+
+  it('shows an explicit insufficient-evidence state for unknown data sensitivity', async () => {
+    vi.spyOn(api, 'getAiSecurityArtifact').mockResolvedValue(buildArtifact({
+      artifactType: 'DATA_STORE',
+      nativeKind: 'AZURE_STORAGE_ACCOUNT',
+      piiScanStatus: 'UNKNOWN',
+    }));
+    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([]);
+    vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({ items: [], page: 0, size: 200, total: 0 });
+    vi.spyOn(api, 'getAiSecurityGraph').mockResolvedValue({ nodes: [], edges: [], truncated: false });
+
+    renderWithProviders(<AiAssetDetailPage artifactId="artifact-1" />);
+
+    expect(await screen.findByText('Unknown — insufficient evidence')).toBeInTheDocument();
+  });
+
   it('shows applicable policies scoped to this artifact type in the Policies tab', async () => {
     vi.spyOn(api, 'getAiSecurityArtifact').mockResolvedValue(buildArtifact());
     vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([
@@ -133,11 +183,15 @@ describe('AiAssetDetailPage', () => {
   });
 
   it('shows connected resources in the Relationships tab', async () => {
+    mockElementDimensionsForReactFlow();
     vi.spyOn(api, 'getAiSecurityArtifact').mockResolvedValue(buildArtifact());
     vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([buildPolicy()]);
     vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({ items: [], page: 0, size: 200, total: 0 });
     vi.spyOn(api, 'getAiSecurityGraph').mockResolvedValue({
-      nodes: [],
+      nodes: [
+        buildArtifact(),
+        buildArtifact({ id: 'artifact-2', name: 'claims-model', artifactType: 'AI_MODEL', nativeKind: 'AZURE_OPENAI_DEPLOYMENT' }),
+      ],
       edges: [{
         id: 'edge-1',
         relationshipType: 'INVOKES_MODEL',
@@ -155,7 +209,7 @@ describe('AiAssetDetailPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /^Relationships/ }));
     expect(await screen.findByText('claims-model')).toBeInTheDocument();
-    expect(screen.getByText('INVOKES MODEL')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'AI artifact dependency graph' })).toBeInTheDocument();
   });
 
   it('shows ownership details for the artifact', async () => {

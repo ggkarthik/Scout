@@ -100,6 +100,8 @@ public class AzureAiManagementClient {
 
         collectRequestedChild(credential, requested, resources.get("AZURE_AI_ACCOUNTS"),
                 "projects", "AZURE_FOUNDRY_PROJECTS", resources, failures);
+        collectRequestedChild(credential, requested, resources.get("AZURE_FOUNDRY_PROJECTS"),
+                "connections", "AZURE_FOUNDRY_CONNECTIONS", resources, failures);
         collectRequestedChild(credential, requested, resources.get("AZURE_AI_ACCOUNTS"),
                 "deployments", "AZURE_FOUNDRY_DEPLOYMENTS", resources, failures);
         collectRequestedChild(credential, requested, resources.get("AZURE_AI_ACCOUNTS"),
@@ -152,7 +154,9 @@ public class AzureAiManagementClient {
                 "AZURE_SEARCH_INDEXES", "indexes",
                 "AZURE_SEARCH_SKILLSETS", "skillsets",
                 "AZURE_SEARCH_INDEXERS", "indexers",
-                "AZURE_SEARCH_DATA_SOURCES", "datasources");
+                "AZURE_SEARCH_DATA_SOURCES", "datasources",
+                "AZURE_SEARCH_KNOWLEDGE_BASES", "knowledgebases",
+                "AZURE_SEARCH_KNOWLEDGE_SOURCES", "knowledgesources");
         for (AzureResource service : services) {
             String endpoint = text(service.properties().path("endpoint"));
             if (endpoint == null) endpoint = text(service.properties().path("hostName"));
@@ -163,7 +167,8 @@ public class AzureAiManagementClient {
                 String family = entry.getKey();
                 if (!requested.contains(family) || failures.containsKey(family)) continue;
                 try {
-                    for (JsonNode node : searchList(credential, base + "/" + entry.getValue() + "?api-version=2024-07-01")) {
+                    String apiVersion = family.startsWith("AZURE_SEARCH_KNOWLEDGE_") ? "2026-04-01" : "2024-07-01";
+                    for (JsonNode node : searchList(credential, base + "/" + entry.getValue() + "?api-version=" + apiVersion)) {
                         AzureResource definition = searchResource(node, service, family).withParentId(service.id());
                         resources.get(family).add(definition);
                     }
@@ -176,7 +181,8 @@ public class AzureAiManagementClient {
 
     private static boolean isSearchDefinitionFamily(String family) {
         return "AZURE_SEARCH_INDEXES".equals(family) || "AZURE_SEARCH_SKILLSETS".equals(family)
-                || "AZURE_SEARCH_INDEXERS".equals(family) || "AZURE_SEARCH_DATA_SOURCES".equals(family);
+                || "AZURE_SEARCH_INDEXERS".equals(family) || "AZURE_SEARCH_DATA_SOURCES".equals(family)
+                || "AZURE_SEARCH_KNOWLEDGE_BASES".equals(family) || "AZURE_SEARCH_KNOWLEDGE_SOURCES".equals(family);
     }
 
     /** Uses only GET /agents and published definitions; it never invokes agents, models, or tools. */
@@ -213,9 +219,30 @@ public class AzureAiManagementClient {
 
     private List<JsonNode> foundryList(TokenCredential credential, String url) {
         List<JsonNode> values = new ArrayList<>();
-        JsonNode data = get(credential, url).path("data");
-        if (data.isArray()) data.forEach(values::add);
+        Set<String> visited = new LinkedHashSet<>();
+        String next = url;
+        for (int page = 0; next != null; page++) {
+            if (page >= MAX_PAGES || !visited.add(next)) {
+                throw new AzureApiException(new AzureApiFailure(
+                        "INVALID_CONFIGURATION", "Azure Foundry pagination limit was exceeded", false, 0));
+            }
+            JsonNode response = get(credential, next);
+            JsonNode data = response.path("data");
+            if (data.isArray()) data.forEach(values::add);
+            next = nextFoundryPageUrl(url, response);
+            if (next != null) validateFoundryUri(URI.create(next));
+        }
         return values;
+    }
+
+    String nextFoundryPageUrl(String initialUrl, JsonNode response) {
+        if (!response.path("has_more").asBoolean(false)) return null;
+        String cursor = text(response.path("last_id"));
+        if (cursor == null) {
+            throw new AzureApiException(new AzureApiFailure(
+                    "INVALID_CONFIGURATION", "Azure Foundry pagination cursor was missing", false, 0));
+        }
+        return initialUrl + (initialUrl.contains("?") ? "&" : "?") + "after=" + encode(cursor);
     }
 
     private AzureResource foundryAgentResource(JsonNode agent, AzureResource project) {
@@ -549,6 +576,9 @@ public class AzureAiManagementClient {
         if (normalized.equals("microsoft.cognitiveservices/accounts/projects")) return "AZURE_FOUNDRY_PROJECTS";
         if (normalized.equals("microsoft.cognitiveservices/accounts/deployments")) return "AZURE_FOUNDRY_DEPLOYMENTS";
         if (normalized.equals("microsoft.cognitiveservices/accounts/raipolicies")) return "AZURE_RAI_POLICIES";
+        if (normalized.equals("microsoft.cognitiveservices/accounts/projects/connections")) return "AZURE_FOUNDRY_CONNECTIONS";
+        if (normalized.equals("microsoft.storage/storageaccounts")) return "AZURE_STORAGE_ACCOUNTS";
+        if (normalized.equals("microsoft.fabric/capacities")) return "AZURE_FABRIC_CAPACITIES";
         if (normalized.contains("/agentdeployments")) return "AZURE_FOUNDRY_AGENTS";
         if (normalized.equals("microsoft.foundry/projects/agents")) return "AZURE_FOUNDRY_AGENTS";
         if (normalized.equals("microsoft.machinelearningservices/workspaces")) return "AZURE_ML_WORKSPACES";
@@ -658,7 +688,7 @@ public class AzureAiManagementClient {
     }
 
     private String encode(String value) {
-        return URLEncoder.encode(value, StandardCharsets.UTF_8);
+        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
     }
 
     public record DiscoverySnapshot(

@@ -44,11 +44,17 @@ public class AiSecurityAzureConnectorService {
             "AZURE_SEARCH_SKILLSETS",
             "AZURE_SEARCH_INDEXERS",
             "AZURE_SEARCH_DATA_SOURCES",
+            "AZURE_SEARCH_KNOWLEDGE_BASES",
+            "AZURE_SEARCH_KNOWLEDGE_SOURCES",
             "AZURE_BOT_SERVICES",
             "AZURE_BOT_CHANNELS",
             "AZURE_BOT_IDENTITIES",
             "AZURE_DIAGNOSTIC_SETTINGS",
-            "AZURE_RBAC_GLOBAL");
+            "AZURE_RBAC_GLOBAL",
+            "AZURE_STORAGE_ACCOUNTS",
+            "AZURE_FABRIC_CAPACITIES",
+            "AZURE_FOUNDRY_CONNECTIONS",
+            "AZURE_PURVIEW_CLASSIFICATION");
 
     private static final List<String> DEFAULT_FAMILIES = List.of(
             "AZURE_AI_ACCOUNTS",
@@ -260,7 +266,8 @@ public class AiSecurityAzureConnectorService {
         return tenantExecution.run(tenant, () -> {
             List<ConnectorSecret> rows = jdbc.query("""
                     select id, account_id, provider_tenant_id, credential_profile_id,
-                           source_target_id, regions_json::text, resource_families_json::text, enabled
+                           source_target_id, regions_json::text, resource_families_json::text, enabled,
+                           purview_account_name
                       from ai_security_connector_configs
                      where id = :id and provider = 'AZURE'
                     """, Map.of("id", connectorId), (rs, rowNum) -> new ConnectorSecret(
@@ -271,7 +278,8 @@ public class AiSecurityAzureConnectorService {
                     rs.getObject("source_target_id", UUID.class),
                     readList(rs.getString("regions_json")),
                     readList(rs.getString("resource_families_json")),
-                    rs.getBoolean("enabled")));
+                    rs.getBoolean("enabled"),
+                    rs.getString("purview_account_name")));
             if (rows.isEmpty()) {
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Azure AI Security connector not found");
             }
@@ -347,7 +355,8 @@ public class AiSecurityAzureConnectorService {
             UUID sourceTargetId,
             List<String> regions,
             List<String> resourceFamilies,
-            boolean enabled
+            boolean enabled,
+            String purviewAccountName
     ) {
     }
 

@@ -14,141 +14,163 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
+function mockBaseline() {
+  vi.spyOn(api, 'listAiSecurityRuns').mockResolvedValue([]);
+  vi.spyOn(api, 'getAiGridCoverage').mockResolvedValue(emptyCoverage());
+  vi.spyOn(api, 'getAiTopRiskArtifacts').mockResolvedValue([]);
+  vi.spyOn(api, 'getAiSeverityGrid').mockResolvedValue({ rows: [] });
+  vi.spyOn(api, 'getAiSecuritySummary').mockResolvedValue(emptySummary());
+}
+
 describe('AiInventoryPage', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     navigateMock.mockReset();
   });
 
-  it('opens with all discovered AI assets instead of hiding non-agent artifacts', async () => {
-    const listArtifacts = vi.spyOn(api, 'listAiSecurityArtifacts').mockResolvedValue({
-      items: [{
-        id: 'artifact-1',
-        provider: 'AWS',
-        providerResourceId: 'arn:aws:bedrock:us-east-1:123456789012:guardrail/example',
-        artifactType: 'AI_GUARDRAIL',
-        nativeKind: 'AWS_BEDROCK_GUARDRAIL',
-        name: 'Production Guardrail',
-        accountId: '123456789012',
-        region: 'us-east-1',
-        active: true,
-        attributes: {},
-        ownerName: null,
-        ownerState: 'UNOWNED',
-        ownerSource: null,
-        ownerConfidence: null,
-        ownerConfidenceMethod: null,
-        ownerConfidenceMethodVersion: null,
-        businessCriticality: null,
-        environment: null,
-        firstObservedAt: '2026-07-29T09:00:00Z',
-        lastObservedAt: '2026-07-29T09:05:00Z',
-      }],
-      page: 0,
-      size: 100,
-      total: 1,
-    });
-    vi.spyOn(api, 'getAiSecuritySummary').mockResolvedValue({
-      artifactCounts: { AI_GUARDRAIL: 1 },
-      openFindings: 0,
-      incompleteScopes: 0,
-      lastCompleteSnapshotAt: '2026-07-29T09:05:00Z',
-    });
-    vi.spyOn(api, 'getAiGridCoverage').mockResolvedValue(emptyCoverage());
+  it('links to the AI asset inventory list page', async () => {
+    mockBaseline();
 
     renderWithProviders(<AiInventoryPage />);
 
-    expect(await screen.findByText('Production Guardrail')).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /All AI Assets/ })).toHaveAttribute('aria-selected', 'true');
-    await waitFor(() => expect(listArtifacts).toHaveBeenCalledWith(
-      undefined,
-      0,
-      100,
-      undefined,
-      undefined,
-    ));
+    fireEvent.click(await screen.findByRole('button', { name: 'View AI asset inventory' }));
+
+    expect(navigateMock).toHaveBeenCalledWith('/inventory/ai/assets');
   });
 
-  it('navigates to the AI asset detail page when a row is clicked', async () => {
-    vi.spyOn(api, 'listAiSecurityArtifacts').mockResolvedValue({
-      items: [{
-        id: 'artifact-1',
-        provider: 'AWS',
-        providerResourceId: 'arn:aws:bedrock:us-east-1:123456789012:guardrail/example',
-        artifactType: 'AI_GUARDRAIL',
-        nativeKind: 'AWS_BEDROCK_GUARDRAIL',
-        name: 'Production Guardrail',
-        accountId: '123456789012',
-        region: 'us-east-1',
-        active: true,
-        attributes: {},
-        ownerName: null,
-        ownerState: 'UNOWNED',
-        ownerSource: null,
-        ownerConfidence: null,
-        ownerConfidenceMethod: null,
-        ownerConfidenceMethodVersion: null,
-        businessCriticality: null,
-        environment: null,
-        firstObservedAt: '2026-07-29T09:00:00Z',
-        lastObservedAt: '2026-07-29T09:05:00Z',
-      }],
-      page: 0,
-      size: 100,
-      total: 1,
+  it('grid cells count distinct artifacts, roll cross-provider kinds into one category row, and open the filtered asset list', async () => {
+    mockBaseline();
+    vi.spyOn(api, 'getAiSeverityGrid').mockResolvedValue({
+      rows: [
+        { nativeKind: 'AWS_BEDROCK_GUARDRAIL', critical: 0, high: 1, medium: 0, low: 0, total: 1 },
+        { nativeKind: 'AZURE_RAI_POLICIES', critical: 0, high: 2, medium: 0, low: 0, total: 2 },
+        { nativeKind: 'AZURE_BOT_CHANNELS', critical: 0, high: 0, medium: 0, low: 0, total: 0 },
+      ],
     });
-    vi.spyOn(api, 'getAiSecuritySummary').mockResolvedValue({
-      artifactCounts: { AI_GUARDRAIL: 1 },
-      openFindings: 0,
-      incompleteScopes: 0,
-      lastCompleteSnapshotAt: '2026-07-29T09:05:00Z',
+
+    renderWithProviders(<AiInventoryPage />);
+
+    // Grid section renders compactly, not with the exposure-dashboard's default cell sizing.
+    const gridSection = (await screen.findByText('Severity Grid')).closest('section');
+    expect(gridSection).toHaveClass('ai-severity-grid--compact');
+
+    // Guardrails row sums both providers' HIGH artifact counts (1 + 2 = 3); wait for the real
+    // severity-grid data to resolve rather than the always-present zeroed placeholder row.
+    const highCell = await screen.findByRole('button', { name: '3' });
+    fireEvent.click(highCell);
+
+    expect(navigateMock).toHaveBeenCalledWith(
+      '/inventory/ai/assets?nativeKind=AWS_BEDROCK_GUARDRAIL%2CAZURE_RAI_POLICIES&severity=HIGH',
+    );
+  });
+
+  it('caps the severity grid at 10 rows and folds overflow into an Other row', async () => {
+    mockBaseline();
+    vi.spyOn(api, 'getAiSeverityGrid').mockResolvedValue({
+      rows: [
+        // 8 uncategorized kinds; only 4 category rows + 6 non-category slots (5 individual + 1 Other) fit in 10.
+        { nativeKind: 'AWS_KIND_A', critical: 0, high: 5, medium: 0, low: 0, total: 5 },
+        { nativeKind: 'AWS_KIND_B', critical: 0, high: 4, medium: 0, low: 0, total: 4 },
+        { nativeKind: 'AWS_KIND_C', critical: 0, high: 3, medium: 0, low: 0, total: 3 },
+        { nativeKind: 'AWS_KIND_D', critical: 0, high: 2, medium: 0, low: 0, total: 2 },
+        { nativeKind: 'AWS_KIND_E', critical: 0, high: 1, medium: 0, low: 0, total: 1 },
+        { nativeKind: 'AWS_KIND_F', critical: 1, high: 0, medium: 0, low: 0, total: 1 },
+        { nativeKind: 'AWS_KIND_G', critical: 1, high: 0, medium: 0, low: 0, total: 1 },
+        { nativeKind: 'AWS_KIND_H', critical: 1, high: 0, medium: 0, low: 0, total: 1 },
+      ],
     });
-    vi.spyOn(api, 'getAiGridCoverage').mockResolvedValue(emptyCoverage());
+
+    renderWithProviders(<AiInventoryPage />);
+
+    await screen.findByText('Other (3)');
+    const rows = document.querySelectorAll('.grid-exposure-table tbody tr');
+    expect(rows.length).toBeLessThanOrEqual(10);
+  });
+
+  it('clicking the Policy Coverage widget opens the policies list and shows artifacts failed', async () => {
+    mockBaseline();
+    vi.spyOn(api, 'getAiGridCoverage').mockResolvedValue({
+      ...emptyCoverage(), ownerFacingDecisionReachabilityPercent: 72, evaluatedFail: 4, artifactsFailing: 3, unsupported: 2,
+    });
+
+    renderWithProviders(<AiInventoryPage />);
+
+    await waitFor(() => expect(screen.getByText('Artifacts failed').closest('.fpl-kpi-card')).toHaveTextContent('3'));
+
+    fireEvent.click(screen.getByText('Policy Coverage & Risk'));
+
+    expect(navigateMock).toHaveBeenCalledWith('/policies');
+  });
+
+  it('ranks Top 5 Assets at Risk by open-finding score and opens the asset detail page on click', async () => {
+    mockBaseline();
+    vi.spyOn(api, 'getAiTopRiskArtifacts').mockResolvedValue([{
+      id: 'artifact-risk-1', name: 'search-rerank-agent', nativeKind: 'AWS_BEDROCK_AGENT',
+      provider: 'AWS', accountId: '123456789012', criticalCount: 2, highCount: 1, mediumCount: 0, lowCount: 0, score: 11,
+    }]);
 
     renderWithProviders(<AiInventoryPage />, { route: '/inventory/ai' });
 
-    fireEvent.click(await screen.findByText('Production Guardrail'));
+    fireEvent.click(await screen.findByText('search-rerank-agent'));
 
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/inventory/ai/artifact-1?returnTo=%2Finventory%2Fai'));
+    expect(navigateMock).toHaveBeenCalledWith('/inventory/ai/artifact-risk-1?returnTo=%2Finventory%2Fai');
   });
 
-  it('routes empty inventory CTA to the connectors landing page', async () => {
-    vi.spyOn(api, 'listAiSecurityArtifacts').mockResolvedValue({
-      items: [],
-      page: 0,
-      size: 100,
-      total: 0,
-    });
-    vi.spyOn(api, 'getAiSecuritySummary').mockResolvedValue({
-      artifactCounts: {},
-      openFindings: 0,
-      incompleteScopes: 0,
-      lastCompleteSnapshotAt: null,
-    });
-    vi.spyOn(api, 'getAiGridCoverage').mockResolvedValue(emptyCoverage());
+  it('shows an empty state for Top 5 Assets at Risk when no artifact has an open finding', async () => {
+    mockBaseline();
 
-    renderWithProviders(<AiInventoryPage />, { route: '/inventory/ai' });
+    renderWithProviders(<AiInventoryPage />);
 
-    expect(await screen.findByText('No AI assets discovered')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Configure AI connector' }));
-
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/connect/connectors'));
+    expect(await screen.findByText('No AI artifacts have an open finding.')).toBeInTheDocument();
   });
 
-  it('makes incomplete and unsupported inventory evidence explicit', async () => {
-    vi.spyOn(api, 'listAiSecurityArtifacts').mockResolvedValue({ items: [], page: 0, size: 100, total: 0 });
-    vi.spyOn(api, 'getAiSecuritySummary').mockResolvedValue({
-      artifactCounts: {}, openFindings: 0, incompleteScopes: 2, lastCompleteSnapshotAt: null,
-    });
+  it('clicking the Coverage Gaps widget opens connector run history', async () => {
+    mockBaseline();
+    vi.spyOn(api, 'getAiSecuritySummary').mockResolvedValue({ ...emptySummary(), incompleteScopes: 72 });
+
+    renderWithProviders(<AiInventoryPage />);
+
+    fireEvent.click(await screen.findByText('Coverage Gaps'));
+
+    expect(navigateMock).toHaveBeenCalledWith('/connect/run-history');
+  });
+
+  it('no longer shows the coverage-incomplete banner', async () => {
+    mockBaseline();
+    vi.spyOn(api, 'getAiSecuritySummary').mockResolvedValue({ ...emptySummary(), incompleteScopes: 72 });
     vi.spyOn(api, 'getAiGridCoverage').mockResolvedValue({ ...emptyCoverage(), unsupported: 3 });
 
     renderWithProviders(<AiInventoryPage />);
 
-    expect(await screen.findByText('Inventory coverage is incomplete.')).toBeInTheDocument();
-    expect(screen.getByText(/2 discovery scopes need attention; 3 policy evidence items remain unsupported/)).toBeInTheDocument();
+    await screen.findByText('Coverage Gaps');
+    expect(screen.queryByText(/Inventory coverage is incomplete/)).not.toBeInTheDocument();
+  });
+
+  it('clicking a By Provider row opens the asset list filtered by that provider', async () => {
+    mockBaseline();
+    vi.spyOn(api, 'getAiSecuritySummary').mockResolvedValue({
+      ...emptySummary(),
+      providerCounts: { AWS: 10, AZURE: 5 },
+    });
+
+    renderWithProviders(<AiInventoryPage />);
+
+    fireEvent.click(await screen.findByText('AZURE'));
+
+    expect(navigateMock).toHaveBeenCalledWith('/inventory/ai/assets?provider=AZURE');
   });
 });
+
+function emptySummary() {
+  return {
+    artifactCounts: {},
+    nativeKindCounts: {},
+    providerCounts: {},
+    openFindings: 0,
+    incompleteScopes: 0,
+    lastCompleteSnapshotAt: null,
+  };
+}
 
 function emptyCoverage() {
   return {
@@ -168,5 +190,8 @@ function emptyCoverage() {
     notApplicable: 0,
     stale: 0,
     unsupported: 0,
+    decisionReachabilityPercent: 0,
+    ownerFacingDecisionReachabilityPercent: 0,
+    artifactsFailing: 0,
   };
 }

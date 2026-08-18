@@ -214,6 +214,14 @@ export function pathForInventoryView(view: InventoryViewKey): string {
   return view === 'software-identities' ? '/inventory/software-identities' : `/inventory/${view}`;
 }
 
+export function pathForAiKnowledgeData(): string {
+  return '/inventory/ai/knowledge-data';
+}
+
+export function pathForAiMcpInventory(): string {
+  return '/inventory/ai/mcp';
+}
+
 export function pathForSoftwareIdentityDetail(softwareIdentityId: string): string {
   return `/inventory/software-identities/${encodeURIComponent(softwareIdentityId)}`;
 }
@@ -278,6 +286,10 @@ export function pathForInventoryHostAsset(assetId: string, returnTo?: string): s
   const searchParams = new URLSearchParams();
   searchParams.set('returnTo', returnTo.trim());
   return `/inventory/hosts/${encodedAssetId}?${searchParams.toString()}`;
+}
+
+export function pathForInventoryAiAssets(values?: Record<string, RouteSearchValue>): string {
+  return appendSearchToPath('/inventory/ai/assets', values);
 }
 
 export function pathForInventoryAiAsset(assetId: string, returnTo?: string): string {

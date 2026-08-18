@@ -46,6 +46,7 @@ public class AiSecurityApiService {
     private final AiGridFindingService canonicalFindings;
     private final AiSecuritySyncRunFacade syncRunFacade;
     private final AuditEventService auditEventService;
+    private final AiSecurityMetadataSanitizer metadataSanitizer;
     private final boolean legacyPolicyFallbackEnabled;
 
     public AiSecurityApiService(
@@ -59,6 +60,7 @@ public class AiSecurityApiService {
             AiGridFindingService canonicalFindings,
             AiSecuritySyncRunFacade syncRunFacade,
             AuditEventService auditEventService,
+            AiSecurityMetadataSanitizer metadataSanitizer,
             @Value("${app.features.ai-grid-legacy-policy-fallback-enabled:false}") boolean legacyPolicyFallbackEnabled
     ) {
         this.jdbc = jdbc;
@@ -71,6 +73,7 @@ public class AiSecurityApiService {
         this.canonicalFindings = canonicalFindings;
         this.syncRunFacade = syncRunFacade;
         this.auditEventService = auditEventService;
+        this.metadataSanitizer = metadataSanitizer;
         this.legacyPolicyFallbackEnabled = legacyPolicyFallbackEnabled;
     }
 
@@ -88,6 +91,32 @@ public class AiSecurityApiService {
                 }
                 return result;
             });
+            Map<String, Long> nativeKindCounts = jdbc.query("""
+                    select native_kind, count(*) as total
+                      from ai_security_artifacts
+                     where active = true
+                     group by native_kind
+                     order by total desc
+                    """, rs -> {
+                Map<String, Long> result = new LinkedHashMap<>();
+                while (rs.next()) {
+                    result.put(rs.getString("native_kind"), rs.getLong("total"));
+                }
+                return result;
+            });
+            Map<String, Long> providerCounts = jdbc.query("""
+                    select provider, count(*) as total
+                      from ai_security_artifacts
+                     where active = true
+                     group by provider
+                     order by total desc
+                    """, rs -> {
+                Map<String, Long> result = new LinkedHashMap<>();
+                while (rs.next()) {
+                    result.put(rs.getString("provider"), rs.getLong("total"));
+                }
+                return result;
+            });
             long openFindings = count("""
                     select count(*) from findings
                      where finding_kind in ('AI_POSTURE', 'AI_EXPOSURE')
@@ -100,19 +129,184 @@ public class AiSecurityApiService {
             Instant lastCompleted = jdbc.query("""
                     select max(completed_at) from ai_security_snapshot_scopes where status = 'COMPLETE'
                     """, rs -> rs.next() && rs.getTimestamp(1) != null ? rs.getTimestamp(1).toInstant() : null);
-            return new SummaryResponse(counts, openFindings, incomplete, lastCompleted);
+            return new SummaryResponse(counts, nativeKindCounts, providerCounts, openFindings, incomplete, lastCompleted);
         });
     }
 
+    /** Distinct AI artifacts with an open finding, bucketed by native artifact kind x severity —
+     * a cell is "how many artifacts have a critical/high/medium/low finding", not a finding
+     * count, so one artifact with three high findings still counts once. Seeded with every
+     * native kind currently in inventory so a kind with zero findings still renders as a full
+     * row — mirrors {@code DashboardService.getGridExposure}'s "seed every value" approach. */
+    public SeverityGridResponse severityGrid(Tenant tenant) {
+        return tenantExecution.run(tenant, () -> {
+            Map<String, long[]> countsByNativeKind = new LinkedHashMap<>();
+            for (String nativeKind : jdbc.queryForList("""
+                    select distinct native_kind from ai_security_artifacts where active = true
+                    """, Map.of(), String.class)) {
+                countsByNativeKind.put(nativeKind, new long[4]);
+            }
+            jdbc.query("""
+                    select a.native_kind,
+                           coalesce(f.severity_override, case when f.risk_score >= 9 then 'CRITICAL'
+                               when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) severity,
+                           count(distinct fs.subject_id) as total
+                      from findings f
+                      join finding_subjects fs on fs.finding_id = f.id and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
+                      join ai_security_artifacts a on a.id = fs.subject_id
+                     where f.status = 'OPEN' and f.finding_kind in ('AI_POSTURE', 'AI_EXPOSURE')
+                     group by a.native_kind, severity
+                    """, rs -> {
+                while (rs.next()) {
+                    long[] counts = countsByNativeKind.computeIfAbsent(rs.getString("native_kind"), ignored -> new long[4]);
+                    int index = severityGridIndex(rs.getString("severity"));
+                    if (index >= 0) {
+                        counts[index] += rs.getLong("total");
+                    }
+                }
+                return null;
+            });
+            Map<String, Long> distinctArtifactTotals = new LinkedHashMap<>();
+            jdbc.query("""
+                    select a.native_kind, count(distinct fs.subject_id) as total
+                      from findings f
+                      join finding_subjects fs on fs.finding_id = f.id and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
+                      join ai_security_artifacts a on a.id = fs.subject_id
+                     where f.status = 'OPEN' and f.finding_kind in ('AI_POSTURE', 'AI_EXPOSURE')
+                     group by a.native_kind
+                    """, rs -> {
+                while (rs.next()) {
+                    distinctArtifactTotals.put(rs.getString("native_kind"), rs.getLong("total"));
+                }
+                return null;
+            });
+            List<SeverityGridRow> rows = new ArrayList<>();
+            for (Map.Entry<String, long[]> entry : countsByNativeKind.entrySet()) {
+                long[] counts = entry.getValue();
+                long total = distinctArtifactTotals.getOrDefault(entry.getKey(), 0L);
+                rows.add(new SeverityGridRow(entry.getKey(), counts[0], counts[1], counts[2], counts[3], total));
+            }
+            return new SeverityGridResponse(rows);
+        });
+    }
+
+    private static int severityGridIndex(String severity) {
+        return switch (severity == null ? "" : severity.toUpperCase(Locale.ROOT)) {
+            case "CRITICAL" -> 0;
+            case "HIGH" -> 1;
+            case "MEDIUM" -> 2;
+            case "LOW" -> 3;
+            default -> -1;
+        };
+    }
+
+    /** Ranks AI artifacts by a weighted score over their open findings' severities
+     * (critical=4, high=3, medium=2, low=1) — the "Top N assets at risk" signal. Unlike the
+     * exposure-correlation engine's validated paths (a narrower, rarer signal), this only
+     * needs an open finding to surface, so it stays populated even before any exposure path
+     * has been validated. */
+    public List<TopRiskArtifact> topRiskArtifacts(Tenant tenant, int limit) {
+        int safeLimit = Math.max(1, Math.min(50, limit));
+        return tenantExecution.run(tenant, () -> jdbc.query("""
+                with open_findings as (
+                    select fs.subject_id as artifact_id,
+                           coalesce(f.severity_override, case when f.risk_score >= 9 then 'CRITICAL'
+                               when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) as severity
+                      from findings f
+                      join finding_subjects fs on fs.finding_id = f.id
+                       and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
+                     where f.status = 'OPEN' and f.finding_kind in ('AI_POSTURE', 'AI_EXPOSURE')
+                )
+                select a.id, a.name, a.native_kind, a.provider, a.account_id,
+                       count(*) filter (where o.severity = 'CRITICAL') as critical_count,
+                       count(*) filter (where o.severity = 'HIGH') as high_count,
+                       count(*) filter (where o.severity = 'MEDIUM') as medium_count,
+                       count(*) filter (where o.severity = 'LOW') as low_count
+                  from open_findings o
+                  join ai_security_artifacts a on a.id = o.artifact_id
+                 group by a.id, a.name, a.native_kind, a.provider, a.account_id
+                 order by (count(*) filter (where o.severity = 'CRITICAL') * 4
+                         + count(*) filter (where o.severity = 'HIGH') * 3
+                         + count(*) filter (where o.severity = 'MEDIUM') * 2
+                         + count(*) filter (where o.severity = 'LOW')) desc,
+                       a.name
+                 limit :limit
+                """, Map.of("limit", safeLimit), (rs, n) -> {
+            long critical = rs.getLong("critical_count");
+            long high = rs.getLong("high_count");
+            long medium = rs.getLong("medium_count");
+            long low = rs.getLong("low_count");
+            long score = critical * 4 + high * 3 + medium * 2 + low;
+            return new TopRiskArtifact(rs.getObject("id", UUID.class), rs.getString("name"),
+                    rs.getString("native_kind"), rs.getString("provider"), rs.getString("account_id"),
+                    critical, high, medium, low, score);
+        }));
+    }
+
     public PageResponse<ArtifactResponse> artifacts(Tenant tenant, String artifactType, int page, int size) {
-        return artifacts(tenant, artifactType, null, null, page, size);
+        return artifacts(tenant, artifactType, null, null, null, null, page, size);
+    }
+
+    public PageResponse<ArtifactResponse> knowledgeData(
+            Tenant tenant, String provider, String kind, String sourceType, String sensitivity,
+            String publicContentAccess, Boolean active, int page, int size) {
+        return inventory(tenant, List.of("KNOWLEDGE_BASE", "DATA_SOURCE", "DATA_STORE", "SEARCH_INDEX"), provider,
+                kind, sourceType, sensitivity, publicContentAccess, null, null, null, active, page, size);
+    }
+
+    public PageResponse<ArtifactResponse> mcp(
+            Tenant tenant, String provider, String role, String authenticationType, String endpointExposure,
+            String synchronizationStatus, Boolean active, int page, int size) {
+        return inventory(tenant, List.of("MCP_GATEWAY", "MCP_TARGET", "MCP_SERVER"), provider,
+                role, null, null, null, authenticationType, endpointExposure, synchronizationStatus, active, page, size);
+    }
+
+    private PageResponse<ArtifactResponse> inventory(
+            Tenant tenant, List<String> types, String provider, String kind, String sourceType, String sensitivity,
+            String publicContentAccess, String authenticationType, String endpointExposure, String synchronizationStatus,
+            Boolean active, int page, int size) {
+        int safePage = Math.max(0, page);
+        int safeSize = Math.max(1, Math.min(100, size));
+        return tenantExecution.run(tenant, () -> {
+            MapSqlParameterSource params = new MapSqlParameterSource()
+                    .addValue("types", types.toArray(String[]::new))
+                    .addValue("provider", normalizedProvider(provider), Types.VARCHAR)
+                    .addValue("kind", blankToNull(kind), Types.VARCHAR)
+                    .addValue("sourceType", blankToNull(sourceType), Types.VARCHAR)
+                    .addValue("sensitivity", blankToNull(sensitivity), Types.VARCHAR)
+                    .addValue("publicContentAccess", blankToNull(publicContentAccess), Types.VARCHAR)
+                    .addValue("authenticationType", blankToNull(authenticationType), Types.VARCHAR)
+                    .addValue("endpointExposure", blankToNull(endpointExposure), Types.VARCHAR)
+                    .addValue("synchronizationStatus", blankToNull(synchronizationStatus), Types.VARCHAR)
+                    .addValue("active", active, Types.BOOLEAN)
+                    .addValue("limit", safeSize, Types.INTEGER).addValue("offset", safePage * safeSize, Types.INTEGER);
+            String where = """
+                    where artifact_type = any(:types)
+                      and (:provider is null or provider = :provider)
+                      and (:kind is null or artifact_type = :kind)
+                      and (:sourceType is null or attributes_json ->> 'sourceType' = :sourceType)
+                      and (:sensitivity is null or pii_scan_status = :sensitivity)
+                      and (:publicContentAccess is null or attributes_json ->> 'publicContentAccess' = :publicContentAccess)
+                      and (:authenticationType is null or coalesce(attributes_json ->> 'configuredAuthType',
+                              attributes_json ->> 'inboundAuthType', attributes_json ->> 'outboundAuthType') = :authenticationType)
+                      and (:endpointExposure is null or attributes_json ->> 'endpointExposure' = :endpointExposure)
+                      and (:synchronizationStatus is null or attributes_json ->> 'status' = :synchronizationStatus)
+                      and (:active is null or active = :active)
+                    """;
+            String fields = "id, provider, provider_resource_id, artifact_type, native_kind, name, account_id, region, active, attributes_json::text, owner_name, owner_state, owner_source, owner_confidence, owner_confidence_method, owner_confidence_method_version, business_criticality, environment, first_observed_at, last_observed_at, pii_scan_status, pii_source, pii_info_types::text, pii_finding_count, pii_last_scanned_at";
+            List<ArtifactResponse> items = jdbc.query("select " + fields + " from ai_security_artifacts " + where
+                    + " order by active desc, last_observed_at desc, id limit :limit offset :offset", params, this::artifact);
+            return new PageResponse<>(items, safePage, safeSize, count("select count(*) from ai_security_artifacts " + where, params));
+        });
     }
 
     public PageResponse<ArtifactResponse> artifacts(
             Tenant tenant,
             String artifactType,
+            String nativeKind,
             String provider,
             String subscription,
+            String severity,
             int page,
             int size
     ) {
@@ -122,22 +316,38 @@ public class AiSecurityApiService {
             MapSqlParameterSource params = new MapSqlParameterSource()
                     .addValue("artifactType", blankToNull(artifactType), Types.VARCHAR)
                     .addValue("otherArtifacts", "OTHER_AI_ARTIFACT".equalsIgnoreCase(artifactType), Types.BOOLEAN)
+                    .addValue("nativeKind", blankToNull(nativeKind), Types.VARCHAR)
                     .addValue("provider", normalizedProvider(provider), Types.VARCHAR)
                     .addValue("subscription", blankToNull(subscription), Types.VARCHAR)
+                    .addValue("severity", blankToNull(severity), Types.VARCHAR)
                     .addValue("limit", safeSize, Types.INTEGER)
                     .addValue("offset", safePage * safeSize, Types.INTEGER);
+            String severityFilter = """
+                       and (:severity is null or exists (
+                           select 1 from findings f
+                             join finding_subjects fs on fs.finding_id = f.id
+                              and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
+                            where fs.subject_id = ai_security_artifacts.id
+                              and f.status = 'OPEN' and f.finding_kind in ('AI_POSTURE', 'AI_EXPOSURE')
+                              and coalesce(f.severity_override, case when f.risk_score >= 9 then 'CRITICAL'
+                                  when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) = :severity
+                       ))
+                    """;
             List<ArtifactResponse> items = jdbc.query("""
                     select id, provider, provider_resource_id, artifact_type, native_kind, name,
                            account_id, region, active, attributes_json::text, owner_name, owner_state,
                            owner_source, owner_confidence, owner_confidence_method,
                            owner_confidence_method_version, business_criticality, environment,
-                           first_observed_at, last_observed_at
+                           first_observed_at, last_observed_at,
+                           pii_scan_status, pii_source, pii_info_types::text, pii_finding_count, pii_last_scanned_at
                       from ai_security_artifacts
                      where (:artifactType is null
                         or (:otherArtifacts = true and artifact_type not in ('AI_AGENT', 'AI_MODEL'))
                         or (:otherArtifacts = false and artifact_type = :artifactType))
+                       and (:nativeKind is null or native_kind = any(string_to_array(:nativeKind, ',')))
                        and (:provider is null or provider = :provider)
                        and (:subscription is null or account_id = :subscription)
+                    """ + severityFilter + """
                      order by active desc, last_observed_at desc, id
                      limit :limit offset :offset
                     """, params, this::artifact);
@@ -146,11 +356,122 @@ public class AiSecurityApiService {
                      where (:artifactType is null
                         or (:otherArtifacts = true and artifact_type not in ('AI_AGENT', 'AI_MODEL'))
                         or (:otherArtifacts = false and artifact_type = :artifactType))
+                       and (:nativeKind is null or native_kind = any(string_to_array(:nativeKind, ',')))
                        and (:provider is null or provider = :provider)
                        and (:subscription is null or account_id = :subscription)
-                    """, params);
+                    """ + severityFilter, params);
             return new PageResponse<>(items, safePage, safeSize, total);
         });
+    }
+
+    /** A leaner, list-view-shaped sibling of {@link #artifacts}: per-artifact open-finding
+     * severity counts and policy pass/fail counts via LATERAL joins, computed only for the
+     * current page of rows. Kept as its own endpoint/type rather than growing
+     * {@link ArtifactResponse} — that type is also used by the graph/detail/candidate-picker
+     * call sites, which don't need (and shouldn't pay the query cost for) these counts. */
+    public PageResponse<ArtifactSummaryResponse> artifactSummaries(
+            Tenant tenant,
+            String artifactType,
+            String nativeKind,
+            String provider,
+            String subscription,
+            String severity,
+            int page,
+            int size
+    ) {
+        int safePage = Math.max(0, page);
+        int safeSize = Math.max(1, Math.min(100, size));
+        return tenantExecution.run(tenant, () -> {
+            MapSqlParameterSource params = new MapSqlParameterSource()
+                    .addValue("artifactType", blankToNull(artifactType), Types.VARCHAR)
+                    .addValue("otherArtifacts", "OTHER_AI_ARTIFACT".equalsIgnoreCase(artifactType), Types.BOOLEAN)
+                    .addValue("nativeKind", blankToNull(nativeKind), Types.VARCHAR)
+                    .addValue("provider", normalizedProvider(provider), Types.VARCHAR)
+                    .addValue("subscription", blankToNull(subscription), Types.VARCHAR)
+                    .addValue("severity", blankToNull(severity), Types.VARCHAR)
+                    .addValue("limit", safeSize, Types.INTEGER)
+                    .addValue("offset", safePage * safeSize, Types.INTEGER);
+            String severityFilter = """
+                       and (:severity is null or exists (
+                           select 1 from findings f
+                             join finding_subjects fs on fs.finding_id = f.id
+                              and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
+                            where fs.subject_id = a.id
+                              and f.status = 'OPEN' and f.finding_kind in ('AI_POSTURE', 'AI_EXPOSURE')
+                              and coalesce(f.severity_override, case when f.risk_score >= 9 then 'CRITICAL'
+                                  when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) = :severity
+                       ))
+                    """;
+            String baseFilter = """
+                     where (:artifactType is null
+                        or (:otherArtifacts = true and a.artifact_type not in ('AI_AGENT', 'AI_MODEL'))
+                        or (:otherArtifacts = false and a.artifact_type = :artifactType))
+                       and (:nativeKind is null or a.native_kind = any(string_to_array(:nativeKind, ',')))
+                       and (:provider is null or a.provider = :provider)
+                       and (:subscription is null or a.account_id = :subscription)
+                    """ + severityFilter;
+            List<ArtifactSummaryResponse> items = jdbc.query("""
+                    select a.id, a.name, a.native_kind, a.provider, a.account_id, a.region,
+                           coalesce(cf.total, 0) as critical_findings,
+                           coalesce(hf.total, 0) as high_findings,
+                           coalesce(tf.total, 0) as total_findings,
+                           coalesce(pt.total, 0) as policies_total,
+                           coalesce(pf.total, 0) as policies_failed
+                      from ai_security_artifacts a
+                      left join lateral (
+                          select count(*) as total from findings f
+                            join finding_subjects fs on fs.finding_id = f.id
+                             and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
+                           where fs.subject_id = a.id and f.status = 'OPEN' and f.finding_kind in ('AI_POSTURE', 'AI_EXPOSURE')
+                             and coalesce(f.severity_override, case when f.risk_score >= 9 then 'CRITICAL'
+                                 when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) = 'CRITICAL'
+                      ) cf on true
+                      left join lateral (
+                          select count(*) as total from findings f
+                            join finding_subjects fs on fs.finding_id = f.id
+                             and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
+                           where fs.subject_id = a.id and f.status = 'OPEN' and f.finding_kind in ('AI_POSTURE', 'AI_EXPOSURE')
+                             and coalesce(f.severity_override, case when f.risk_score >= 9 then 'CRITICAL'
+                                 when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) = 'HIGH'
+                      ) hf on true
+                      left join lateral (
+                          select count(*) as total from findings f
+                            join finding_subjects fs on fs.finding_id = f.id
+                             and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
+                           where fs.subject_id = a.id and f.status = 'OPEN' and f.finding_kind in ('AI_POSTURE', 'AI_EXPOSURE')
+                      ) tf on true
+                      left join lateral (
+                          select count(*) as total from ai_grid_current_expected_candidates c where c.artifact_id = a.id
+                      ) pt on true
+                      left join lateral (
+                          select count(*) as total from ai_grid_current_expected_candidates c
+                           where c.artifact_id = a.id and c.decision = 'FAIL'
+                      ) pf on true
+                    """ + baseFilter + """
+                     order by a.active desc, a.last_observed_at desc, a.id
+                     limit :limit offset :offset
+                    """, params, this::artifactSummary);
+            long total = count("""
+                    select count(*) from ai_security_artifacts a
+                    """ + baseFilter, params);
+            return new PageResponse<>(items, safePage, safeSize, total);
+        });
+    }
+
+    private ArtifactSummaryResponse artifactSummary(ResultSet rs, int rowNum) throws SQLException {
+        return new ArtifactSummaryResponse(
+                rs.getObject("id", UUID.class),
+                rs.getString("name"),
+                rs.getString("native_kind"),
+                rs.getString("provider"),
+                rs.getString("account_id"),
+                rs.getString("region"),
+                rs.getLong("critical_findings"),
+                rs.getLong("high_findings"),
+                rs.getLong("total_findings"),
+                rs.getLong("policies_failed"),
+                rs.getLong("policies_total")
+        );
     }
 
     public ArtifactResponse artifact(Tenant tenant, UUID artifactId) {
@@ -160,7 +481,8 @@ public class AiSecurityApiService {
                            account_id, region, active, attributes_json::text, owner_name, owner_state,
                            owner_source, owner_confidence, owner_confidence_method,
                            owner_confidence_method_version, business_criticality, environment,
-                           first_observed_at, last_observed_at
+                           first_observed_at, last_observed_at,
+                           pii_scan_status, pii_source, pii_info_types::text, pii_finding_count, pii_last_scanned_at
                       from ai_security_artifacts where id = :id
                     """, Map.of("id", artifactId), this::artifact);
             if (rows.isEmpty()) {
@@ -191,7 +513,16 @@ public class AiSecurityApiService {
                 readMap(rs.getString("attributes_json")))));
     }
 
+    /** Bounded above the exposure-correlation engine's HARD_MAX_DEPTH (6) — this is a live,
+     * per-request read path (AiGridExposureService's bound is for an offline batch job). */
+    private static final int MAX_GRAPH_DEPTH = 3;
+
     public GraphResponse graph(Tenant tenant, UUID rootArtifactId) {
+        return graph(tenant, rootArtifactId, 1);
+    }
+
+    public GraphResponse graph(Tenant tenant, UUID rootArtifactId, int depth) {
+        int boundedDepth = Math.max(1, Math.min(depth, MAX_GRAPH_DEPTH));
         return tenantExecution.run(tenant, () -> {
             List<ArtifactResponse> nodes;
             List<RelationshipResponse> edges;
@@ -201,29 +532,90 @@ public class AiSecurityApiService {
                                account_id, region, active, attributes_json::text, owner_name, owner_state,
                                owner_source, owner_confidence, owner_confidence_method,
                                owner_confidence_method_version, business_criticality, environment,
-                               first_observed_at, last_observed_at
+                               first_observed_at, last_observed_at,
+                           pii_scan_status, pii_source, pii_info_types::text, pii_finding_count, pii_last_scanned_at
                           from ai_security_artifacts where active = true
                          order by last_observed_at desc limit 500
                         """, this::artifact);
                 edges = graphEdges(null, 1001);
             } else {
                 artifact(tenant, rootArtifactId);
-                edges = graphEdges(rootArtifactId, 1001);
+                edges = boundedGraphEdges(rootArtifactId, boundedDepth, 1001);
                 java.util.LinkedHashSet<UUID> ids = new java.util.LinkedHashSet<>();
                 ids.add(rootArtifactId);
                 edges.forEach(edge -> {
                     ids.add(edge.sourceArtifactId());
                     ids.add(edge.targetArtifactId());
                 });
-                nodes = ids.stream().limit(500).map(id -> artifact(tenant, id)).toList();
+                nodes = artifactsByIds(ids.stream().limit(500).toList());
             }
             boolean truncated = nodes.size() >= 500 || edges.size() > 1000;
             return new GraphResponse(nodes.stream().limit(500).toList(), edges.stream().limit(1000).toList(), truncated);
         });
     }
 
+    /** BFS over ai_security_relationships from root, up to `depth` hops. Runs inside the caller's
+     * tenantExecution.run(...) lambda (see graph() above) — search_path is already pinned to the
+     * caller's tenant schema, so this can never traverse into another tenant's rows regardless of
+     * how many hops it takes. */
+    private List<RelationshipResponse> boundedGraphEdges(UUID root, int depth, int limit) {
+        Set<UUID> frontier = new java.util.LinkedHashSet<>(List.of(root));
+        Set<UUID> visited = new java.util.LinkedHashSet<>(frontier);
+        Map<UUID, RelationshipResponse> collected = new LinkedHashMap<>();
+        for (int hop = 0; hop < depth && !frontier.isEmpty() && collected.size() < limit; hop++) {
+            List<RelationshipResponse> hopEdges = jdbc.query("""
+                    select r.id, r.relationship_type, r.source_artifact_id, source.name as source_name,
+                           r.target_artifact_id, target.name as target_name, r.attributes_json::text
+                      from ai_security_relationships r
+                      join ai_security_artifacts source on source.id = r.source_artifact_id
+                      join ai_security_artifacts target on target.id = r.target_artifact_id
+                     where r.active = true
+                       and (r.source_artifact_id in (:frontier) or r.target_artifact_id in (:frontier))
+                     order by r.relationship_type, r.id
+                     limit :limit
+                    """, new MapSqlParameterSource()
+                            .addValue("frontier", new ArrayList<>(frontier))
+                            .addValue("limit", limit - collected.size()),
+                    (rs, rowNum) -> new RelationshipResponse(
+                            rs.getObject("id", UUID.class),
+                            rs.getString("relationship_type"),
+                            rs.getObject("source_artifact_id", UUID.class),
+                            rs.getString("source_name"),
+                            rs.getObject("target_artifact_id", UUID.class),
+                            rs.getString("target_name"),
+                            readMap(rs.getString("attributes_json"))));
+            Set<UUID> nextFrontier = new java.util.LinkedHashSet<>();
+            for (RelationshipResponse edge : hopEdges) {
+                collected.putIfAbsent(edge.id(), edge);
+                if (visited.add(edge.sourceArtifactId())) {
+                    nextFrontier.add(edge.sourceArtifactId());
+                }
+                if (visited.add(edge.targetArtifactId())) {
+                    nextFrontier.add(edge.targetArtifactId());
+                }
+            }
+            frontier = nextFrontier;
+        }
+        return new ArrayList<>(collected.values());
+    }
+
+    private List<ArtifactResponse> artifactsByIds(List<UUID> ids) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        return jdbc.query("""
+                select id, provider, provider_resource_id, artifact_type, native_kind, name,
+                       account_id, region, active, attributes_json::text, owner_name, owner_state,
+                       owner_source, owner_confidence, owner_confidence_method,
+                       owner_confidence_method_version, business_criticality, environment,
+                       first_observed_at, last_observed_at,
+                           pii_scan_status, pii_source, pii_info_types::text, pii_finding_count, pii_last_scanned_at
+                  from ai_security_artifacts where id in (:ids)
+                """, Map.of("ids", ids), this::artifact);
+    }
+
     public PageResponse<FindingResponse> findings(Tenant tenant, String policyId, String status, int page, int size) {
-        return findings(tenant, policyId, status, null, null, page, size);
+        return findings(tenant, policyId, status, null, null, null, null, page, size);
     }
 
     public PageResponse<FindingResponse> findings(
@@ -232,6 +624,8 @@ public class AiSecurityApiService {
             String status,
             String provider,
             String subscription,
+            String severity,
+            String nativeKind,
             int page,
             int size
     ) {
@@ -243,6 +637,8 @@ public class AiSecurityApiService {
                     .addValue("status", blankToNull(status), Types.VARCHAR)
                     .addValue("provider", normalizedProvider(provider), Types.VARCHAR)
                     .addValue("subscription", blankToNull(subscription), Types.VARCHAR)
+                    .addValue("severity", blankToNull(severity), Types.VARCHAR)
+                    .addValue("nativeKind", blankToNull(nativeKind), Types.VARCHAR)
                     .addValue("limit", safeSize, Types.INTEGER)
                     .addValue("offset", safePage * safeSize, Types.INTEGER);
             String filter = """
@@ -250,6 +646,9 @@ public class AiSecurityApiService {
                        and (:status is null or f.status = :status)
                        and (:provider is null or a.provider = :provider)
                        and (:subscription is null or a.account_id = :subscription)
+                       and (:nativeKind is null or a.native_kind = any(string_to_array(:nativeKind, ',')))
+                       and (:severity is null or coalesce(f.severity_override, case when f.risk_score >= 9 then 'CRITICAL'
+                           when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) = :severity)
                     """;
             List<FindingResponse> items = jdbc.query("""
                     select f.id, f.display_id, f.policy_id, f.policy_version, fs.subject_id artifact_id,
@@ -850,17 +1249,19 @@ public class AiSecurityApiService {
     }
 
     private ArtifactResponse artifact(ResultSet rs, int rowNum) throws SQLException {
+        String provider = rs.getString("provider");
+        String nativeKind = rs.getString("native_kind");
         return new ArtifactResponse(
                 rs.getObject("id", UUID.class),
-                rs.getString("provider"),
+                provider,
                 rs.getString("provider_resource_id"),
                 rs.getString("artifact_type"),
-                rs.getString("native_kind"),
+                nativeKind,
                 rs.getString("name"),
                 rs.getString("account_id"),
                 rs.getString("region"),
                 rs.getBoolean("active"),
-                readMap(rs.getString("attributes_json")),
+                metadataSanitizer.sanitize(provider, nativeKind, readMap(rs.getString("attributes_json"))).attributes(),
                 rs.getString("owner_name"),
                 rs.getString("owner_state"),
                 rs.getString("owner_source"),
@@ -870,7 +1271,12 @@ public class AiSecurityApiService {
                 rs.getString("business_criticality"),
                 rs.getString("environment"),
                 instant(rs, "first_observed_at"),
-                instant(rs, "last_observed_at"));
+                instant(rs, "last_observed_at"),
+                rs.getString("pii_scan_status"),
+                rs.getString("pii_source"),
+                readStringList(rs.getString("pii_info_types")),
+                rs.getInt("pii_finding_count"),
+                instant(rs, "pii_last_scanned_at"));
     }
 
     private FindingResponse finding(ResultSet rs, int rowNum) throws SQLException {
@@ -953,9 +1359,25 @@ public class AiSecurityApiService {
 
     public record SummaryResponse(
             Map<String, Long> artifactCounts,
+            Map<String, Long> nativeKindCounts,
+            Map<String, Long> providerCounts,
             long openFindings,
             long incompleteScopes,
             Instant lastCompleteSnapshotAt
+    ) {
+    }
+
+    public record SeverityGridRow(
+            String nativeKind, long critical, long high, long medium, long low, long total
+    ) {
+    }
+
+    public record SeverityGridResponse(List<SeverityGridRow> rows) {
+    }
+
+    public record TopRiskArtifact(
+            UUID id, String name, String nativeKind, String provider, String accountId,
+            long criticalCount, long highCount, long mediumCount, long lowCount, long score
     ) {
     }
 
@@ -968,7 +1390,16 @@ public class AiSecurityApiService {
             String ownerName, String ownerState, String ownerSource, Double ownerConfidence,
             String ownerConfidenceMethod, String ownerConfidenceMethodVersion,
             String businessCriticality, String environment,
-            Instant firstObservedAt, Instant lastObservedAt
+            Instant firstObservedAt, Instant lastObservedAt,
+            String piiScanStatus, String piiSource, List<String> piiInfoTypes,
+            int piiFindingCount, Instant piiLastScannedAt
+    ) {
+    }
+
+    public record ArtifactSummaryResponse(
+            UUID id, String name, String nativeKind, String provider, String accountId, String region,
+            long criticalFindings, long highFindings, long totalFindings,
+            long policiesFailed, long policiesTotal
     ) {
     }
 

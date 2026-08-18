@@ -9,11 +9,15 @@ import org.springframework.stereotype.Component;
 @Component
 public class AiSecurityResourceFamilyCatalogue {
 
-    public static final String VERSION = "1.4";
+    public static final String VERSION = "1.5";
 
     private static final Map<String, ScopeSemantics> FAMILIES = Map.ofEntries(
             Map.entry("BEDROCK_AGENTS", ScopeSemantics.REGIONAL),
             Map.entry("BEDROCK_KNOWLEDGE_BASES", ScopeSemantics.REGIONAL),
+            Map.entry("BEDROCK_DATA_SOURCES", ScopeSemantics.REGIONAL),
+            Map.entry("BEDROCK_DATA_STORES", ScopeSemantics.REGIONAL),
+            Map.entry("AWS_AGENTCORE_GATEWAYS", ScopeSemantics.REGIONAL),
+            Map.entry("AWS_AGENTCORE_GATEWAY_TARGETS", ScopeSemantics.REGIONAL),
             Map.entry("BEDROCK_GUARDRAILS", ScopeSemantics.REGIONAL),
             Map.entry("BEDROCK_INVOCATION_LOGGING", ScopeSemantics.REGIONAL),
             Map.entry("BEDROCK_DEPLOYABLE_MODELS", ScopeSemantics.REGIONAL),
@@ -52,6 +56,8 @@ public class AiSecurityResourceFamilyCatalogue {
             Map.entry("AZURE_SEARCH_SKILLSETS", ScopeSemantics.REGIONAL),
             Map.entry("AZURE_SEARCH_INDEXERS", ScopeSemantics.REGIONAL),
             Map.entry("AZURE_SEARCH_DATA_SOURCES", ScopeSemantics.REGIONAL),
+            Map.entry("AZURE_SEARCH_KNOWLEDGE_BASES", ScopeSemantics.REGIONAL),
+            Map.entry("AZURE_SEARCH_KNOWLEDGE_SOURCES", ScopeSemantics.REGIONAL),
             Map.entry("AZURE_BOT_SERVICES", ScopeSemantics.ACCOUNT_GLOBAL),
             Map.entry("AZURE_BOT_CHANNELS", ScopeSemantics.ACCOUNT_GLOBAL),
             Map.entry("AZURE_BOT_IDENTITIES", ScopeSemantics.ACCOUNT_GLOBAL),

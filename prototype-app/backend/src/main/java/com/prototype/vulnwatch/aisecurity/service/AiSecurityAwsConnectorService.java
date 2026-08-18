@@ -10,6 +10,8 @@ import com.prototype.vulnwatch.service.TenantSchemaExecutionService;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -26,6 +28,8 @@ import software.amazon.awssdk.services.sts.model.AssumeRoleRequest;
 
 @Service
 public class AiSecurityAwsConnectorService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(AiSecurityAwsConnectorService.class);
 
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
@@ -106,6 +110,8 @@ public class AiSecurityAwsConnectorService {
             return new ConnectionTestResponse(false, normalizeStsCode(code),
                     "Unable to assume the configured AWS role", false, List.of("sts:AssumeRole"));
         } catch (Exception ex) {
+            LOG.warn("AWS connection test could not be completed for tenant {}: {}: {}",
+                    tenant.getId(), ex.getClass().getName(), ex.getMessage());
             return new ConnectionTestResponse(false, "PROVIDER_UNAVAILABLE",
                     "AWS connection test could not be completed", true, List.of());
         }

@@ -12,6 +12,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -91,10 +92,32 @@ public class AiGridPolicyCatalogService {
 
     public Distribution updateDistribution(String policyId, DistributionCommand command, String actor) {
         return TenantContext.runAsPlatform(() -> {
+            if (command == null) bad("Distribution command is required");
             if (!SELECTIONS.contains(command.defaultSelection())) bad("Invalid defaultSelection");
             if (!List.of("GENERAL_AVAILABILITY", "CANARY", "PAUSED", "RETIRED").contains(command.rolloutStage())) bad("Invalid rolloutStage");
             Integer policy = jdbc.queryForObject("select count(*) from platform.ai_grid_policy_versions where policy_id=:id and lifecycle='PUBLISHED'", Map.of("id", policyId), Integer.class);
             if (policy == null || policy == 0) notFound("Published policy not found");
+            List<String> cohort = command.canaryTenantIds() == null ? List.of() : command.canaryTenantIds();
+            if (new HashSet<>(cohort).size() != cohort.size()) bad("CANARY cohort contains duplicate tenant IDs");
+            List<UUID> tenantIds = new java.util.ArrayList<>();
+            for (String tenantId : cohort) {
+                try { tenantIds.add(UUID.fromString(tenantId)); }
+                catch (IllegalArgumentException ex) { bad("CANARY cohort contains an invalid tenant ID"); }
+            }
+            if ("CANARY".equals(command.rolloutStage()) && tenantIds.isEmpty()) bad("CANARY requires a non-empty cohort");
+            if (!"CANARY".equals(command.rolloutStage())) cohort = List.of();
+            if (!tenantIds.isEmpty()) {
+                Integer active = jdbc.queryForObject("select count(*) from platform.tenants where id in (:ids) and status='ACTIVE' and deleted_at is null",
+                        Map.of("ids", tenantIds), Integer.class);
+                if (active == null || active != tenantIds.size()) bad("CANARY cohort contains an inactive or unknown tenant");
+            }
+            String pinned = blank(command.pinnedVersion());
+            if (pinned != null) {
+                Integer published = jdbc.queryForObject("select count(*) from platform.ai_grid_policy_versions where policy_id=:id and version=:version and lifecycle='PUBLISHED'",
+                        Map.of("id", policyId, "version", pinned), Integer.class);
+                if (published == null || published == 0) conflict("Pinned version must be a published version of this policy");
+            }
+            String before = distributionState(policyId);
             jdbc.update("""
                     insert into platform.ai_grid_policy_distribution (policy_id,available,default_selection,rollout_stage,canary_tenant_ids_json,pinned_version,updated_by)
                     values (:id,:available,:selection,:stage,cast(:cohort as jsonb),:pinned,:actor)
@@ -103,10 +126,17 @@ public class AiGridPolicyCatalogService {
                     pinned_version=excluded.pinned_version, updated_by=excluded.updated_by, updated_at=now()
                     """, new MapSqlParameterSource().addValue("id", policyId).addValue("available", command.available())
                     .addValue("selection", command.defaultSelection()).addValue("stage", command.rolloutStage())
-                    .addValue("cohort", json(command.canaryTenantIds())).addValue("pinned", blank(command.pinnedVersion())).addValue("actor", actor));
-            audit.record("ai_grid.policy_distribution.updated", "ai_grid_policy", policyId, "{\"stage\":\"" + command.rolloutStage() + "\"}");
+                    .addValue("cohort", json(cohort)).addValue("pinned", pinned).addValue("actor", actor));
+            audit.record("ai_grid.policy_distribution.updated", "ai_grid_policy", policyId,
+                    "{\"before\":" + before + ",\"after\":" + distributionState(policyId)
+                            + ",\"affectedTenantCount\":" + ("CANARY".equals(command.rolloutStage()) ? cohort.size() : "null") + "}");
             return distribution(policyId);
         });
+    }
+
+    private String distributionState(String policyId) {
+        return jdbc.query("select row_to_json(d)::text from platform.ai_grid_policy_distribution d where policy_id=:id",
+                Map.of("id", policyId), rs -> rs.next() ? rs.getString(1) : "null");
     }
 
     public List<Distribution> distributions() { return TenantContext.runAsPlatform(() -> jdbc.query("""

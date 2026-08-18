@@ -38,6 +38,8 @@ function buildIdentity(overrides = {}) {
     nearEolComponentCount: 0,
     unknownEolComponentCount: 0,
     openFindingCount: 0,
+    criticalFindingCount: 0,
+    highFindingCount: 0,
     openVulnerabilityCount: 0,
     ...overrides,
   };

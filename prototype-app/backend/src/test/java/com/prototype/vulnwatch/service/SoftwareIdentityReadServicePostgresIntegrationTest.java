@@ -16,6 +16,8 @@ import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.domain.Vulnerability;
 import com.prototype.vulnwatch.domain.VulnerabilitySource;
 import com.prototype.vulnwatch.dto.SoftwareIdentityFunnelResponse;
+import com.prototype.vulnwatch.dto.SoftwareIdentityPageResponse;
+import com.prototype.vulnwatch.dto.SoftwareIdentitySummaryResponse;
 import com.prototype.vulnwatch.repo.AssetRepository;
 import com.prototype.vulnwatch.repo.FindingRepository;
 import com.prototype.vulnwatch.repo.InventoryComponentRepository;
@@ -134,6 +136,39 @@ class SoftwareIdentityReadServicePostgresIntegrationTest {
         assertEquals(1L, funnel.uniqueSoftware());
         assertEquals(0L, funnel.softwareWithVulnerabilities());
         assertEquals(0L, funnel.softwareWithFindings());
+    }
+
+    @Test
+    void listPageBreaksOpenFindingsDownBySeverity() {
+        // The Open Findings column on the software identities list renders one chip per
+        // severity bucket, so criticalFindingCount/highFindingCount must agree with the
+        // vulnerability/risk-score-derived severity used everywhere else in the product.
+        String suffix = "severity-" + TENANT_SEQUENCE.incrementAndGet();
+        Tenant tenant = createTenant(suffix);
+        SoftwareIdentity identity = createIdentity(suffix);
+        Asset asset = createAsset(tenant, "host-" + suffix);
+        SbomUpload sbom = createSbom(tenant, asset, suffix);
+        InventoryComponent component = createActiveComponent(tenant, asset, sbom, identity, suffix);
+
+        Vulnerability criticalVulnerability = createVulnerability("CVE-2099-critical-" + suffix);
+        criticalVulnerability.setSeverity("CRITICAL");
+        vulnerabilityRepository.save(criticalVulnerability);
+        createOpenFinding(tenant, asset, component, criticalVulnerability);
+
+        Vulnerability highVulnerability = createVulnerability("CVE-2099-high-" + suffix);
+        createOpenFinding(tenant, asset, component, highVulnerability);
+
+        SoftwareIdentityPageResponse page = softwareIdentityReadService.listPage(
+                tenant, null, null, null, null, null, null, null, null, 0, 20);
+
+        SoftwareIdentitySummaryResponse summary = page.content().stream()
+                .filter(item -> item.id().equals(identity.getId()))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals(2L, summary.openFindingCount());
+        assertEquals(1L, summary.criticalFindingCount());
+        assertEquals(1L, summary.highFindingCount());
     }
 
     private Tenant createTenant(String suffix) {

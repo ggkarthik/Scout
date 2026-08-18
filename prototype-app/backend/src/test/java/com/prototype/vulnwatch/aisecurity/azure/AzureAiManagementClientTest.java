@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyRegistry;
 import java.net.URI;
 import java.net.http.HttpHeaders;
@@ -84,6 +85,25 @@ class AzureAiManagementClientTest {
     @Test
     void classifiesFoundryProjectAgentsAsFirstClassDiscoveryResources() {
         assertEquals("AZURE_FOUNDRY_AGENTS", client.family("Microsoft.Foundry/projects/agents"));
+    }
+
+    @Test
+    void advancesFoundryPaginationWithABoundedEncodedCursor() {
+        ObjectNode page = new ObjectMapper().createObjectNode()
+                .put("has_more", true)
+                .put("last_id", "agent/id with spaces");
+        assertEquals(
+                "https://pilot.services.ai.azure.com/api/projects/demo/agents?api-version=v1&after=agent%2Fid%20with%20spaces",
+                client.nextFoundryPageUrl(
+                        "https://pilot.services.ai.azure.com/api/projects/demo/agents?api-version=v1", page));
+    }
+
+    @Test
+    void rejectsIncompleteFoundryPaginationState() {
+        ObjectNode page = new ObjectMapper().createObjectNode().put("has_more", true);
+        assertThrows(AzureAiManagementClient.AzureApiException.class,
+                () -> client.nextFoundryPageUrl(
+                        "https://pilot.services.ai.azure.com/api/projects/demo/agents?api-version=v1", page));
     }
 
     @Test

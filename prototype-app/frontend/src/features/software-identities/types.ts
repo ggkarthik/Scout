@@ -18,6 +18,8 @@ export type SoftwareIdentitySummary = {
   nearEolComponentCount: number;
   unknownEolComponentCount: number;
   openFindingCount: number;
+  criticalFindingCount: number;
+  highFindingCount: number;
   openVulnerabilityCount: number;
   lastObservedAt?: string;
 };
@@ -56,6 +58,8 @@ export type SoftwareIdentityVersion = {
   assetCount: number;
   componentCount: number;
   openFindingCount: number;
+  criticalFindingCount: number;
+  highFindingCount: number;
   openVulnerabilityCount: number;
   lastObservedAt?: string;
 };

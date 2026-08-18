@@ -32,18 +32,21 @@ public class AiSecurityObservationService {
     public static final String CONTRACT_VERSION = "1.0";
     private static final Set<String> RELATIONSHIP_TYPES = Set.of(
             "USES_MODEL", "USES_GUARDRAIL", "USES_KNOWLEDGE_BASE", "USES_DATA_SOURCE",
-            "INVOKES_LAMBDA", "ASSUMES_ROLE", "READS_FROM_S3", "LOGS_TO", "SUPERVISES_AGENT",
-            "CONTAINS_PROJECT", "DEPLOYS_MODEL", "USES_TOOL", "USES_SEARCH_INDEX",
+            "BACKED_BY_DATA_STORE", "USES_SEARCH_INDEX", "EXPOSES_MCP", "CONNECTS_TO_MCP",
+            "CONTAINS_MCP_TARGET", "ROUTES_TO", "INVOKES_LAMBDA", "ASSUMES_ROLE", "READS_FROM_S3", "LOGS_TO", "SUPERVISES_AGENT",
+            "CONTAINS_PROJECT", "DEPLOYS_MODEL", "USES_TOOL",
             "USES_MANAGED_IDENTITY", "HAS_PRIVATE_ENDPOINT", "USES_KEY_VAULT_KEY",
             "CONTAINS_RESOURCE", "HAS_DEPLOYMENT", "RUNS_PIPELINE", "HAS_CHANNEL",
             "HAS_ROLE_ASSIGNMENT", "CONTAINS", "USES_EXECUTION_ROLE", "USES_NETWORK",
-            "USES_ENDPOINT_CONFIGURATION", "PRODUCES_MODEL", "USES_DATA_CONNECTION");
+            "USES_ENDPOINT_CONFIGURATION", "PRODUCES_MODEL", "USES_DATA_CONNECTION",
+            "READS_FROM_STORAGE_ACCOUNT");
 
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final TenantSchemaExecutionService tenantExecution;
     private final TransactionTemplate transactionTemplate;
     private final AiSecuritySyncRunFacade syncRunFacade;
+    private final AiSecurityMetadataSanitizer metadataSanitizer;
     private AiGridPipelineService aiGridPipelineService;
 
     public AiSecurityObservationService(
@@ -51,13 +54,15 @@ public class AiSecurityObservationService {
             ObjectMapper objectMapper,
             TenantSchemaExecutionService tenantExecution,
             TransactionTemplate transactionTemplate,
-            AiSecuritySyncRunFacade syncRunFacade
+            AiSecuritySyncRunFacade syncRunFacade,
+            AiSecurityMetadataSanitizer metadataSanitizer
     ) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
         this.tenantExecution = tenantExecution;
         this.transactionTemplate = transactionTemplate;
         this.syncRunFacade = syncRunFacade;
+        this.metadataSanitizer = metadataSanitizer;
     }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -113,13 +118,20 @@ public class AiSecurityObservationService {
 
         upsertScope(tenant, envelope);
         Map<String, UUID> artifactIds = new HashMap<>();
+        List<Diagnostic> metadataDiagnostics = new ArrayList<>();
         for (ArtifactObservation artifact : safe(envelope.artifacts())) {
-            UUID artifactId = upsertArtifact(tenant, envelope, artifact);
+            AiSecurityMetadataSanitizer.Result sanitized = metadataSanitizer.sanitize(
+                    envelope.provider(), artifact.nativeKind(), artifact.attributes());
+            if (!sanitized.rejectedFieldNames().isEmpty()) {
+                metadataDiagnostics.add(metadataDiagnostic(envelope, sanitized.rejectedFieldNames()));
+            }
+            UUID artifactId = upsertArtifact(tenant, envelope, artifact, sanitized.attributes());
             artifactIds.put(artifact.providerResourceId(), artifactId);
             upsertSource(tenant, envelope, artifact, artifactId);
         }
 
         List<Diagnostic> combinedDiagnostics = new ArrayList<>(diagnostics(envelope));
+        combinedDiagnostics.addAll(metadataDiagnostics.stream().limit(1).toList());
         boolean unknownRelationship = false;
         for (RelationshipObservation relationship : safe(envelope.relationships())) {
             if (!RELATIONSHIP_TYPES.contains(relationship.relationshipType())) {
@@ -243,7 +255,8 @@ public class AiSecurityObservationService {
                 """, params);
     }
 
-    private UUID upsertArtifact(Tenant tenant, ObservationEnvelopeV1 envelope, ArtifactObservation artifact) {
+    private UUID upsertArtifact(Tenant tenant, ObservationEnvelopeV1 envelope, ArtifactObservation artifact,
+                                Map<String, Object> attributes) {
         UUID id = UUID.randomUUID();
         MapSqlParameterSource params = base(envelope)
                 .addValue("id", id)
@@ -252,15 +265,22 @@ public class AiSecurityObservationService {
                 .addValue("artifactType", artifact.artifactType())
                 .addValue("nativeKind", artifact.nativeKind())
                 .addValue("name", artifact.name())
-                .addValue("attributes", json(artifact.attributes()))
+                .addValue("attributes", json(attributes))
+                .addValue("piiScanStatus", artifact.piiScanStatus())
+                .addValue("piiSource", artifact.piiSource())
+                .addValue("piiInfoTypes", json(artifact.piiInfoTypes()))
+                .addValue("piiFindingCount", artifact.piiFindingCount())
+                .addValue("piiLastScannedAt", artifact.piiLastScannedAt() == null ? null : timestamp(artifact.piiLastScannedAt()))
                 .addValue("observedAt", timestamp(envelope.observedAt()));
         return jdbc.queryForObject("""
                 insert into ai_security_artifacts (
                     id, tenant_id, provider, provider_resource_id, artifact_type, native_kind, name,
-                    account_id, region, active, attributes_json, first_observed_at, last_observed_at
+                    account_id, region, active, attributes_json, first_observed_at, last_observed_at,
+                    pii_scan_status, pii_source, pii_info_types, pii_finding_count, pii_last_scanned_at
                 ) values (
                     :id, :tenantId, :provider, :providerResourceId, :artifactType, :nativeKind, :name,
-                    :accountId, :region, true, cast(:attributes as jsonb), :observedAt, :observedAt
+                    :accountId, :region, true, cast(:attributes as jsonb), :observedAt, :observedAt,
+                    :piiScanStatus, :piiSource, cast(:piiInfoTypes as jsonb), :piiFindingCount, :piiLastScannedAt
                 ) on conflict (tenant_id, provider, provider_resource_id) do update
                     set artifact_type = excluded.artifact_type,
                         native_kind = excluded.native_kind,
@@ -270,7 +290,12 @@ public class AiSecurityObservationService {
                         active = true,
                         attributes_json = ai_security_artifacts.attributes_json || excluded.attributes_json,
                         last_observed_at = excluded.last_observed_at,
-                        deactivated_at = null
+                        deactivated_at = null,
+                        pii_scan_status = excluded.pii_scan_status,
+                        pii_source = excluded.pii_source,
+                        pii_info_types = excluded.pii_info_types,
+                        pii_finding_count = excluded.pii_finding_count,
+                        pii_last_scanned_at = excluded.pii_last_scanned_at
                 returning id
                 """, params, UUID.class);
     }
@@ -459,6 +484,13 @@ public class AiSecurityObservationService {
 
     private List<Diagnostic> diagnostics(ObservationEnvelopeV1 envelope) {
         return envelope.diagnostics() == null ? List.of() : envelope.diagnostics();
+    }
+
+    private Diagnostic metadataDiagnostic(ObservationEnvelopeV1 envelope, List<String> fields) {
+        List<String> bounded = fields.stream().sorted().limit(20).toList();
+        return new Diagnostic("AI_METADATA_FIELDS_DROPPED",
+                "Discarded " + fields.size() + " invalid metadata fields: " + String.join(",", bounded),
+                false, List.of(), envelope.scopeKey());
     }
 
     private <T> List<T> safe(List<T> values) {
