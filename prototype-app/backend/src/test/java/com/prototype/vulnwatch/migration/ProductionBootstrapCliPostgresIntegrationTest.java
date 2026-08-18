@@ -39,7 +39,7 @@ class ProductionBootstrapCliPostgresIntegrationTest {
             }
         });
 
-        assertEquals(71, queryInt("""
+        assertEquals(73, queryInt("""
                 select max(version::integer)
                 from public.flyway_schema_history
                 where version ~ '^[0-9]+$' and success

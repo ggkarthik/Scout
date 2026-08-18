@@ -169,7 +169,7 @@ class AiSecurityObservationPostgresIntegrationTest {
         observationService.ingest(
                 tenant,
                 evidenceEnvelope(
-                        tenant, connectorId, runId, "GLOBAL", "IAM_GLOBAL", "global-iam", List.of()));
+                        tenant, connectorId, runId, "GLOBAL", "IAM_GLOBAL", "global-iam", List.of(agent)));
         assertEquals("FAIL", wildcardRoleOutcome(tenant, runId));
     }
 
@@ -335,7 +335,7 @@ class AiSecurityObservationPostgresIntegrationTest {
                 List.of(guardrail), List.of(), List.of()));
 
         Map<String, String> originalFingerprints = tenantExecution.run(tenant, () -> {
-            assertEquals(3, jdbc.queryForObject(
+            assertEquals(5, jdbc.queryForObject(
                     "select count(*) from ai_grid_snapshot_manifests where run_id = :runId",
                     Map.of("runId", runId), Integer.class));
             assertEquals(2, jdbc.queryForObject(
@@ -890,10 +890,10 @@ class AiSecurityObservationPostgresIntegrationTest {
         ArtifactObservation policy = new ArtifactObservation(
                 "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.CognitiveServices/accounts/ai/raiPolicies/production",
                 "AI_GUARDRAIL", "AZURE_RAI_POLICIES", "production", attributes);
-        String scopeKey = "AWS:123456789012:us-east-1:AZURE_RAI_POLICIES";
+        String scopeKey = "AZURE:sub:eastus:AZURE_RAI_POLICIES";
         return new ObservationEnvelopeV1(
-                AiSecurityObservationService.CONTRACT_VERSION, runId, connectorId, tenant.getId(), "AWS",
-                "123456789012", "us-east-1", "AZURE_RAI_POLICIES", scopeKey, 0, 1,
+                AiSecurityObservationService.CONTRACT_VERSION, runId, connectorId, tenant.getId(), "AZURE",
+                "sub", "eastus", "AZURE_RAI_POLICIES", scopeKey, 0, 1,
                 runId + ":rai:0", hash, Instant.now(), ScopeStatus.COMPLETE,
                 List.of(policy), List.of(), List.of());
     }
