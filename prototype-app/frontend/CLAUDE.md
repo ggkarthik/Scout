@@ -45,6 +45,8 @@ Authentication state flows through a single read path:
 
 Role checks **must** go through the helper functions in `src/features/auth/roles.ts` (`hasRole`, `canAccessPlatformConsole`, etc.). Do not check `actor.roles` directly — the helpers normalize `ROLE_` prefixes and handle `platformScope` edge cases.
 
+**Entitlements are a separate mechanism from roles**: `src/features/auth/entitlements.ts`'s `canUseEntitlement(actor, key)` checks a per-tenant, plan-based feature flag (currently `ai.security`, gating the entire AI Security / AI Grid feature surface) and fails closed. Roles answer "can this user do X"; entitlements answer "does this tenant's plan include feature X at all". Both can gate the same route.
+
 `ActorContext.platformScope = true` means the user is a platform owner who has not yet entered a tenant. In this state, tenant-scoped routes redirect to `/platform/tenants`. After selecting a tenant, `actingAsPlatformOwner = true`.
 
 ## Source layout
@@ -71,6 +73,8 @@ src/
     eol/
     admin/             # Tenant, PlatformUser, ServiceAccount, AuditEvent, TenantSchemaStatusItem
     campaigns/         # Remediation campaign types + CampaignDetailPage; API calls inlined (no queries.ts)
+    ai-security/       # AI Security/AI Grid types, dependency graph (React Flow), category
+                       # helpers; entitlement-gated ('ai.security') — see root CLAUDE.md
     widgets/           # Shared chart/widget components
   hooks/
     useDebouncedValue.ts  # Generic debounce hook

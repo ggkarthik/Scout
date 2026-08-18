@@ -1,6 +1,6 @@
 # VulnWatch — End-to-End Business Logic Guide
 
-Last updated: 2026-07-13
+Last updated: 2026-08-18
 
 **Audience:** Engineers and product stakeholders who need to understand how the platform works end-to-end.
 
@@ -45,7 +45,11 @@ Every tenant gets its own PostgreSQL schema. The `TenantAwareDataSource` wraps H
 
 States: `ACTIVE`, `TRIAL`, `SUSPENDED`, `EXPIRED`, `DEMO`.
 
-Demo tenants auto-expire after 7 days. `DemoTenantExpiryJob` runs hourly, marks expired demos as `SUSPENDED`. `DemoTenantPurgeService` handles schema cleanup.
+Demo tenants auto-expire after 7 days. `DemoTenantExpiryJob` runs hourly, marks expired demos as `SUSPENDED`. `DemoTenantPurgeService` handles schema cleanup. `DemoDatasetProvisioningService` (polls every 30s by default) seeds or repairs a requested tenant's demo dataset once it reaches `ACTIVE`; `DemoDatasetController` (`POST /api/platform/tenants/{tenantId}/demo-data`, `PLATFORM_OWNER`) can trigger this manually.
+
+### Tenant-Authorized Support Access
+
+`TenantSupportAccessController` (added with `V45__tenant_access_membership_provenance.sql`) lets a tenant admin grant a time-boxed, break-glass platform-owner access grant (`POST /api/tenants/{tenantId}/support-grants`, `TENANT_ADMIN`), which the invited platform owner then accepts (`POST /api/auth/support-grants/{grantId}/accept`). This is distinct from — and layers on top of — the existing `tenant_support_grants` table and `TenantSupportGrant` lifecycle described elsewhere in this doc; the new piece is that the *tenant* can initiate the grant rather than only the platform owner requesting access.
 
 ---
 
@@ -317,6 +321,67 @@ A **Campaign** groups findings/CVEs into a tracked remediation effort:
 
 `BomController` (`/api/bom`) handles general Bill-of-Materials ingestion (fetch by URL or file upload), with dashboard, support-matrix, and lineage views per BOM. `CbomController` (`/api/bom/cbom`) is a specialized branch tracking cloud/container posture: per-asset CBOM posture summaries, components, and risk findings with an analyst accept-finding workflow. The Connect page's `bom-management` connector exposes SBOM, AI-BOM, CBOM, and Vendor-BOM ingestion in one place.
 
+## AI Security / AI Grid Pipeline
+
+Not to be confused with [AI Integration (OpenAI)](#ai-integration-openai) above — that section covers VulnWatch *using* an LLM internally (EOL slug suggestion, CVE investigation summaries). This section covers VulnWatch *discovering and governing other systems'* AI/ML resources (Bedrock agents, Azure AI Foundry projects, MCP servers, etc.) as a security posture management capability, entitlement-gated per tenant behind the `ai.security` key (`TenantEntitlementService.AI_SECURITY`). It backs the `/findings/ai`, `/policies`, and `/inventory/ai` frontend routes and lives in its own top-level backend package, `com.prototype.vulnwatch.aisecurity` (11 controllers, 37 services — separate from the main `controller`/`service` packages).
+
+Two generations coexist:
+
+- **Legacy "AI Security"** — a hardcoded catalog of ~14 misconfiguration policies (public S3 knowledge bases, unauthenticated Lambda URLs, wildcard IAM, weak Bedrock guardrails, disabled Azure RAI content filters, local-auth-enabled Azure AI/ML/Search, etc.), evaluated directly against discovered artifacts.
+- **"AI Grid"** — the platform-governed replacement, now the primary path for policy evaluation. `V60`/`V61` (tenant migrations) migrated legacy findings and policy selections into the canonical, governed tables; the legacy tables and `AiSecurityController` remain for artifacts/inventory reads and backward compatibility.
+
+### Discovery
+
+`AiSecurityJobWorkerService` polls `ingestion_jobs` for `AI_SECURITY_AWS_BEDROCK` / `AI_SECURITY_AZURE_DISCOVERY` job types (every 3s by default) and dispatches to a provider:
+
+- **AWS** (`AwsBedrockDiscoveryService`) — via AWS SDK v2, discovers Bedrock agents/action-groups/knowledge bases/guardrails/models/inference profiles/prompts/flows, AgentCore gateways/targets, and SageMaker domains/endpoints/pipelines; checks IAM policies for wildcard actions, Lambda function-URL auth, and S3 bucket public-access status. Optionally reads *existing* AWS Macie PII classification findings for referenced S3 buckets (`AwsMaciePiiLookupService` — never triggers a new Macie scan). Gated by `AiSecurityAwsAdmissionService` (per account/region semaphores) and the budget service below.
+- **Azure** (`AzureAiDiscoveryService` / `AzureAiManagementClient`) — raw ARM API calls discovering Cognitive Services/AI accounts, Foundry projects/deployments/RAI policies/agents, ML workspaces/endpoints, AI Search services/indexers/knowledge sources, Bot Service, diagnostic settings, RBAC assignments, Storage accounts. `AzureRaiPolicyAnalyzer` conservatively parses RAI content-filter configs. Optionally reads *existing* Microsoft Purview Data Map classification results for Storage accounts (`AzurePurviewClassificationClient` — read-only). Gated by `AiSecurityAzureAdmissionService` and a config-driven kill switch (`AiSecurityAzureKillSwitchService`).
+
+Both connectors emit `ObservationEnvelopeV1` chunks (validated, allow-listed-field-only via `AiSecurityMetadataSanitizer` — no prompt bodies, secrets, or free-text PII) which `AiSecurityObservationService` persists idempotently by receipt and, once a scan scope completes, hands to the AI Grid pipeline.
+
+### AI Grid Pipeline (per completed scope)
+
+`AiGridPipelineService.processCompleteScope()` runs, in order:
+
+1. **Snapshot** (`AiGridSnapshotService`) — commits an immutable, redacted, hash-deduped snapshot of discovered artifacts; derives versioned **facts** from it (the sole input to policy evaluation).
+2. **Ownership** (`AiGridOwnershipService`) — resolves CONFIRMED / INFERRED (via `ownership_rules` — the same table used by Configurations → Ownership) / CANDIDATE (tag heuristic) / UNOWNED. Tags never get promoted to authoritative on their own.
+3. **System grouping** (`AiGridSystemService`) — derives agent-rooted "AI systems" via bounded breadth-first search (depth 6, fan-out 100) over provider relationships; tracks revisions and split/merge/successor/retirement lineage across scans.
+4. **Policy assessment** (`AiGridAssessmentService`) — evaluates each artifact against every policy the tenant has selected REQUIRED/ENABLED/PREVIEW for (via `AiGridPredicateEngine`, a JSON predicate evaluator over facts, with per-tenant scope conditions/exceptions/parameters), producing PASS/FAIL/NO_DECISION/ERROR/NOT_APPLICABLE decisions.
+5. **Exposure correlation** (`AiGridExposureService`) — an R2-generation bounded graph-traversal engine running three hardcoded correlation templates (external sensitive-data access, excessive tool privilege, untrusted autonomous execution). Hypotheses are promoted to a **validated exposure** only when every supporting fact is exact, evidence-graded, and still fresh; `AiGridExposureFreshnessService` (60s cadence) demotes validated exposures whose supporting evidence has expired.
+6. **Coverage & setup** (`AiGridReconciliationService`, `AiGridCoverageService`, `AiGridReadinessService`) — surfaces coverage gaps (unknown technology, no policy coverage, missing assessment, unresolved owner), materializes a deletion-safe "current epoch" view of the latest complete scan per scope, and generates a prioritized tenant setup-action queue.
+7. **Finding bridge** (`AiGridFindingService` / `AiGridExposureFindingService`) — promotes qualifying policy failures and validated exposures into the canonical `findings` table (`finding_kind = AI_POSTURE` / `AI_EXPOSURE`, `creation_source = AI_SECURITY`), reusing the same `FindingWorkflowService`, SLA logic, and ServiceNow incident creation as CVE findings — there is no separate AI finding table.
+
+Host-context evidence (from external CIEM/DSPM/ASM/runtime tools, or analyst attestation) can be ingested via `AiGridEvidenceIngestionController` (`ROLE_SERVICE_ACCOUNT` only) and is tracked with confidence/evidence-class rules in `AiGridHostContextService` — it can promote a fact to "validating" status only under those rules, never unconditionally.
+
+### Governance & Release Certification (platform-scoped)
+
+A separate platform-owner-only track gates what AI Grid content ever reaches tenants, mirroring how NVD/GHSA feeds are trusted inputs but with an explicit sign-off step because policy false positives here can misdirect security teams:
+
+- **Policy catalog & distribution** (`AiGridPolicyCatalogService`) — platform imports immutable policy/correlation *versions* into a catalog, then controls rollout via `platform.ai_grid_policy_distribution` (GA / canary / paused / retired, canary tenant list, pinned version) — this superseded the older `ai_security_policy_distribution` toggle table (`V67`, kept in sync during migration).
+- **Answer-key & precision review** (`AiGridValidationGovernanceService`) — a labeled test-case framework (`ai_grid_answer_key_*`) plus statistical (Wilson-interval) precision/bias review (`ai_grid_precision_reviews`) that a policy version must pass before it can be published.
+- **Release certification** (`AiGridR1CertificationService`, `AiGridR2CertificationService`) — combines platform-computed evidence with externally attested operational gates into an immutable release manifest (`ai_grid_release_manifest_items`, update/delete blocked by a database trigger).
+- **Portfolio** (`AiGridPolicyPortfolioService`) — tracks OWASP LLM Top-10 coverage and a RICE-scored intake backlog of candidate policies not yet authored.
+- **Legacy reconciliation** (`AiGridPolicyMigrationService`) — reconciles/migrates tenants still on legacy policy selections onto the governed catalog and tracks retirement status.
+
+### Operations: Budget, Cadence, and Retention
+
+`AiGridBudgetService` enforces per-tenant daily scan/API-call/byte/processing-time budgets and scan-cadence throttling (new tenants start in an `OBSERVE`-only mode), raising `ai_grid_budget_alerts` on breach. `AiGridRetentionService` classifies evidence into HOT / ARCHIVE / RESTRICTED_EVIDENCE retention tiers, supports legal holds, and runs a purge sweep that leaves a durable audit trail (`ai_grid_retention_purge_audit`) even after the underlying snapshot bodies are deleted. Both are exposed to tenant admins via `AiGridOperationsGovernanceController` (`/api/ai-governance`).
+
+### Scheduled Jobs (AI Security / AI Grid)
+
+| Cadence | Job |
+|---|---|
+| Every 3s (default) | `AiSecurityJobWorkerService` — poll `ingestion_jobs` for AWS/Azure AI discovery jobs |
+| Every 60s (default) | `AiGridExposureFreshnessService` — demote validated exposures with expired evidence |
+| Daily 02:20 (default) | `AiSecurityAzureCredentialExpiryService` — sweep Azure AI credential profiles for expiry |
+
+### Known Limitations (AI Security / AI Grid)
+
+- All AI Grid/AI Security tables are accessed via `JdbcTemplate` directly — there are no JPA entities or Spring Data repositories for this module, unlike the rest of the backend.
+- Azure discovery is newer and less battle-tested than AWS; a config-driven kill switch (`AiSecurityAzureKillSwitchService`) exists specifically to disable it per tenant/connector/resource-family/policy if needed.
+- Macie and Purview integrations are strictly read-only against *existing* classification results — neither path ever triggers a new PII scan.
+- `com.prototype.vulnwatch.web.PlatformAdminRequestPaths` (a request-path classifier added alongside recent platform-admin hardening work) has no call site anywhere outside its own unit test as of this writing — likely wired up incompletely; verify before relying on it.
+
 ## Audit Trail
 
 `AuditEvent` records capture state-changing operations:
@@ -336,3 +401,6 @@ A **Campaign** groups findings/CVEs into a tracked remediation effort:
 - S.AI Risk Score and S.AI Priority are computed entirely in the browser — not stored in the database.
 - ServiceNow integration is read-heavy (finding → incident creation, then status polling) but not event-driven.
 - Multi-tenant schema-per-tenant isolation is implemented (`TenantAwareDataSource`, `TenantSchemaService`, `ProductionSafetyValidator`) and `TenantService.getDefaultTenant()` is no longer used by controllers or services. Row-level security policies are created on every provisioned tenant schema, but full RLS *enforcement* across existing production tenants remains gated behind `V29__tenant_rls_rollout_gate.sql` pending verification that the production/preprod database runtime role is non-superuser and lacks `BYPASSRLS`.
+- AI Security / AI Grid (see above) — see its own "Known Limitations" subsection for module-specific caveats (JdbcTemplate-only data access, Azure kill switch, read-only Macie/Purview integration).
+- `EntitlementShadowSweepService` (every 30 min by default) computes corrected-vs-legacy entitlement decisions for every active tenant/key so shadow-mode coverage doesn't depend on the feature being exercised live — a sign that at least one entitlement migration is still running in shadow/compare mode rather than fully cut over.
+- `FindingDeltaQueueService` has a second scheduled method (`recoverStaleProcessingEntriesOnSchedule`, 1 min by default) beyond the documented 2-second drain — it recovers queue entries stuck in `PROCESSING` after a worker dies mid-batch.

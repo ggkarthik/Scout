@@ -2,7 +2,7 @@
 
 This document describes the React/TypeScript frontend for VulnWatch (package name `vulnwatch-frontend`). It is derived entirely from reading the source code in `frontend/src/`.
 
-Last updated: 2026-07-13
+Last updated: 2026-08-18
 
 ---
 
@@ -55,6 +55,7 @@ frontend/src/
     eol/                    EolSummary, PackageEolStatus, catalog queries
     admin/                  Tenant, PlatformUser, ServiceAccount, AuditEvent, admin queries
     campaigns/              Remediation campaign types + CampaignDetailPage; API calls inlined (no queries.ts)
+    ai-security/            AI Security / AI Grid types, dependency graph, category helpers (entitlement-gated)
     widgets/                DonutChart, HBarChart, WidgetCard SVG components
   lib/
     riskScoring.ts          Pure TS: computeCveRiskScore, computeFindingPriorityScore
@@ -105,12 +106,22 @@ All routes are registered in `src/App.tsx` using React Router v7 nested routes. 
 | `/vuln-repo/host-assets/:assetId` | `VulnRepoHostAssetRoute` | Host asset detail (vuln-repo context) |
 | `/vuln-repo/org-cves/:cveId/assets` | `VulnRepoCveAssetsPage` | Per-CVE affected asset breakdown |
 | `/vuln-repo/org-cves/:cveId/software` | `VulnRepoCveSoftwarePage` | Per-CVE affected software breakdown |
-| `/inventory/:inventoryView?` | `InventoryRoute` (dispatches sub-views) | Default `overview` |
+| `/inventory/:inventoryView?` | `InventoryRoute` (dispatches sub-views) | Default `overview`; `ai` sub-view shows `AiInventoryPage` |
 | `/inventory/hosts/:assetId` | `InventoryHostAssetRoute` | Host asset detail |
 | `/inventory/software-identities/:softwareIdentityId` | `SoftwareIdentityDetailRoute` | Software identity detail |
+| `/inventory/ai/assets` | `AiInventoryAssetsPage` | Filterable list of all discovered AI artifacts (AWS/Azure) — entitlement-gated (`ai.security`) |
+| `/inventory/ai/knowledge-data` | `AiKnowledgeMcpInventoryPage kind="knowledge-data"` | AI knowledge/data-source artifact inventory with sensitivity/PII posture |
+| `/inventory/ai/mcp` | `AiKnowledgeMcpInventoryPage kind="mcp"` | MCP (Model Context Protocol) server artifact inventory |
+| `/inventory/ai/:assetId` | `AiAssetDetailPage` (via `InventoryAiAssetRoute`) | Single AI artifact detail — overview/policies/findings/relationships + dependency graph |
+| `/findings/ai` | `AiFindingsPage` | Deterministic AI policy-failure findings (separate stream from CVE findings) |
+| `/findings/ai/:findingId` | `AiFindingDetailPage` (via `AiFindingDetailRoute`) | AI finding detail — evidence, review workflow, ServiceNow incident creation |
+| `/findings/ai/exposures` | `AiExposuresPage` | Cross-system "AI Grid" validated exposure paths |
+| `/findings/ai/exposures/:exposureId` | `AiExposuresPage` (detail branch) | Single exposure detail — root cause, evidence history, accept/false-positive disposition |
+| `/policies` | `AiPoliciesPage` | Tenant view of AI Grid policies — enable/disable, severity/search filter |
+| `/policies/:policyId` | `AiPolicyDetailPage` (via `AiPolicyDetailRoute`) | AI policy detail — overview/configure(scope, exceptions, parameters)/findings/artifacts tabs |
 | `/connect/:connectView?` | `ConnectRoute` (`ConnectPage`) | Default `sources`; also `connectors`, `run-history`, `processing-jobs` |
 | `/admin/:adminView?` | `AdminRoute` (`UserManagementPage`) | Default `users`; Invites, Support Access, Roles, Service Accounts, Audit |
-| `/platform/:platformView?` | `PlatformRoute` (`PlatformConsolePage`) | Default `tenants`; platform owner console |
+| `/platform/:platformView?` | `PlatformRoute` (`PlatformConsolePage`) | Default `tenants`; platform owner console. `ai-policies` sub-view renders `PlatformAiPolicyStudio` (governed AI Grid policy catalog rollout/impact-preview/reconciliation/portfolio) |
 | `/configurations/:configView?` | `ConfigurationsPage` | Default `sla`; SLA, Triage, Automation, Ownership, Vuln Sources, Findings Score, Suppression, Auto-Finding |
 | `/demo` | `DemoLandingPage` | Public demo landing |
 | `/demo/request` | `DemoRequestPage` | Demo request form |
@@ -124,6 +135,8 @@ All routes are registered in `src/App.tsx` using React Router v7 nested routes. 
 **`/end-of-life` no longer renders a dedicated `EolPage`.** `EndOfLifeRoute` redirects to `/platform/eol` for platform-scope owners, or `/exposure` otherwise.
 
 **Legacy redirects:** `LegacyQueryRedirect` in `App.tsx` intercepts old `?tab=inventory&inventoryView=hosts` style URLs and converts them via `buildLegacyCompatiblePath()` in `src/app/routes.ts`. Separately, `/vulnerability-intelligence`, `/vulnerability-intelligence/vulnerabilities`, and `/vulnerability-intelligence/org-cves/:cveId?` redirect to their `/vuln-repo/*` equivalents.
+
+**AI Security routing:** all `/findings/ai*`, `/policies*`, and `/inventory/ai*` routes are wrapped in `AiSecurityRoute`, which redirects to `/exposure` unless `canUseEntitlement(actor, 'ai.security')` is true and the actor is not in platform scope. Unlike `/operations/:operationsView?` or `/inventory/:inventoryView?`, there is no shared `:aiView?` optional-param pattern — each AI Security sub-page is its own literal route. Nav entry points: the sidebar "Findings" button expands into "Vulnerability Findings" / "AI Findings" sub-items when the entitlement is enabled; a top-level "Policies" nav tab appears next to Vuln Repo/Campaigns; the Inventory pill list gains an "AI Inventory" entry; the Connect page gains two connector cards (`ai-security-aws`, `ai-security-azure`); and the Platform Console gains an `ai-policies` sidebar view.
 
 ---
 
@@ -179,6 +192,10 @@ All role checks must go through these helpers — never read `actor.roles` direc
 | `canManageServiceAccounts(actor)` | ROLE_TENANT_ADMIN or higher |
 | `canExportAudit(actor)` | ROLE_SECURITY_ANALYST or higher |
 | `isPlatformScopeOnly(actor)` | True when `platformScope=true` and not `actingAsPlatformOwner` |
+
+### Entitlements (distinct from roles)
+
+`src/features/auth/entitlements.ts` introduces a second, orthogonal access concept alongside roles: **entitlements** are per-tenant, plan-based feature flags (e.g. `ai.security`) rather than per-user permissions. `canUseEntitlement(actor, key)` checks the actor's entitlement snapshot from the backend and **fails closed** — an entitlement not explicitly present/enabled is treated as disabled. `AI_ENTITLEMENT_KEYS` currently gates the entire AI Security / AI Grid feature surface (routes, nav items, `AiInventoryOverviewStrip`). Role helpers (`hasRole`, etc.) still govern *what an authenticated user with access can do*; entitlements govern *whether the tenant's plan includes the feature at all*.
 
 ### Multi-tenant switching
 
@@ -334,6 +351,27 @@ Files: `types.ts`, `CampaignDetailPage.tsx` — undocumented until now; a fully 
 **No separate `queries.ts`** — API calls are inlined directly via `api.getCampaign()`, etc., calling `/campaigns`, `/campaigns/{campaignId}`, `/campaigns/{campaignId}/status`, `/campaigns/{campaignId}/exceptions/{exceptionId}/status`, `/campaigns/{campaignId}/notes`, `/campaigns/{campaignId}/notify-groups`, `/campaigns/{campaignId}/watchlist`, and bulk-add endpoints for assets/CVEs/software.
 
 `CampaignDetailPage.tsx` is large (2000+ lines) — lifecycle stage UI, KPI tiles, severity/team accountability breakdowns, AI-powered insights (OpenAI-gated), advisory fetch, and add-assets/add-CVE modals. Routed at `/vuln-repo/campaigns` and `/vuln-repo/campaigns/:id`.
+
+### ai-security (`src/features/ai-security/`)
+
+Files: `types.ts`, `categories.ts`, `AiDependencyGraph.tsx`, `graph-layout.ts`, `AiInventoryOverviewStrip.tsx`, `ProviderLogo.tsx`, `test-support.ts`
+
+Backs the AI Security / AI Grid posture-management surface (12 pages under `src/pages/Ai*.tsx` + `PlatformAiPolicyStudio.tsx`), entitlement-gated on `ai.security` (see [Entitlements](#entitlements-distinct-from-roles) above). Mirrors the backend `com.prototype.vulnwatch.aisecurity` module's two generations (legacy "AI Security" catalog + governed "AI Grid" pipeline) but the frontend does not distinguish them structurally — everything is under this one feature directory.
+
+**Types** (`types.ts`), grouped by concern:
+- Inventory/summary: `AiSecurityArtifact`, `AiArtifactSummary`, `AiSecuritySummary`, `AiSeverityGrid`/`Row`, `AiSecurityPage<T>`
+- Graph/relationships: `AiSecurityRelationship`, `AiSecurityGraph`
+- Findings: `AiSecurityFinding`, `AiTopRiskArtifact`
+- Policies (tenant-scoped): `AiSecurityPolicy`, `PolicyScope`/`PolicyScopeMode`/`PolicyScopeCondition`, `PolicyException`, `PolicyParameterValue`, `PolicyConfiguration`
+- Runs/connectors: `AiSecurityRun`, `AiSecurityScope`, `AiSecurityConnectorConfig` (AWS), `AiSecurityAzureConnector`/`AzureFoundryConfig`/`AzureCredentialProfile` (Azure)
+- AI Grid governance (platform-scoped): `AiGridSystem`, `AiGridCoverage`, `AiGridPolicy`/`PolicySelection`/`PolicyDistribution`, `AiGridPolicyImpactPreview`, `AiGridPolicyReleaseReadiness`, `AiGridPolicyTenantReconciliation`, `AiGridOwaspCoverage`, `AiGridPolicyCandidate`, `AiGridRunMetrics`
+- Exposure intelligence: `AiGridExposureSummary`/`Page`/`Detail`, `AiExposurePriority`, `AiExposureIntelligenceOverview`, `AiActionQueueItem`, `AiAssetPosture`
+
+**`AiDependencyGraph.tsx`** — React Flow-based artifact relationship graph with click-to-inspect node popups (posture, PII, criticality); layout math is pure in `graph-layout.ts` (dagre-based, no JSX, independently unit-tested). `test-support.ts` mocks jsdom's `getBoundingClientRect` since React Flow needs real layout dimensions in tests.
+
+**`categories.ts`** — cross-provider native-kind grouping (Agents/Models/Guardrails/Identity) used by the inventory pages to present AWS Bedrock and Azure AI resources under one taxonomy.
+
+**API surface:** unlike most other features, calls are **not** namespaced under one consistent base path — a mix of `/ai-security/...` (artifacts, findings, policies, runs), `/ai-coverage/...`, `/ai-overview`, `/connectors/ai-security/...` (AWS/Azure connector config), and `/platform/ai-grid/...` (governance). Worth knowing before extending this feature: pick the base path that matches the existing sibling endpoint rather than assuming one canonical prefix.
 
 ### widgets (`src/features/widgets/`)
 
@@ -559,6 +597,17 @@ clearStoredAuthToken(): void               // removes from localStorage
 - `getVulnerabilitySourceFilterConfig(sourceSystem)`, `updateVulnerabilitySourceFilterConfig(sourceSystem, payload)`
 - `getVexAssertionRepairSummary()`
 
+**AI Security / AI Grid** (base paths mixed — see the `ai-security` feature section above; method names below verified against `src/api/client.ts`):
+- Inventory: `getAiSecuritySummary()`, `listAiSecurityArtifacts(...)`, `listAiArtifactSummaries(...)`, `listAiKnowledgeDataInventory(...)`, `listAiMcpInventory(...)`, `getAiSecurityArtifact(artifactId)`, `getAiSecurityGraph(rootArtifactId?, depth?)`, `getAiSeverityGrid()`, `getAiTopRiskArtifacts(limit?)`
+- Findings: `listAiSecurityFindings(...)`, `getAiSecurityFinding(findingId)`, `reviewAiSecurityFinding(findingId, disposition, reason?)`
+- Policies (tenant): `listAiSecurityPolicies()`, `updateAiSecurityPolicy(policyId, enabled)`, `getAiSecurityPolicyConfiguration(policyId)`, `updateAiSecurityPolicyScope(policyId, mode, conditionLogic, conditions)`, `addAiSecurityPolicyException(...)`, `removeAiSecurityPolicyException(policyId, artifactId)`, `updateAiSecurityPolicyParameters(policyId, parameters)`, `explainAiSecurityPolicy(policyId)`
+- Runs: `listAiSecurityRuns(provider?)`, `listAiSecurityRunScopes(runId)`
+- AWS connector: `getAiSecurityConnector()`, `saveAiSecurityConnector(payload)`, `testAiSecurityConnector()`, `runAiSecurityConnector()`
+- Azure connector: `listAiSecurityAzureConnectors()`, `getAiSecurityAzureRequirements()`, `saveAiSecurityAzureConnector(payload)`, `runAiSecurityAzureConnector(connectorId)`, `runAiSecurityAzureTarget(targetId)`; Foundry single-form flow `testAiSecurityAzureFoundryConfig()`/`runAiSecurityAzureFoundryConfig()`; credential profiles `listAiSecurityAzureCredentials()`, `createAiSecurityAzureCredential(payload)`, `testAiSecurityAzureCredential(profileId, subscriptionId)`, `rotateAiSecurityAzureCredential(profileId, payload)`, `revokeAiSecurityAzureCredential(profileId)`
+- Coverage: `getAiGridCoverage()`, `getAiGridCoverageDimensions()`
+- Exposure intelligence: `getAiExposureIntelligenceOverview()`, `listAiExposurePriorities()`, `listAiActionQueue()`, `getAiAssetPosture(artifactId)`, `listAiGridExposures(cursor?, limit?)`, `getAiGridExposure(exposureId)`, `dispositionAiGridExposure(exposureId, disposition, reason)`, `getAiGridRunMetrics(runId)`, `confirmAiGridArtifactOwner(artifactId, ownerName, reason?)`
+- Platform governance: `listPlatformAiGridPolicies()`, distribution/impact-preview/release-readiness/publish mutations, `getPlatformAiGridPolicyReconciliation()`, `migratePlatformAiGridLegacySelections()`, `getPlatformAiGridPolicyRetirementStatus()`, `getPlatformAiGridOwaspCoverage()`, `getPlatformAiGridPolicyCandidates()`
+
 **Auth / Admin:**
 - `getAuthContext()` -> `ActorContext`
 - `login(credentials)` -> `AuthTokenResponse`
@@ -698,6 +747,7 @@ Types are **feature-colocated**, not centralized. `src/types/index.ts` re-export
 | `SoftwareIdentitySummary`, `SoftwareIdentityDetail`, `SoftwareIdentityFunnel`, `VulnRepoSoftwareAssetsDetail` | `src/features/software-identities/types.ts` |
 | `EolSummary`, `ComponentEolStatus`, `EolProductCatalog`, `PackageEolStatus` | `src/features/eol/types.ts` |
 | `Tenant`, `TenantMember`, `PlatformUser`, `ServiceAccount`, `AuditEvent`, `TenantSupportGrant` | `src/features/admin/types.ts` |
+| `AiSecurityArtifact`, `AiSecurityFinding`, `AiSecurityPolicy`, `AiGridSystem`, `AiGridCoverage`, `AiGridExposureDetail`, and all other AI Security/Grid types | `src/features/ai-security/types.ts` |
 | `OwnershipSummary` | `src/types/ownership.ts` |
 | `PolicyWeights` | `src/lib/riskScoring.ts` |
 | `DataTableColumn`, `DataTableRow` | `src/components/DataTable.tsx` |
