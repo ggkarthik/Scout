@@ -286,7 +286,11 @@ public class AiSecurityObservationService {
                         native_kind = excluded.native_kind,
                         name = excluded.name,
                         account_id = excluded.account_id,
-                        region = excluded.region,
+                        region = case
+                            when excluded.region = 'GLOBAL' and ai_security_artifacts.region <> 'GLOBAL'
+                                then ai_security_artifacts.region
+                            else excluded.region
+                        end,
                         active = true,
                         attributes_json = ai_security_artifacts.attributes_json || excluded.attributes_json,
                         last_observed_at = excluded.last_observed_at,

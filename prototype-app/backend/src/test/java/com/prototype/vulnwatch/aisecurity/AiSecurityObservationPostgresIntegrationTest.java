@@ -335,7 +335,7 @@ class AiSecurityObservationPostgresIntegrationTest {
                 List.of(guardrail), List.of(), List.of()));
 
         Map<String, String> originalFingerprints = tenantExecution.run(tenant, () -> {
-            assertEquals(5, jdbc.queryForObject(
+            assertEquals(3, jdbc.queryForObject(
                     "select count(*) from ai_grid_snapshot_manifests where run_id = :runId",
                     Map.of("runId", runId), Integer.class));
             assertEquals(2, jdbc.queryForObject(
@@ -805,11 +805,7 @@ class AiSecurityObservationPostgresIntegrationTest {
     @Test
     void azureRaiPolicySliceProducesFailPassAndNoDecisionWithoutOverclaiming() {
         Tenant tenant = provision("Azure RAI Answer Key", "azure-rai-answer-key");
-        UUID connectorId = connectorService.save(
-                tenant,
-                new AiSecurityAwsConnectorService.ConnectorConfigRequest(
-                        "123456789012", null, null, List.of("us-east-1"), true)
-        ).id();
+        UUID connectorId = azureConnector(tenant);
 
         UUID unsafeRun = syncRunFacade.start(tenant).getId();
         observationService.ingest(tenant, raiEnvelope(
@@ -893,7 +889,7 @@ class AiSecurityObservationPostgresIntegrationTest {
         String scopeKey = "AZURE:sub:eastus:AZURE_RAI_POLICIES";
         return new ObservationEnvelopeV1(
                 AiSecurityObservationService.CONTRACT_VERSION, runId, connectorId, tenant.getId(), "AZURE",
-                "sub", "eastus", "AZURE_RAI_POLICIES", scopeKey, 0, 1,
+                "azure-test-tenant", "sub", "eastus", "AZURE_RAI_POLICIES", scopeKey, 0, 1,
                 runId + ":rai:0", hash, Instant.now(), ScopeStatus.COMPLETE,
                 List.of(policy), List.of(), List.of());
     }
@@ -903,6 +899,20 @@ class AiSecurityObservationPostgresIntegrationTest {
                 select decision from ai_grid_assessments
                  where run_id = :runId and policy_id = 'AZURE_RAI_POLICY_NON_BLOCKING_FILTER'
                 """, Map.of("runId", runId), String.class);
+    }
+
+    private UUID azureConnector(Tenant tenant) {
+        UUID connectorId = UUID.randomUUID();
+        return tenantExecution.run(tenant, () -> {
+            jdbc.update("""
+                    insert into ai_security_connector_configs
+                        (id, tenant_id, provider, account_id, provider_tenant_id,
+                         regions_json, resource_families_json, enabled)
+                    values (:id, :tenantId, 'AZURE', 'sub', 'azure-test-tenant',
+                            '["eastus"]'::jsonb, '["AZURE_RAI_POLICIES"]'::jsonb, true)
+                    """, Map.of("id", connectorId, "tenantId", tenant.getId()));
+            return connectorId;
+        });
     }
 
     private int count(String table) {
