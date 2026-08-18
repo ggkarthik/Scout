@@ -46,6 +46,7 @@ public class AiSecurityApiService {
     private final AiGridFindingService canonicalFindings;
     private final AiSecuritySyncRunFacade syncRunFacade;
     private final AuditEventService auditEventService;
+    private final AiSecurityMetadataSanitizer metadataSanitizer;
     private final boolean legacyPolicyFallbackEnabled;
 
     public AiSecurityApiService(
@@ -59,6 +60,7 @@ public class AiSecurityApiService {
             AiGridFindingService canonicalFindings,
             AiSecuritySyncRunFacade syncRunFacade,
             AuditEventService auditEventService,
+            AiSecurityMetadataSanitizer metadataSanitizer,
             @Value("${app.features.ai-grid-legacy-policy-fallback-enabled:false}") boolean legacyPolicyFallbackEnabled
     ) {
         this.jdbc = jdbc;
@@ -71,6 +73,7 @@ public class AiSecurityApiService {
         this.canonicalFindings = canonicalFindings;
         this.syncRunFacade = syncRunFacade;
         this.auditEventService = auditEventService;
+        this.metadataSanitizer = metadataSanitizer;
         this.legacyPolicyFallbackEnabled = legacyPolicyFallbackEnabled;
     }
 
@@ -242,6 +245,59 @@ public class AiSecurityApiService {
 
     public PageResponse<ArtifactResponse> artifacts(Tenant tenant, String artifactType, int page, int size) {
         return artifacts(tenant, artifactType, null, null, null, null, page, size);
+    }
+
+    public PageResponse<ArtifactResponse> knowledgeData(
+            Tenant tenant, String provider, String kind, String sourceType, String sensitivity,
+            String publicContentAccess, Boolean active, int page, int size) {
+        return inventory(tenant, List.of("KNOWLEDGE_BASE", "DATA_SOURCE", "DATA_STORE", "SEARCH_INDEX"), provider,
+                kind, sourceType, sensitivity, publicContentAccess, null, null, null, active, page, size);
+    }
+
+    public PageResponse<ArtifactResponse> mcp(
+            Tenant tenant, String provider, String role, String authenticationType, String endpointExposure,
+            String synchronizationStatus, Boolean active, int page, int size) {
+        return inventory(tenant, List.of("MCP_GATEWAY", "MCP_TARGET", "MCP_SERVER"), provider,
+                role, null, null, null, authenticationType, endpointExposure, synchronizationStatus, active, page, size);
+    }
+
+    private PageResponse<ArtifactResponse> inventory(
+            Tenant tenant, List<String> types, String provider, String kind, String sourceType, String sensitivity,
+            String publicContentAccess, String authenticationType, String endpointExposure, String synchronizationStatus,
+            Boolean active, int page, int size) {
+        int safePage = Math.max(0, page);
+        int safeSize = Math.max(1, Math.min(100, size));
+        return tenantExecution.run(tenant, () -> {
+            MapSqlParameterSource params = new MapSqlParameterSource()
+                    .addValue("types", types.toArray(String[]::new))
+                    .addValue("provider", normalizedProvider(provider), Types.VARCHAR)
+                    .addValue("kind", blankToNull(kind), Types.VARCHAR)
+                    .addValue("sourceType", blankToNull(sourceType), Types.VARCHAR)
+                    .addValue("sensitivity", blankToNull(sensitivity), Types.VARCHAR)
+                    .addValue("publicContentAccess", blankToNull(publicContentAccess), Types.VARCHAR)
+                    .addValue("authenticationType", blankToNull(authenticationType), Types.VARCHAR)
+                    .addValue("endpointExposure", blankToNull(endpointExposure), Types.VARCHAR)
+                    .addValue("synchronizationStatus", blankToNull(synchronizationStatus), Types.VARCHAR)
+                    .addValue("active", active, Types.BOOLEAN)
+                    .addValue("limit", safeSize, Types.INTEGER).addValue("offset", safePage * safeSize, Types.INTEGER);
+            String where = """
+                    where artifact_type = any(:types)
+                      and (:provider is null or provider = :provider)
+                      and (:kind is null or artifact_type = :kind)
+                      and (:sourceType is null or attributes_json ->> 'sourceType' = :sourceType)
+                      and (:sensitivity is null or pii_scan_status = :sensitivity)
+                      and (:publicContentAccess is null or attributes_json ->> 'publicContentAccess' = :publicContentAccess)
+                      and (:authenticationType is null or coalesce(attributes_json ->> 'configuredAuthType',
+                              attributes_json ->> 'inboundAuthType', attributes_json ->> 'outboundAuthType') = :authenticationType)
+                      and (:endpointExposure is null or attributes_json ->> 'endpointExposure' = :endpointExposure)
+                      and (:synchronizationStatus is null or attributes_json ->> 'status' = :synchronizationStatus)
+                      and (:active is null or active = :active)
+                    """;
+            String fields = "id, provider, provider_resource_id, artifact_type, native_kind, name, account_id, region, active, attributes_json::text, owner_name, owner_state, owner_source, owner_confidence, owner_confidence_method, owner_confidence_method_version, business_criticality, environment, first_observed_at, last_observed_at, pii_scan_status, pii_source, pii_info_types::text, pii_finding_count, pii_last_scanned_at";
+            List<ArtifactResponse> items = jdbc.query("select " + fields + " from ai_security_artifacts " + where
+                    + " order by active desc, last_observed_at desc, id limit :limit offset :offset", params, this::artifact);
+            return new PageResponse<>(items, safePage, safeSize, count("select count(*) from ai_security_artifacts " + where, params));
+        });
     }
 
     public PageResponse<ArtifactResponse> artifacts(
@@ -1193,17 +1249,19 @@ public class AiSecurityApiService {
     }
 
     private ArtifactResponse artifact(ResultSet rs, int rowNum) throws SQLException {
+        String provider = rs.getString("provider");
+        String nativeKind = rs.getString("native_kind");
         return new ArtifactResponse(
                 rs.getObject("id", UUID.class),
-                rs.getString("provider"),
+                provider,
                 rs.getString("provider_resource_id"),
                 rs.getString("artifact_type"),
-                rs.getString("native_kind"),
+                nativeKind,
                 rs.getString("name"),
                 rs.getString("account_id"),
                 rs.getString("region"),
                 rs.getBoolean("active"),
-                readMap(rs.getString("attributes_json")),
+                metadataSanitizer.sanitize(provider, nativeKind, readMap(rs.getString("attributes_json"))).attributes(),
                 rs.getString("owner_name"),
                 rs.getString("owner_state"),
                 rs.getString("owner_source"),

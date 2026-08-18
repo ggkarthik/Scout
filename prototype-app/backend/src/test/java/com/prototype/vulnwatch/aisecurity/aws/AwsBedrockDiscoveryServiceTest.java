@@ -43,7 +43,7 @@ class AwsBedrockDiscoveryServiceTest {
             null, null, null, new ObjectMapper(), null, null, null, null, null, false);
 
     @Test
-    void capturesTheFullGuardrailConfigurationNotJustStatusAndStrength() {
+    void capturesBoundedStructuralGuardrailConfigurationWithoutFreeFormMessages() {
         GetGuardrailResponse detail = GetGuardrailResponse.builder()
                 .name("search-rerank-guardrail-free-tier")
                 .description("Blocks sensitive topics in the free-tier search assistant")
@@ -102,11 +102,11 @@ class AwsBedrockDiscoveryServiceTest {
 
         assertEquals("READY", attributes.get("status"));
         assertEquals("HIGH", attributes.get("minimumStrength"));
-        assertEquals("Blocks sensitive topics in the free-tier search assistant", attributes.get("description"));
+        assertFalse(attributes.containsKey("description"));
         assertEquals("DRAFT", attributes.get("version"));
         assertEquals("arn:aws:kms:us-east-1:919221584905:key/example", attributes.get("kmsKeyArn"));
-        assertEquals("I can't help with that request.", attributes.get("blockedInputMessaging"));
-        assertEquals("I can't share that response.", attributes.get("blockedOutputsMessaging"));
+        assertFalse(attributes.containsKey("blockedInputMessaging"));
+        assertFalse(attributes.containsKey("blockedOutputsMessaging"));
         assertTrue(((String) attributes.get("createdAt")).startsWith("2026-08-09"));
         assertTrue(((String) attributes.get("updatedAt")).startsWith("2026-08-11"));
 

@@ -7,7 +7,7 @@ import { AI_ARTIFACT_CATEGORIES, combinedNativeKindFilterValue, stripProviderPre
 import { ProviderLogo } from '../features/ai-security/ProviderLogo';
 import { FindingSeverityChips } from '../features/findings/components/FindingSeverityChips';
 import { InventoryShell } from '../features/inventory/InventoryShell';
-import { pathForInventoryAiAsset, pathForInventoryView } from '../app/routes';
+import { pathForAiKnowledgeData, pathForAiMcpInventory, pathForInventoryAiAsset, pathForInventoryView } from '../app/routes';
 import { RUN_QUEUE_REFRESH_INTERVAL_MS } from '../lib/polling';
 
 const ALL_KIND = 'ALL';
@@ -82,9 +82,11 @@ export function AiInventoryAssetsPage() {
       description="Every discovered AI artifact across AWS and Azure, filterable by kind, provider, and severity."
       legacyClassName="ai-security-page"
       actions={(
-        <button type="button" className="btn btn-secondary" onClick={() => navigate(pathForInventoryView('ai'))}>
-          View dashboard
-        </button>
+        <div className="inventory-fpl-toolbar">
+          <button type="button" className="btn btn-secondary" onClick={() => navigate(pathForInventoryView('ai'))}>View dashboard</button>
+          <button type="button" className="btn btn-secondary" onClick={() => navigate(pathForAiKnowledgeData())}>Knowledge &amp; Data</button>
+          <button type="button" className="btn btn-secondary" onClick={() => navigate(pathForAiMcpInventory())}>MCP</button>
+        </div>
       )}
     >
       <PageFreshnessStatus updatedAt={summary?.lastCompleteSnapshotAt} />

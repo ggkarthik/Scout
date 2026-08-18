@@ -88,6 +88,35 @@ public class AiSecurityController {
         return apiService.artifactSummaries(tenant, artifactType, nativeKind, provider, subscription, severity, page, size);
     }
 
+    /** Purpose-built inventory views deliberately return the same redacted artifact contract as detail/graph. */
+    @GetMapping("/inventory/knowledge-data")
+    public PageResponse<ArtifactResponse> knowledgeData(
+            @RequestParam(required = false) String provider,
+            @RequestParam(required = false) String kind,
+            @RequestParam(required = false) String sourceType,
+            @RequestParam(required = false) String sensitivity,
+            @RequestParam(required = false) String publicContentAccess,
+            @RequestParam(required = false) Boolean active,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size
+    ) {
+        return apiService.knowledgeData(tenant(), provider, kind, sourceType, sensitivity, publicContentAccess, active, page, size);
+    }
+
+    @GetMapping("/inventory/mcp")
+    public PageResponse<ArtifactResponse> mcp(
+            @RequestParam(required = false) String provider,
+            @RequestParam(required = false) String role,
+            @RequestParam(required = false) String authenticationType,
+            @RequestParam(required = false) String endpointExposure,
+            @RequestParam(required = false) String synchronizationStatus,
+            @RequestParam(required = false) Boolean active,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size
+    ) {
+        return apiService.mcp(tenant(), provider, role, authenticationType, endpointExposure, synchronizationStatus, active, page, size);
+    }
+
     @GetMapping("/artifacts/{artifactId}")
     public ArtifactResponse artifact(@PathVariable UUID artifactId) {
         Tenant tenant = tenant();

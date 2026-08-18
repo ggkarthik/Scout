@@ -23,6 +23,7 @@ import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.service.IngestionJobService;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.net.URI;
 import java.time.Instant;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -44,7 +45,9 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
             "AZURE_SEARCH_INDEXES",
             "AZURE_SEARCH_SKILLSETS",
             "AZURE_SEARCH_INDEXERS",
-            "AZURE_SEARCH_DATA_SOURCES");
+            "AZURE_SEARCH_DATA_SOURCES",
+            "AZURE_SEARCH_KNOWLEDGE_BASES",
+            "AZURE_SEARCH_KNOWLEDGE_SOURCES");
 
     private final AiSecurityAzureConnectorService connectors;
     private final AiSecurityAzureCredentialService credentials;
@@ -200,6 +203,10 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         }
         if (searchDataPlaneEnabled) {
             families.addAll(SEARCH_DATA_FAMILIES);
+            // Stable backing-store IDs are resolved from Search definitions without requiring
+            // Purview. When Purview is disabled the resulting store remains explicitly NOT_SCANNED.
+            families.add("AZURE_STORAGE_ACCOUNTS");
+            families.add("AZURE_FABRIC_CAPACITIES");
         }
         if (purviewPiiEnabled) {
             families.add("AZURE_STORAGE_ACCOUNTS");
@@ -273,6 +280,8 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         List<RelationshipObservation> relationships = new ArrayList<>();
         Set<String> included = new LinkedHashSet<>();
         for (AzureResource resource : resources) {
+            // Storage is inventory only when a provider definition directly references it.
+            if ("AZURE_STORAGE_ACCOUNTS".equals(family) || "AZURE_FABRIC_CAPACITIES".equals(family)) continue;
             addArtifact(artifacts, included, resource, family, snapshot);
             if (resource.parentId() != null) {
                 AzureResource parent = allResources.get(resource.parentId().toLowerCase(Locale.ROOT));
@@ -312,11 +321,21 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         if ("AZURE_SEARCH_INDEXERS".equals(family)) {
             addSearchIndexerRelationships(artifacts, relationships, included, resources, snapshot);
         }
+        if ("AZURE_SEARCH_KNOWLEDGE_BASES".equals(family)) {
+            addSearchKnowledgeBaseRelationships(artifacts, relationships, included, resources, snapshot);
+        }
+        if ("AZURE_SEARCH_KNOWLEDGE_SOURCES".equals(family)) {
+            addSearchKnowledgeSourceRelationships(artifacts, relationships, included, resources, snapshot);
+        }
         if ("AZURE_FOUNDRY_AGENTS".equals(family)) {
             addFoundryAgentModelRelationships(artifacts, relationships, included, resources, snapshot);
+            addFoundryMcpRelationships(artifacts, relationships, included, resources, snapshot);
         }
         if ("AZURE_STORAGE_ACCOUNTS".equals(family)) {
             addStorageAccountPiiLinkage(artifacts, relationships, included, resources, snapshot, connector, credential);
+        }
+        if ("AZURE_FABRIC_CAPACITIES".equals(family)) {
+            addFabricDataStoreLinkage(artifacts, relationships, included, resources, snapshot);
         }
 
         if (failure == null) {
@@ -388,13 +407,22 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         for (AzureResource account : storageAccountsInRegion) {
             storageById.put(account.id().toLowerCase(Locale.ROOT), account);
         }
+        Map<String, AzurePurviewClassificationClient.PiiLookupResult> piiByAccountId = new LinkedHashMap<>();
 
         for (AzureResource dataSource : snapshot.resources().getOrDefault("AZURE_SEARCH_DATA_SOURCES", List.of())) {
             String storageAccountId = managedIdentityStorageAccountId(
                     text(dataSource.properties().path("credentials").path("connectionString")));
             linkStorageAccount(artifacts, relationships, included, storageById, storageAccountId,
                     dataSource, "AZURE_SEARCH_DATA_SOURCES", "Azure AI Search definition API",
-                    "credentials.connectionString", snapshot, connector, credential);
+                    "credentials.connectionString", snapshot, connector, credential, piiByAccountId);
+        }
+
+        for (AzureResource knowledgeSource : snapshot.resources().getOrDefault("AZURE_SEARCH_KNOWLEDGE_SOURCES", List.of())) {
+            for (String storageAccountId : stableAzureResourceIds(knowledgeSource.properties())) {
+                linkStorageAccount(artifacts, relationships, included, storageById, storageAccountId,
+                        knowledgeSource, "AZURE_SEARCH_KNOWLEDGE_SOURCES", "Azure AI Search knowledge source API",
+                        "stable resourceId reference", snapshot, connector, credential, piiByAccountId);
+            }
         }
 
         for (AzureResource connection : snapshot.resources().getOrDefault("AZURE_FOUNDRY_CONNECTIONS", List.of())) {
@@ -403,12 +431,32 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
                 continue;
             }
             String storageAccountId = text(connection.properties().path("metadata").path("ResourceId"));
-            if (storageAccountId == null) {
-                storageAccountId = text(connection.properties().path("target"));
-            }
             linkStorageAccount(artifacts, relationships, included, storageById, storageAccountId,
                     connection, "AZURE_FOUNDRY_CONNECTIONS", "Azure AI Foundry project connections API",
-                    "properties.metadata.ResourceId", snapshot, connector, credential);
+                    "properties.metadata.ResourceId", snapshot, connector, credential, piiByAccountId);
+        }
+    }
+
+    /** Fabric capacity IDs can back OneLake sources. They are retained only when directly named by a source definition. */
+    private void addFabricDataStoreLinkage(
+            List<ArtifactObservation> artifacts, List<RelationshipObservation> relationships, Set<String> included,
+            List<AzureResource> capacities, AzureAiManagementClient.DiscoverySnapshot snapshot
+    ) {
+        Map<String, AzureResource> byId = new LinkedHashMap<>();
+        for (AzureResource capacity : capacities) if (hasText(capacity.id())) byId.put(capacity.id().toLowerCase(Locale.ROOT), capacity);
+        for (AzureResource source : snapshot.resources().getOrDefault("AZURE_SEARCH_KNOWLEDGE_SOURCES", List.of())) {
+            for (String resourceId : stableAzureResourceIds(source.properties())) {
+                AzureResource capacity = byId.get(resourceId.toLowerCase(Locale.ROOT));
+                if (capacity == null) continue;
+                if (included.add(capacity.id())) {
+                    artifacts.add(new ArtifactObservation(capacity.id(), "DATA_STORE", "AZURE_FABRIC_CAPACITIES",
+                            capacity.name() == null ? capacity.id() : capacity.name(), Map.of("storeType", "ONELAKE"),
+                            "NOT_SCANNED", null, List.of(), 0, null));
+                }
+                addArtifact(artifacts, included, source, "AZURE_SEARCH_KNOWLEDGE_SOURCES", snapshot);
+                relationships.add(direct(source.id(), capacity.id(), "BACKED_BY_DATA_STORE",
+                        "Azure AI Search knowledge source API", "stable resourceId reference"));
+            }
         }
     }
 
@@ -424,17 +472,54 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
             String field,
             AzureAiManagementClient.DiscoverySnapshot snapshot,
             ConnectorSecret connector,
-            TokenCredential credential
+            TokenCredential credential,
+            Map<String, AzurePurviewClassificationClient.PiiLookupResult> piiByAccountId
     ) {
         if (storageAccountId == null) return;
         AzureResource account = storageById.get(storageAccountId.toLowerCase(Locale.ROOT));
         if (account == null) return;
-        var pii = purviewPiiEnabled
+        var pii = piiByAccountId.computeIfAbsent(account.id().toLowerCase(Locale.ROOT), ignored -> purviewPiiEnabled
                 ? purview.lookup(credential, connector.purviewAccountName(), account.name())
-                : new AzurePurviewClassificationClient.PiiLookupResult("NOT_SCANNED", null, List.of(), 0, null);
-        addArtifact(artifacts, included, account, "AZURE_STORAGE_ACCOUNTS", snapshot, pii);
+                : new AzurePurviewClassificationClient.PiiLookupResult("NOT_SCANNED", null, List.of(), 0, null));
+        addDataStoreArtifact(artifacts, included, account, pii);
         addArtifact(artifacts, included, source, sourceFamily, snapshot);
-        relationships.add(direct(source.id(), account.id(), "READS_FROM_STORAGE_ACCOUNT", sourceApi, field));
+        relationships.add(direct(source.id(), account.id(), "BACKED_BY_DATA_STORE", sourceApi, field));
+    }
+
+    private void addDataStoreArtifact(List<ArtifactObservation> artifacts, Set<String> included,
+                                      AzureResource account, AzurePurviewClassificationClient.PiiLookupResult pii) {
+        if (account == null || account.id() == null || !included.add(account.id())) return;
+        artifacts.add(new ArtifactObservation(account.id(), "DATA_STORE", "AZURE_STORAGE_ACCOUNTS",
+                account.name() == null ? account.id() : account.name(), Map.of("storeType", "AZURE_STORAGE"),
+                pii.status(), pii.source(), pii.infoTypes(), pii.findingCount(), pii.lastScannedAt()));
+    }
+
+    /** Only accepts an exact ARM resource ID, including the managed-identity `ResourceId=` form. */
+    static List<String> stableAzureResourceIds(JsonNode root) {
+        List<String> ids = new ArrayList<>();
+        collectStableAzureResourceIds(root, ids);
+        return ids.stream().distinct().toList();
+    }
+
+    private static void collectStableAzureResourceIds(JsonNode node, List<String> ids) {
+        if (node == null || node.isMissingNode() || node.isNull()) return;
+        if (node.isObject()) {
+            node.fields().forEachRemaining(entry -> {
+                String key = entry.getKey().toLowerCase(Locale.ROOT);
+                JsonNode value = entry.getValue();
+                if ((key.equals("resourceid") || key.equals("resource_id")) && value.isTextual()
+                        && isStableAzureResourceId(value.asText())) ids.add(value.asText());
+                else if (key.equals("connectionstring") && value.isTextual()) {
+                    String resourceId = managedIdentityStorageAccountId(value.asText());
+                    if (isStableAzureResourceId(resourceId)) ids.add(resourceId);
+                }
+                else collectStableAzureResourceIds(value, ids);
+            });
+        } else if (node.isArray()) node.forEach(value -> collectStableAzureResourceIds(value, ids));
+    }
+
+    private static boolean isStableAzureResourceId(String value) {
+        return value != null && value.matches("(?i)^/subscriptions/[0-9a-f-]{36}/resourcegroups/[^/]+/providers/microsoft\\.(storage|fabric)/.+$");
     }
 
     /**
@@ -443,7 +528,7 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
      * form (a key or SAS-based connection string) is left completely unparsed and unresolved —
      * that string may contain a secret and must never be logged, stored, or inspected further.
      */
-    private String managedIdentityStorageAccountId(String connectionString) {
+    private static String managedIdentityStorageAccountId(String connectionString) {
         if (connectionString == null) return null;
         for (String part : connectionString.split(";")) {
             String trimmed = part.trim();
@@ -648,6 +733,162 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         }
     }
 
+    /**
+     * Adds MCP inventory from the published Foundry v1 agent definition only. This never
+     * resolves, fetches, handshakes with, or enumerates an MCP endpoint. Header names, values,
+     * tool schemas and arguments remain in the provider response and are intentionally omitted.
+     */
+    private void addFoundryMcpRelationships(
+            List<ArtifactObservation> artifacts,
+            List<RelationshipObservation> relationships,
+            Set<String> included,
+            List<AzureResource> agents,
+            AzureAiManagementClient.DiscoverySnapshot snapshot
+    ) {
+        Map<String, AzureResource> connections = new LinkedHashMap<>();
+        for (AzureResource connection : snapshot.resources().getOrDefault("AZURE_FOUNDRY_CONNECTIONS", List.of())) {
+            if (hasText(connection.id())) connections.put(connection.id().toLowerCase(Locale.ROOT), connection);
+            if (hasText(connection.name())) connections.put(connection.name().toLowerCase(Locale.ROOT), connection);
+        }
+        for (AzureResource agent : agents) {
+            JsonNode tools = agent.properties().path("tools");
+            if (!tools.isArray()) continue;
+            for (JsonNode tool : tools) {
+                if (!"mcp".equalsIgnoreCase(text(tool.path("type")))) continue;
+                String endpoint = normalizedMcpEndpoint(firstText(tool, "server_url", "serverUrl", "url"));
+                if (endpoint == null) continue;
+                String serverId = (agent.parentId() == null ? agent.id() : agent.parentId())
+                        + "/mcp-servers/" + sha256(endpoint).substring(0, 24);
+                String configuredAuthType = configuredMcpAuthType(tool);
+                AzureResource server = new AzureResource(serverId, serverId, endpointHost(endpoint),
+                        "Microsoft.Foundry/projects/agents/mcpServers", "FoundryMcpServer", agent.location(),
+                        agent.subscriptionId(), agent.resourceGroup(), objectMapper.createObjectNode(),
+                        objectMapper.createObjectNode(), objectMapper.createObjectNode(), Map.of(), agent.id());
+                if (included.add(server.id())) {
+                    // Attributes are constructed locally rather than copied from the tool definition.
+                    // This is the only metadata persisted for a Foundry MCP server.
+                    artifacts.add(new ArtifactObservation(server.id(), "MCP_SERVER", "AZURE_FOUNDRY_MCP_SERVER",
+                            endpointHost(endpoint), Map.of("endpointHost", endpointHost(endpoint),
+                            "endpointExposure", "EXTERNAL_ENDPOINT", "configuredAuthType", configuredAuthType)));
+                }
+                relationships.add(direct(agent.id(), server.id(), "CONNECTS_TO_MCP",
+                        "Foundry Agents v1 definition API", "tools[type=mcp].server_url"));
+                String connectionRef = firstText(tool, "project_connection_id", "projectConnectionId", "connection_id", "connectionId");
+                if (connectionRef != null) {
+                    AzureResource connection = connections.get(connectionRef.toLowerCase(Locale.ROOT));
+                    if (connection != null) {
+                        addArtifact(artifacts, included, connection, "AZURE_FOUNDRY_CONNECTIONS", snapshot);
+                        relationships.add(direct(agent.id(), connection.id(), "USES_DATA_CONNECTION",
+                                "Foundry Agents v1 definition API", "tools[type=mcp].project_connection_id"));
+                    }
+                }
+            }
+        }
+    }
+
+    static String configuredMcpAuthType(JsonNode tool) {
+        if (firstText(tool, "project_connection_id", "projectConnectionId", "connection_id", "connectionId") != null) {
+            return "PROJECT_CONNECTION";
+        }
+        JsonNode headers = tool.path("headers");
+        if (headers.isObject() && headers.size() > 0) return "CUSTOM_HEADER";
+        String auth = firstText(tool, "authentication_type", "authenticationType", "auth_type", "authType");
+        if (auth == null) return "UNKNOWN";
+        String normalized = auth.toUpperCase(Locale.ROOT).replace('-', '_');
+        return switch (normalized) {
+            case "OAUTH", "OAUTH2" -> "OAUTH";
+            case "MANAGED_IDENTITY", "MANAGEDIDENTITY" -> "MANAGED_IDENTITY";
+            case "NONE", "NO_AUTH" -> "NONE";
+            default -> "UNKNOWN";
+        };
+    }
+
+    private static String firstText(JsonNode node, String... fields) {
+        for (String field : fields) {
+            String value = text(node.path(field));
+            if (value != null) return value;
+        }
+        return null;
+    }
+
+    static String normalizedMcpEndpoint(String value) {
+        if (value == null || value.isBlank() || value.length() > 2_048) return null;
+        try {
+            URI uri = URI.create(value.trim());
+            if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null
+                    || uri.getHost().isBlank() || uri.getUserInfo() != null) return null;
+            return "https://" + uri.getHost().toLowerCase(Locale.ROOT)
+                    + (uri.getPort() < 0 ? "" : ":" + uri.getPort());
+        } catch (IllegalArgumentException exception) {
+            return null;
+        }
+    }
+
+    private static String endpointHost(String endpoint) {
+        return URI.create(endpoint).getHost();
+    }
+
+    /** Links only explicit names/IDs in stable Search knowledge definitions; no proximity inference. */
+    private void addSearchKnowledgeBaseRelationships(
+            List<ArtifactObservation> artifacts, List<RelationshipObservation> relationships, Set<String> included,
+            List<AzureResource> knowledgeBases, AzureAiManagementClient.DiscoverySnapshot snapshot
+    ) {
+        List<AzureResource> sources = snapshot.resources().getOrDefault("AZURE_SEARCH_KNOWLEDGE_SOURCES", List.of());
+        for (AzureResource base : knowledgeBases) {
+            for (String reference : references(base.properties(), "knowledgeSources", "knowledgeSourceNames")) {
+                findByNameOrId(sources, reference).ifPresent(source -> {
+                    addArtifact(artifacts, included, source, "AZURE_SEARCH_KNOWLEDGE_SOURCES", snapshot);
+                    relationships.add(direct(base.id(), source.id(), "USES_DATA_SOURCE",
+                            "Azure AI Search knowledge base API", "knowledgeSources"));
+                });
+            }
+            // Managed Search MCP identity is derived from the trusted service resource ID and KB name;
+            // no provider-returned endpoint is stored or requested.
+            String serverId = base.parentId() + "/managed-mcp/" + sha256(base.name() == null ? base.id() : base.name()).substring(0, 24);
+            if (included.add(serverId)) {
+                artifacts.add(new ArtifactObservation(serverId, "MCP_SERVER", "AZURE_SEARCH_MCP_SERVER",
+                        base.name() == null ? "Search managed MCP" : base.name() + " managed MCP",
+                        Map.of("endpointExposure", "UNKNOWN", "configuredAuthType", "UNKNOWN", "managed", true)));
+            }
+            relationships.add(direct(base.id(), serverId, "EXPOSES_MCP",
+                    "Azure AI Search knowledge base API", "managedMcpIdentity"));
+        }
+    }
+
+    private void addSearchKnowledgeSourceRelationships(
+            List<ArtifactObservation> artifacts, List<RelationshipObservation> relationships, Set<String> included,
+            List<AzureResource> sources, AzureAiManagementClient.DiscoverySnapshot snapshot
+    ) {
+        List<AzureResource> indexes = snapshot.resources().getOrDefault("AZURE_SEARCH_INDEXES", List.of());
+        for (AzureResource source : sources) {
+            for (String reference : references(source.properties(), "searchIndexName", "indexName", "targetIndexName")) {
+                findByNameOrId(indexes, reference).ifPresent(index -> {
+                    addArtifact(artifacts, included, index, "AZURE_SEARCH_INDEXES", snapshot);
+                    relationships.add(direct(source.id(), index.id(), "USES_SEARCH_INDEX",
+                            "Azure AI Search knowledge source API", "searchIndexName"));
+                });
+            }
+        }
+    }
+
+    private List<String> references(JsonNode properties, String... fields) {
+        List<String> values = new ArrayList<>();
+        for (String field : fields) {
+            JsonNode node = properties.path(field);
+            if (node.isTextual() && text(node) != null) values.add(text(node));
+            if (node.isArray()) for (JsonNode entry : node) {
+                String value = entry.isTextual() ? text(entry) : firstText(entry, "name", "id");
+                if (value != null) values.add(value);
+            }
+        }
+        return values;
+    }
+
+    private java.util.Optional<AzureResource> findByNameOrId(List<AzureResource> resources, String reference) {
+        return resources.stream().filter(resource -> reference.equalsIgnoreCase(resource.name())
+                || reference.equalsIgnoreCase(resource.id())).findFirst();
+    }
+
     /** Uses only indexer definition identifiers; no Search query or document endpoint is called. */
     private void addSearchIndexerRelationships(
             List<ArtifactObservation> artifacts,
@@ -817,6 +1058,12 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         if ("AZURE_FOUNDRY_DEPLOYMENTS".equals(family) || "AZURE_ML_MODELS".equals(family)) return "AI_MODEL";
         if ("AZURE_FOUNDRY_AGENTS".equals(family) || "AZURE_BOT_SERVICES".equals(family)) return "AI_AGENT";
         if ("AZURE_RAI_POLICIES".equals(family)) return "AI_GUARDRAIL";
+        if ("AZURE_SEARCH_KNOWLEDGE_BASES".equals(family)) return "KNOWLEDGE_BASE";
+        if ("AZURE_SEARCH_KNOWLEDGE_SOURCES".equals(family)
+                || "AZURE_SEARCH_DATA_SOURCES".equals(family)) return "DATA_SOURCE";
+        if ("AZURE_SEARCH_INDEXES".equals(family)) return "SEARCH_INDEX";
+        if ("AZURE_STORAGE_ACCOUNTS".equals(family)) return "DATA_STORE";
+        if ("AZURE_FABRIC_CAPACITIES".equals(family)) return "DATA_STORE";
         return "OTHER_AI_ARTIFACT";
     }
 
@@ -936,7 +1183,7 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
                 : objectMapper.convertValue(node, Map.class);
     }
 
-    private String text(JsonNode node) {
+    private static String text(JsonNode node) {
         return node == null || node.isMissingNode() || node.isNull() || node.asText().isBlank()
                 ? null : node.asText();
     }

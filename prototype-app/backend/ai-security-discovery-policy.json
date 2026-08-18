@@ -15,6 +15,17 @@
       "Resource": "*"
     },
     {
+      "Sid": "AiSecurityAgentCoreGatewayReadOnly",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock-agentcore:ListGateways",
+        "bedrock-agentcore:GetGateway",
+        "bedrock-agentcore:ListGatewayTargets",
+        "bedrock-agentcore:GetGatewayTarget"
+      ],
+      "Resource": "*"
+    },
+    {
       "Sid": "AiSecurityS3ExposureCheck",
       "Effect": "Allow",
       "Action": [

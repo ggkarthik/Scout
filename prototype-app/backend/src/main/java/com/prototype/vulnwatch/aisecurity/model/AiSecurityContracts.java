@@ -121,8 +121,15 @@ public final class AiSecurityContracts {
                 Map<String, Object> attributes
         ) {
             this(providerResourceId, artifactType, nativeKind, name, attributes,
-                    "NOT_APPLICABLE", null, List.of(), 0, null);
+                    defaultPiiScanStatus(artifactType), null, List.of(), 0, null);
         }
+    }
+
+    private static String defaultPiiScanStatus(String artifactType) {
+        return switch (artifactType == null ? "" : artifactType) {
+            case "KNOWLEDGE_BASE", "DATA_SOURCE", "DATA_STORE", "SEARCH_INDEX" -> "UNKNOWN";
+            default -> "NOT_APPLICABLE";
+        };
     }
 
     public record RelationshipObservation(

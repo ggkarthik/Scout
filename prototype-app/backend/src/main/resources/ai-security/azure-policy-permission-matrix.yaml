@@ -83,6 +83,14 @@ family_permissions:
     api_version: "2024-07-01"
     role: Certified definition-only custom role required
     actions: [Microsoft.Search/searchServices/dataSources/read]
+  AZURE_SEARCH_KNOWLEDGE_BASES:
+    api_version: "2026-04-01"
+    role: Certified definition-only custom role required
+    actions: [Microsoft.Search/searchServices/knowledgeBases/read]
+  AZURE_SEARCH_KNOWLEDGE_SOURCES:
+    api_version: "2026-04-01"
+    role: Certified definition-only custom role required
+    actions: [Microsoft.Search/searchServices/knowledgeSources/read]
   AZURE_BOT_SERVICES:
     api_version: "2022-09-15"
     role: Reader
@@ -107,6 +115,10 @@ family_permissions:
     api_version: "2023-01-01"
     role: Reader
     actions: [Microsoft.Storage/storageAccounts/read]
+  AZURE_FABRIC_CAPACITIES:
+    api_version: "2023-11-01"
+    role: Reader
+    actions: [Microsoft.Fabric/capacities/read]
   AZURE_FOUNDRY_CONNECTIONS:
     api_version: "2025-06-01"
     role: Reader

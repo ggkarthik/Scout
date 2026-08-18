@@ -131,6 +131,21 @@ describe('AiAssetDetailPage', () => {
     expect(screen.getByText('None')).toBeInTheDocument();
   });
 
+  it('shows an explicit insufficient-evidence state for unknown data sensitivity', async () => {
+    vi.spyOn(api, 'getAiSecurityArtifact').mockResolvedValue(buildArtifact({
+      artifactType: 'DATA_STORE',
+      nativeKind: 'AZURE_STORAGE_ACCOUNT',
+      piiScanStatus: 'UNKNOWN',
+    }));
+    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([]);
+    vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({ items: [], page: 0, size: 200, total: 0 });
+    vi.spyOn(api, 'getAiSecurityGraph').mockResolvedValue({ nodes: [], edges: [], truncated: false });
+
+    renderWithProviders(<AiAssetDetailPage artifactId="artifact-1" />);
+
+    expect(await screen.findByText('Unknown — insufficient evidence')).toBeInTheDocument();
+  });
+
   it('shows applicable policies scoped to this artifact type in the Policies tab', async () => {
     vi.spyOn(api, 'getAiSecurityArtifact').mockResolvedValue(buildArtifact());
     vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([

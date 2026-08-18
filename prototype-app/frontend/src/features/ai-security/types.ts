@@ -212,7 +212,7 @@ export type AiSecurityArtifact = {
   environment: string | null;
   firstObservedAt: string;
   lastObservedAt: string;
-  piiScanStatus: 'NOT_APPLICABLE' | 'NOT_SCANNED' | 'SCANNED_CLEAN' | 'SCANNED_PII_FOUND' | 'LOOKUP_FAILED';
+  piiScanStatus: 'UNKNOWN' | 'NOT_APPLICABLE' | 'NOT_SCANNED' | 'SCANNED_CLEAN' | 'SCANNED_PII_FOUND' | 'LOOKUP_FAILED';
   piiSource: 'AWS_MACIE' | 'AZURE_PURVIEW' | null;
   piiInfoTypes: string[];
   piiFindingCount: number;

@@ -41,7 +41,9 @@ public class AwsMaciePiiLookupService {
                             .build())
                     .build());
             if (!listed.hasFindingIds() || listed.findingIds().isEmpty()) {
-                return scannedClean();
+                // Finding absence is not bucket-level classification evidence. The bucket may be
+                // excluded, newly created, stale, or never covered by automated discovery.
+                return unknown();
             }
             List<Finding> findings = macie.getFindings(GetFindingsRequest.builder()
                     .findingIds(listed.findingIds()).build()).findings();
@@ -78,8 +80,8 @@ public class AwsMaciePiiLookupService {
                 lastScannedAt == null ? Instant.now() : lastScannedAt);
     }
 
-    private PiiLookupResult scannedClean() {
-        return new PiiLookupResult("SCANNED_CLEAN", "AWS_MACIE", List.of(), 0, Instant.now());
+    private PiiLookupResult unknown() {
+        return new PiiLookupResult("UNKNOWN", "AWS_MACIE", List.of(), 0, null);
     }
 
     private PiiLookupResult notScanned() {

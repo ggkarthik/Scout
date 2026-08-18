@@ -43,6 +43,13 @@ function formatFactValue(value: unknown): string {
   return String(value);
 }
 
+function formatSensitivity(value: string): string {
+  if (value === 'NOT_SCANNED') return 'Not scanned';
+  if (value === 'UNKNOWN') return 'Unknown — insufficient evidence';
+  if (value === 'LOOKUP_FAILED') return 'Unknown — lookup failed';
+  return formatLabel(value);
+}
+
 const ATTRIBUTE_LABEL_OVERRIDES: Record<string, string> = {
   dataSourceAccessCount: 'Access to data sources',
 };
@@ -157,6 +164,17 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
       label: formatAttributeLabel(key),
       value: formatFactValue(value),
     }));
+  }, [artifact]);
+
+  const typeSpecificFields = React.useMemo<OverviewField[]>(() => {
+    if (!artifact) return [];
+    const attributes = artifact.attributes;
+    const fields: Array<[string, unknown]> = artifact.artifactType === 'MCP_SERVER' || artifact.artifactType === 'MCP_GATEWAY' || artifact.artifactType === 'MCP_TARGET'
+      ? [['Role', artifact.artifactType], ['Endpoint host', attributes.endpointHost], ['Exposure', attributes.endpointExposure], ['Configured authentication', attributes.configuredAuthType ?? attributes.inboundAuthType], ['Target health', attributes.status], ['Last synchronized', attributes.lastSynchronizedAt]]
+      : artifact.artifactType === 'KNOWLEDGE_BASE' || artifact.artifactType === 'DATA_SOURCE' || artifact.artifactType === 'DATA_STORE' || artifact.artifactType === 'SEARCH_INDEX'
+        ? [['Source type', attributes.sourceType], ['Sensitivity', formatSensitivity(artifact.piiScanStatus)], ['ACL state', attributes.aclSupport], ['Retrieval mode', attributes.retrievalMode], ['Backing store', attributes.storeType ?? attributes.backingStore]]
+        : [];
+    return fields.map(([label, value]) => ({ label, value: formatFactValue(value) }));
   }, [artifact]);
 
   const overviewOwnerFooter = canConfirmOwner ? (
@@ -290,6 +308,7 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
               primaryFooter={overviewOwnerFooter}
               secondaryFields={overviewSecondaryFields}
             />
+            {typeSpecificFields.length > 0 && <section className="fd3-panel"><div className="fd3-panel-title">{artifact.artifactType.startsWith('MCP_') ? 'MCP configuration' : 'Knowledge and data configuration'}</div><InventoryOverviewPanel primaryFields={typeSpecificFields} /></section>}
             <section className="fd3-panel">
               <div className="fd3-panel-title">Control posture</div>
               {postureQuery.isLoading ? <p className="panel-caption">Loading evaluated controls…</p> : postureQuery.isError ? <p className="notice error">Control posture could not be loaded.</p> : (postureQuery.data?.controls.length ?? 0) === 0 ? <p className="panel-caption">No current policy evidence covers this asset.</p> : <table className="data-table"><thead><tr><th>Control</th><th>Evidence</th><th>Decision</th></tr></thead><tbody>

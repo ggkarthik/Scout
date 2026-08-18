@@ -17,6 +17,15 @@
       "Resource": "*"
     },
     {
+      "Sid": "AgentCoreGatewayInventoryReadOnly",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock-agentcore:ListGateways", "bedrock-agentcore:GetGateway",
+        "bedrock-agentcore:ListGatewayTargets", "bedrock-agentcore:GetGatewayTarget"
+      ],
+      "Resource": "*"
+    },
+    {
       "Sid": "SageMakerInventoryReadOnly",
       "Effect": "Allow",
       "Action": [

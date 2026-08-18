@@ -67,6 +67,9 @@ const AiInventoryPage = React.lazy(async () => ({
 const AiInventoryAssetsPage = React.lazy(async () => ({
   default: (await import('./pages/AiInventoryAssetsPage')).AiInventoryAssetsPage
 }));
+const AiKnowledgeMcpInventoryPage = React.lazy(async () => ({
+  default: (await import('./pages/AiKnowledgeMcpInventoryPage')).AiKnowledgeMcpInventoryPage
+}));
 const AiAssetDetailPage = React.lazy(async () => ({
   default: (await import('./pages/AiAssetDetailPage')).AiAssetDetailPage
 }));
@@ -697,10 +700,10 @@ function AppShell() {
   const [navOpen, setNavOpen] = React.useState(false);
   const [settingsMenuOpen, setSettingsMenuOpen] = React.useState(false);
   const [personaDialogOpen, setPersonaDialogOpen] = React.useState(false);
-  const [inventoryNavExpanded, setInventoryNavExpanded] = React.useState(true);
-  const [findingsNavExpanded, setFindingsNavExpanded] = React.useState(true);
-  const [adminNavExpanded, setAdminNavExpanded] = React.useState(true);
-  const [configurationsNavExpanded, setConfigurationsNavExpanded] = React.useState(true);
+  const [inventoryNavExpanded, setInventoryNavExpanded] = React.useState(false);
+  const [findingsNavExpanded, setFindingsNavExpanded] = React.useState(false);
+  const [adminNavExpanded, setAdminNavExpanded] = React.useState(false);
+  const [configurationsNavExpanded, setConfigurationsNavExpanded] = React.useState(false);
 
   const activeTab = activeTabForPath(location.pathname);
   const pathSegments = location.pathname.split('/').filter(Boolean);
@@ -1142,6 +1145,8 @@ function AppShell() {
               <Route path="/vuln-repo/org-cves/:cveId?" element={<VulnRepoWorkbenchRoute />} />
               <Route path="/inventory/hosts/:assetId" element={<InventoryHostAssetRoute />} />
               <Route path="/inventory/ai/assets" element={<AiSecurityRoute><AiInventoryAssetsPage /></AiSecurityRoute>} />
+              <Route path="/inventory/ai/knowledge-data" element={<AiSecurityRoute><AiKnowledgeMcpInventoryPage kind="knowledge-data" /></AiSecurityRoute>} />
+              <Route path="/inventory/ai/mcp" element={<AiSecurityRoute><AiKnowledgeMcpInventoryPage kind="mcp" /></AiSecurityRoute>} />
               <Route path="/inventory/ai/:assetId" element={<InventoryAiAssetRoute />} />
               <Route path="/inventory/software-identities/:softwareIdentityId" element={<SoftwareIdentityDetailRoute />} />
               <Route path="/inventory/:inventoryView?" element={<InventoryRoute />} />

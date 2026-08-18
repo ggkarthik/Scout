@@ -214,6 +214,14 @@ export function pathForInventoryView(view: InventoryViewKey): string {
   return view === 'software-identities' ? '/inventory/software-identities' : `/inventory/${view}`;
 }
 
+export function pathForAiKnowledgeData(): string {
+  return '/inventory/ai/knowledge-data';
+}
+
+export function pathForAiMcpInventory(): string {
+  return '/inventory/ai/mcp';
+}
+
 export function pathForSoftwareIdentityDetail(softwareIdentityId: string): string {
   return `/inventory/software-identities/${encodeURIComponent(softwareIdentityId)}`;
 }

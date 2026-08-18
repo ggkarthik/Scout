@@ -61,7 +61,7 @@ class AwsMaciePiiLookupServiceTest {
     }
 
     @Test
-    void reportsCleanWhenEnabledWithNoFindings() {
+    void reportsUnknownWhenEnabledWithNoBucketClassificationEvidence() {
         Macie2Client macie = mock(Macie2Client.class);
         when(macie.getMacieSession(any(GetMacieSessionRequest.class)))
                 .thenReturn(GetMacieSessionResponse.builder().status(MacieStatus.ENABLED).build());
@@ -69,8 +69,9 @@ class AwsMaciePiiLookupServiceTest {
                 .thenReturn(ListFindingsResponse.builder().findingIds(List.of()).build());
 
         var result = service.lookup(macie, "my-bucket");
-        assertEquals("SCANNED_CLEAN", result.status());
+        assertEquals("UNKNOWN", result.status());
         assertEquals(0, result.findingCount());
+        assertEquals(null, result.lastScannedAt());
     }
 
     @Test

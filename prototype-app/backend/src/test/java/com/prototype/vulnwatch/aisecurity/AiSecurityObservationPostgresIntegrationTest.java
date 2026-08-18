@@ -169,7 +169,7 @@ class AiSecurityObservationPostgresIntegrationTest {
         observationService.ingest(
                 tenant,
                 evidenceEnvelope(
-                        tenant, connectorId, runId, "GLOBAL", "IAM_GLOBAL", "global-iam", List.of()));
+                        tenant, connectorId, runId, "GLOBAL", "IAM_GLOBAL", "global-iam", List.of(agent)));
         assertEquals("FAIL", wildcardRoleOutcome(tenant, runId));
     }
 
@@ -805,11 +805,7 @@ class AiSecurityObservationPostgresIntegrationTest {
     @Test
     void azureRaiPolicySliceProducesFailPassAndNoDecisionWithoutOverclaiming() {
         Tenant tenant = provision("Azure RAI Answer Key", "azure-rai-answer-key");
-        UUID connectorId = connectorService.save(
-                tenant,
-                new AiSecurityAwsConnectorService.ConnectorConfigRequest(
-                        "123456789012", null, null, List.of("us-east-1"), true)
-        ).id();
+        UUID connectorId = azureConnector(tenant);
 
         UUID unsafeRun = syncRunFacade.start(tenant).getId();
         observationService.ingest(tenant, raiEnvelope(
@@ -890,10 +886,10 @@ class AiSecurityObservationPostgresIntegrationTest {
         ArtifactObservation policy = new ArtifactObservation(
                 "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.CognitiveServices/accounts/ai/raiPolicies/production",
                 "AI_GUARDRAIL", "AZURE_RAI_POLICIES", "production", attributes);
-        String scopeKey = "AWS:123456789012:us-east-1:AZURE_RAI_POLICIES";
+        String scopeKey = "AZURE:sub:eastus:AZURE_RAI_POLICIES";
         return new ObservationEnvelopeV1(
-                AiSecurityObservationService.CONTRACT_VERSION, runId, connectorId, tenant.getId(), "AWS",
-                "123456789012", "us-east-1", "AZURE_RAI_POLICIES", scopeKey, 0, 1,
+                AiSecurityObservationService.CONTRACT_VERSION, runId, connectorId, tenant.getId(), "AZURE",
+                "azure-test-tenant", "sub", "eastus", "AZURE_RAI_POLICIES", scopeKey, 0, 1,
                 runId + ":rai:0", hash, Instant.now(), ScopeStatus.COMPLETE,
                 List.of(policy), List.of(), List.of());
     }
@@ -903,6 +899,20 @@ class AiSecurityObservationPostgresIntegrationTest {
                 select decision from ai_grid_assessments
                  where run_id = :runId and policy_id = 'AZURE_RAI_POLICY_NON_BLOCKING_FILTER'
                 """, Map.of("runId", runId), String.class);
+    }
+
+    private UUID azureConnector(Tenant tenant) {
+        UUID connectorId = UUID.randomUUID();
+        return tenantExecution.run(tenant, () -> {
+            jdbc.update("""
+                    insert into ai_security_connector_configs
+                        (id, tenant_id, provider, account_id, provider_tenant_id,
+                         regions_json, resource_families_json, enabled)
+                    values (:id, :tenantId, 'AZURE', 'sub', 'azure-test-tenant',
+                            '["eastus"]'::jsonb, '["AZURE_RAI_POLICIES"]'::jsonb, true)
+                    """, Map.of("id", connectorId, "tenantId", tenant.getId()));
+            return connectorId;
+        });
     }
 
     private int count(String table) {

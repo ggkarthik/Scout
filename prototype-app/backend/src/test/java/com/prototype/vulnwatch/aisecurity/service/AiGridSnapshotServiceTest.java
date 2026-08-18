@@ -39,4 +39,41 @@ class AiGridSnapshotServiceTest {
         assertFalse(safe.path("nested").has("rawPrompt"));
         assertFalse(safe.path("items").get(0).has("password"));
     }
+
+    @Test
+    void externalEndpointWithoutProviderConfirmedPublicReachabilityDoesNotBecomePolicyFact() throws Exception {
+        var attributes = mapper.readTree("""
+                {
+                  "endpointExposure": "EXTERNAL_ENDPOINT",
+                  "configuredAuthType": "NONE"
+                }
+                """);
+
+        var facts = service.normalize(attributes, "MCP_SERVER", null, null);
+
+        assertFalse(facts.containsKey("mcp.endpoint_exposure"));
+        assertEquals("NONE", facts.get("mcp.configured_auth_type").asText());
+    }
+
+    @Test
+    void providerConfirmedPublicReachabilityBecomesPolicyFact() throws Exception {
+        var attributes = mapper.readTree("""
+                {
+                  "endpointExposure": "PUBLIC_NETWORK_REACHABLE",
+                  "configuredAuthType": "NONE"
+                }
+                """);
+
+        var facts = service.normalize(attributes, "MCP_SERVER", null, null);
+
+        assertEquals("PUBLIC_NETWORK_REACHABLE", facts.get("mcp.endpoint_exposure").asText());
+    }
+
+    @Test
+    void unknownSensitivityRemainsUnknownAndDoesNotBecomeConfirmedSensitive() throws Exception {
+        var facts = service.normalize(mapper.createObjectNode(), "DATA_STORE", "UNKNOWN", "AZURE_PURVIEW");
+
+        assertEquals("UNKNOWN", facts.get("data.source_sensitivity").asText());
+        assertFalse(facts.containsKey("data.sensitivity_confirmed"));
+    }
 }

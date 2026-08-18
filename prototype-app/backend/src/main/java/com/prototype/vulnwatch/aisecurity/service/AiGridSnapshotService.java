@@ -43,7 +43,7 @@ public class AiGridSnapshotService {
     public List<SnapshotArtifact> commitScope(Tenant tenant, ObservationEnvelopeV1 envelope) {
         List<ArtifactRow> rows = jdbc.query("""
                 select a.id, a.provider, a.provider_resource_id, a.artifact_type, a.native_kind,
-                       a.name, a.account_id, a.region, a.attributes_json::text
+                       a.name, a.account_id, a.region, a.attributes_json::text, a.pii_scan_status, a.pii_source
                   from ai_security_artifacts a
                   join ai_security_artifact_sources s on s.artifact_id = a.id
                  where s.run_id = :runId and s.scope_key = :scopeKey and a.active = true
@@ -51,7 +51,8 @@ public class AiGridSnapshotService {
                 (rs, n) -> new ArtifactRow(rs.getObject("id", UUID.class), rs.getString("provider"),
                         rs.getString("provider_resource_id"), rs.getString("artifact_type"),
                         rs.getString("native_kind"), rs.getString("name"), rs.getString("account_id"),
-                        rs.getString("region"), readTree(rs.getString("attributes_json"))));
+                        rs.getString("region"), readTree(rs.getString("attributes_json")), rs.getString("pii_scan_status"),
+                        rs.getString("pii_source")));
         List<SnapshotArtifact> committed = new ArrayList<>();
         for (ArtifactRow row : rows) {
             JsonNode safeAttributes = redactAttributes(row.attributes());
@@ -94,7 +95,7 @@ public class AiGridSnapshotService {
                     .addValue("bodyId", bodyId).addValue("version", SNAPSHOT_SCHEMA_VERSION)
                     .addValue("connectorId", envelope.connectorId())
                     .addValue("observedAt", Timestamp.from(envelope.observedAt() == null ? Instant.now() : envelope.observedAt())), UUID.class);
-            Map<String, JsonNode> facts = normalize(safeAttributes, row.artifactType());
+            Map<String, JsonNode> facts = normalize(safeAttributes, row.artifactType(), row.piiScanStatus(), row.piiSource());
             for (Map.Entry<String, JsonNode> fact : facts.entrySet()) {
                 persistFact(tenant, envelope, row, manifestId, fact.getKey(), fact.getValue());
             }
@@ -176,7 +177,7 @@ public class AiGridSnapshotService {
                 || normalized.endsWith("privatekey");
     }
 
-    private Map<String, JsonNode> normalize(JsonNode attributes, String artifactType) {
+    Map<String, JsonNode> normalize(JsonNode attributes, String artifactType, String piiScanStatus, String piiSource) {
         Map<String, JsonNode> facts = new LinkedHashMap<>();
         copy(attributes, "guardrailAttached", "bedrock.agent.guardrail_attached_configured", facts);
         copy(attributes, "guardrailMinimumStrength", "bedrock.guardrail.minimum_strength_configured", facts);
@@ -194,6 +195,32 @@ public class AiGridSnapshotService {
         copy(attributes, "botPasswordAuthWithoutManagedIdentity", "identity.bot_password_without_managed_identity_observed", facts);
         copy(attributes, "customerManagedKey", "data.customer_managed_key_configured", facts);
         copy(attributes, "privateEndpointCount", "network.private_endpoint_count_configured", facts);
+        copy(attributes, "sourceType", "data.source_type", facts);
+        copy(attributes, "aclSupport", "data.source_acl_enforced", facts);
+        copy(attributes, "retrievalMode", "data.retrieval_mode", facts);
+        copy(attributes, "publicContentAccess", "data.source_public_content_access", facts);
+        copy(attributes, "privateEndpoint", "mcp.private_endpoint", facts);
+        copy(attributes, "lastSynchronizedAt", "mcp.last_synchronized_at", facts);
+        // An external configured URL is not proof of public network reachability. Only a
+        // provider-confirmed public exposure value may become a policy fact; all other states
+        // intentionally leave the fact absent so policies yield NO_DECISION.
+        if ("PUBLIC_NETWORK_REACHABLE".equals(attributes.path("endpointExposure").asText())) {
+            copy(attributes, "endpointExposure", "mcp.endpoint_exposure", facts);
+        }
+        copy(attributes, "configuredAuthType", "mcp.configured_auth_type", facts);
+        copy(attributes, "inboundAuthType", "mcp.inbound_auth_type", facts);
+        copy(attributes, "outboundAuthType", "mcp.outbound_auth_type", facts);
+        copy(attributes, "status", "mcp.target_status", facts);
+        copy(attributes, "publicContentAccess", "data.public_content_access_configured", facts);
+        if (piiScanStatus != null && !"NOT_APPLICABLE".equals(piiScanStatus)) {
+            facts.put("data.source_sensitivity", canonicalMapper.valueToTree(sensitivityState(piiScanStatus)));
+        }
+        if ("SCANNED_PII_FOUND".equals(piiScanStatus)) {
+            facts.put("data.sensitivity_confirmed", canonicalMapper.valueToTree(true));
+        }
+        if (piiSource != null && !piiSource.isBlank()) {
+            facts.put("data.sensitivity_source", canonicalMapper.valueToTree(piiSource));
+        }
         if (attributes.path("raiFilterEvidenceComplete").asBoolean(false)) {
             copy(attributes, "raiNonBlockingFilterObserved", "guardrail.rai_non_blocking_filter_observed", facts);
         }
@@ -211,6 +238,15 @@ public class AiGridSnapshotService {
             facts.put("owner.tag_candidate", tags);
         }
         return facts;
+    }
+
+    private String sensitivityState(String piiScanStatus) {
+        return switch (piiScanStatus) {
+            case "SCANNED_PII_FOUND" -> "SENSITIVE_CONFIRMED";
+            case "SCANNED_CLEAN" -> "NO_SENSITIVE_SIGNAL";
+            case "NOT_SCANNED" -> "NOT_SCANNED";
+            default -> "UNKNOWN";
+        };
     }
 
     private void copy(JsonNode source, String attribute, String factKey, Map<String, JsonNode> target) {
@@ -297,5 +333,6 @@ public class AiGridSnapshotService {
 
     public record SnapshotArtifact(UUID artifactId, UUID manifestId, Map<String, JsonNode> facts) {}
     private record ArtifactRow(UUID id, String provider, String providerResourceId, String artifactType,
-                               String nativeKind, String name, String accountId, String region, JsonNode attributes) {}
+                               String nativeKind, String name, String accountId, String region, JsonNode attributes,
+                               String piiScanStatus, String piiSource) {}
 }

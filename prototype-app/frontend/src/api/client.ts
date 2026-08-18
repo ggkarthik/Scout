@@ -1452,6 +1452,32 @@ export const api = {
     if (severity) params.set('severity', severity);
     return request<AiSecurityPage<AiArtifactSummary>>(`/ai-security/artifact-summaries?${params.toString()}`);
   },
+  listAiKnowledgeDataInventory: (
+    page = 0, size = 50, provider?: 'AWS' | 'AZURE', kind?: string,
+    sourceType?: string, sensitivity?: string, publicContentAccess?: string, active?: boolean,
+  ) => {
+    const params = new URLSearchParams({ page: String(page), size: String(size) });
+    if (provider) params.set('provider', provider);
+    if (kind) params.set('kind', kind);
+    if (sourceType) params.set('sourceType', sourceType);
+    if (sensitivity) params.set('sensitivity', sensitivity);
+    if (publicContentAccess) params.set('publicContentAccess', publicContentAccess);
+    if (active !== undefined) params.set('active', String(active));
+    return request<AiSecurityPage<AiSecurityArtifact>>(`/ai-security/inventory/knowledge-data?${params.toString()}`);
+  },
+  listAiMcpInventory: (
+    page = 0, size = 50, provider?: 'AWS' | 'AZURE', role?: string,
+    authenticationType?: string, endpointExposure?: string, synchronizationStatus?: string, active?: boolean,
+  ) => {
+    const params = new URLSearchParams({ page: String(page), size: String(size) });
+    if (provider) params.set('provider', provider);
+    if (role) params.set('role', role);
+    if (authenticationType) params.set('authenticationType', authenticationType);
+    if (endpointExposure) params.set('endpointExposure', endpointExposure);
+    if (synchronizationStatus) params.set('synchronizationStatus', synchronizationStatus);
+    if (active !== undefined) params.set('active', String(active));
+    return request<AiSecurityPage<AiSecurityArtifact>>(`/ai-security/inventory/mcp?${params.toString()}`);
+  },
   getAiSecurityArtifact: (artifactId: string) =>
     request<AiSecurityArtifact>(`/ai-security/artifacts/${encodeURIComponent(artifactId)}`),
   getAiSecurityGraph: (rootArtifactId?: string, depth?: number) => {

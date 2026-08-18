@@ -137,7 +137,7 @@ class AiSecurityPolicyConfigurationPostgresIntegrationTest {
         observationService.ingest(tenant, evidenceEnvelope(
                 tenant, connectorId, runId, "us-east-1", "BEDROCK_AGENTS", "bedrock-agents-hash", agents));
         observationService.ingest(tenant, evidenceEnvelope(
-                tenant, connectorId, runId, "GLOBAL", "IAM_GLOBAL", "iam-global-hash", List.of()));
+                tenant, connectorId, runId, "GLOBAL", "IAM_GLOBAL", "iam-global-hash", agents));
         return artifactIdByName(tenant, agentNames[0]);
     }
 

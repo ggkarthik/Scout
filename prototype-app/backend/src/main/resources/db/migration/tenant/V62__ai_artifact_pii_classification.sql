@@ -11,7 +11,7 @@ ALTER TABLE ai_security_artifacts
 
 ALTER TABLE ai_security_artifacts DROP CONSTRAINT IF EXISTS ai_security_artifacts_pii_scan_status_check;
 ALTER TABLE ai_security_artifacts ADD CONSTRAINT ai_security_artifacts_pii_scan_status_check
-    CHECK (pii_scan_status IN ('NOT_APPLICABLE','NOT_SCANNED','SCANNED_CLEAN','SCANNED_PII_FOUND','LOOKUP_FAILED'));
+    CHECK (pii_scan_status IN ('UNKNOWN','NOT_APPLICABLE','NOT_SCANNED','SCANNED_CLEAN','SCANNED_PII_FOUND','LOOKUP_FAILED'));
 
 ALTER TABLE ai_security_artifacts DROP CONSTRAINT IF EXISTS ai_security_artifacts_pii_source_check;
 ALTER TABLE ai_security_artifacts ADD CONSTRAINT ai_security_artifacts_pii_source_check

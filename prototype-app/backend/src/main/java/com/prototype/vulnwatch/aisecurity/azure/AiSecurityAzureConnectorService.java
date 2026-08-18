@@ -44,12 +44,15 @@ public class AiSecurityAzureConnectorService {
             "AZURE_SEARCH_SKILLSETS",
             "AZURE_SEARCH_INDEXERS",
             "AZURE_SEARCH_DATA_SOURCES",
+            "AZURE_SEARCH_KNOWLEDGE_BASES",
+            "AZURE_SEARCH_KNOWLEDGE_SOURCES",
             "AZURE_BOT_SERVICES",
             "AZURE_BOT_CHANNELS",
             "AZURE_BOT_IDENTITIES",
             "AZURE_DIAGNOSTIC_SETTINGS",
             "AZURE_RBAC_GLOBAL",
             "AZURE_STORAGE_ACCOUNTS",
+            "AZURE_FABRIC_CAPACITIES",
             "AZURE_FOUNDRY_CONNECTIONS",
             "AZURE_PURVIEW_CLASSIFICATION");
 

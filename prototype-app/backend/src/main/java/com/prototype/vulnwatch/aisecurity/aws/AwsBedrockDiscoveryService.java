@@ -18,6 +18,7 @@ import com.prototype.vulnwatch.aisecurity.service.AiGridRunMetricsService;
 import com.prototype.vulnwatch.domain.SyncRun;
 import com.prototype.vulnwatch.domain.Tenant;
 import java.net.URLDecoder;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -73,6 +74,11 @@ import software.amazon.awssdk.services.bedrockagent.model.ListDataSourcesRequest
 import software.amazon.awssdk.services.bedrockagent.model.ListKnowledgeBasesRequest;
 import software.amazon.awssdk.services.bedrockagent.model.ListFlowsRequest;
 import software.amazon.awssdk.services.bedrockagent.model.ListPromptsRequest;
+import software.amazon.awssdk.services.bedrockagentcorecontrol.BedrockAgentCoreControlClient;
+import software.amazon.awssdk.services.bedrockagentcorecontrol.model.GetGatewayRequest;
+import software.amazon.awssdk.services.bedrockagentcorecontrol.model.GetGatewayTargetRequest;
+import software.amazon.awssdk.services.bedrockagentcorecontrol.model.ListGatewayTargetsRequest;
+import software.amazon.awssdk.services.bedrockagentcorecontrol.model.ListGatewaysRequest;
 import software.amazon.awssdk.services.iam.IamClient;
 import software.amazon.awssdk.services.iam.model.GetPolicyRequest;
 import software.amazon.awssdk.services.iam.model.GetPolicyVersionRequest;
@@ -165,7 +171,8 @@ public class AwsBedrockDiscoveryService {
         try (var measurement = providerCalls.begin()) {
             try {
                 budgets.admit(tenant, run.getId(), "AWS", List.of(
-                        "BEDROCK_AGENTS", "IAM_GLOBAL", "LAMBDA_URLS", "BEDROCK_KNOWLEDGE_BASES",
+                        "BEDROCK_AGENTS", "IAM_GLOBAL", "LAMBDA_URLS", "BEDROCK_KNOWLEDGE_BASES", "BEDROCK_DATA_SOURCES", "BEDROCK_DATA_STORES",
+                        "AWS_AGENTCORE_GATEWAYS", "AWS_AGENTCORE_GATEWAY_TARGETS",
                         "S3_EXPOSURE", "AWS_MACIE_PII", "BEDROCK_GUARDRAILS", "BEDROCK_INVOCATION_LOGGING",
                         "SAGEMAKER_DOMAINS", "SAGEMAKER_SPACES", "SAGEMAKER_MODEL_REGISTRY",
                         "SAGEMAKER_ENDPOINTS", "SAGEMAKER_ENDPOINT_CONFIGURATIONS", "SAGEMAKER_JOBS",
@@ -222,6 +229,7 @@ public class AwsBedrockDiscoveryService {
         collectIam(config, credentials, region, agents, scopes);
         collectLambdaUrls(config, credentials, region, agents, scopes);
         collectKnowledgeBases(config, credentials, region, agents, scopes);
+        collectAgentCoreGateways(config, credentials, region, scopes);
         collectGuardrails(config, credentials, region, agents, scopes);
         collectInvocationLogging(config, credentials, region, scopes);
         collectDeployableBedrockResources(config, credentials, region, scopes);
@@ -528,7 +536,6 @@ public class AwsBedrockDiscoveryService {
                     attributes.put("status", summary.agentStatusAsString());
                     attributes.put("executionRoleArn", agent.agentResourceRoleArn());
                     attributes.put("foundationModel", agent.foundationModel());
-                    attributes.put("description", safeValue(agent.description()));
                     boolean guardrailAttached = agent.guardrailConfiguration() != null
                             && hasText(agent.guardrailConfiguration().guardrailIdentifier());
                     attributes.put("guardrailAttached", guardrailAttached);
@@ -645,8 +652,12 @@ public class AwsBedrockDiscoveryService {
             List<ScopePayload> scopes
     ) {
         List<ArtifactObservation> kbArtifacts = new ArrayList<>();
+        List<ArtifactObservation> dataSourceArtifacts = new ArrayList<>();
+        List<ArtifactObservation> dataStoreArtifacts = new ArrayList<>();
         List<ArtifactObservation> exposureArtifacts = new ArrayList<>();
-        List<RelationshipObservation> relationships = new ArrayList<>();
+        List<RelationshipObservation> knowledgeRelationships = new ArrayList<>();
+        List<RelationshipObservation> dataSourceRelationships = new ArrayList<>();
+        List<RelationshipObservation> dataStoreRelationships = new ArrayList<>();
         Map<String, Integer> dataSourceCountByKbId = new HashMap<>();
         try (BedrockAgentClient bedrock = BedrockAgentClient.builder()
                 .region(region).credentialsProvider(credentials)
@@ -672,6 +683,21 @@ public class AwsBedrockDiscoveryService {
                             var detail = bedrock.getDataSource(GetDataSourceRequest.builder()
                                     .knowledgeBaseId(summary.knowledgeBaseId())
                                     .dataSourceId(source.dataSourceId()).build()).dataSource();
+                            String dataSourceId = kbArn + "/data-source/" + source.dataSourceId();
+                            Map<String, Object> sourceAttributes = new LinkedHashMap<>();
+                            sourceAttributes.put("sourceType", detail.dataSourceConfiguration() == null
+                                    ? "UNKNOWN" : detail.dataSourceConfiguration().typeAsString());
+                            sourceAttributes.put("status", detail.statusAsString());
+                            sourceAttributes.put("deletionPolicy", detail.dataDeletionPolicyAsString());
+                            sourceAttributes.put("ingestionConfigurationPresent",
+                                    detail.dataSourceConfiguration() != null);
+                            dataSourceArtifacts.add(new ArtifactObservation(
+                                    dataSourceId, "DATA_SOURCE", "AWS_BEDROCK_DATA_SOURCE",
+                                    source.name() == null ? source.dataSourceId() : source.name(), sourceAttributes));
+                            dataSourceRelationships.add(new RelationshipObservation(
+                                    kbArn, dataSourceId, "USES_DATA_SOURCE", Map.of(
+                                    "confidence", "DIRECT", "evidence", Map.of(
+                                    "sourceApi", "Bedrock GetDataSource", "field", "knowledgeBaseId"))));
                             if (detail.dataSourceConfiguration() != null
                                     && detail.dataSourceConfiguration().s3Configuration() != null) {
                                 String bucketArn = detail.dataSourceConfiguration().s3Configuration().bucketArn();
@@ -686,8 +712,14 @@ public class AwsBedrockDiscoveryService {
                                         bucketArn, "SUPPORTING_RESOURCE", "AWS_S3_BUCKET", bucketName,
                                         Map.of("public", isPublic),
                                         pii.status(), pii.source(), pii.infoTypes(), pii.findingCount(), pii.lastScannedAt()));
-                                relationships.add(new RelationshipObservation(
-                                        kbArn, bucketArn, "READS_FROM_S3", Map.of("dataSourceId", source.dataSourceId())));
+                                dataStoreArtifacts.add(new ArtifactObservation(
+                                        bucketArn, "DATA_STORE", "AWS_S3_BUCKET", bucketName,
+                                        Map.of("storeType", "S3", "publicContentAccess", isPublic),
+                                        pii.status(), pii.source(), pii.infoTypes(), pii.findingCount(), pii.lastScannedAt()));
+                                dataStoreRelationships.add(new RelationshipObservation(
+                                        dataSourceId, bucketArn, "BACKED_BY_DATA_STORE", Map.of(
+                                        "confidence", "DIRECT", "evidence", Map.of(
+                                        "sourceApi", "Bedrock GetDataSource", "field", "s3Configuration.bucketArn"))));
                             }
                         }
                         dataToken = dataSources.nextToken();
@@ -709,14 +741,16 @@ public class AwsBedrockDiscoveryService {
                         .agentId(agent.id()).agentVersion("DRAFT").build());
                 int agentDataSourceAccessCount = 0;
                 for (var kb : attached.agentKnowledgeBaseSummaries()) {
-                    relationships.add(new RelationshipObservation(
+                    knowledgeRelationships.add(new RelationshipObservation(
                             agent.arn(), arn(config, region, "knowledge-base/" + kb.knowledgeBaseId()),
                             "USES_KNOWLEDGE_BASE", Map.of()));
                     agentDataSourceAccessCount += dataSourceCountByKbId.getOrDefault(kb.knowledgeBaseId(), 0);
                 }
                 kbArtifacts.add(agentUpdate(agent, Map.of("dataSourceAccessCount", agentDataSourceAccessCount)));
             }
-            scopes.add(complete("BEDROCK_KNOWLEDGE_BASES", kbArtifacts, relationships));
+            scopes.add(complete("BEDROCK_KNOWLEDGE_BASES", kbArtifacts, knowledgeRelationships));
+            scopes.add(complete("BEDROCK_DATA_SOURCES", dataSourceArtifacts, dataSourceRelationships));
+            scopes.add(complete("BEDROCK_DATA_STORES", dataStoreArtifacts, dataStoreRelationships));
             scopes.add(complete("S3_EXPOSURE", exposureArtifacts, List.of()));
             if (maciePiiEnabled) {
                 scopes.add(complete("AWS_MACIE_PII", List.of(), List.of()));
@@ -724,11 +758,101 @@ public class AwsBedrockDiscoveryService {
         } catch (Exception ex) {
             scopes.add(failed("BEDROCK_KNOWLEDGE_BASES", ex, List.of(
                     "bedrock:ListKnowledgeBases", "bedrock:ListDataSources", "bedrock:GetDataSource")));
+            scopes.add(failed("BEDROCK_DATA_SOURCES", ex, List.of("bedrock:ListDataSources", "bedrock:GetDataSource")));
+            scopes.add(failed("BEDROCK_DATA_STORES", ex, List.of("bedrock:GetDataSource")));
             scopes.add(failed("S3_EXPOSURE", ex, List.of("s3:GetBucketPolicyStatus")));
             if (maciePiiEnabled) {
                 scopes.add(failed("AWS_MACIE_PII", ex, List.of(
                         "macie2:GetMacieSession", "macie2:ListFindings", "macie2:GetFindings")));
             }
+        }
+    }
+
+    /** AgentCore control-plane inventory. It deliberately does not contact gateway or target endpoints. */
+    private void collectAgentCoreGateways(
+            ConnectorSecret config, AwsCredentialsProvider credentials, Region region, List<ScopePayload> scopes
+    ) {
+        List<ArtifactObservation> gateways = new ArrayList<>();
+        List<ArtifactObservation> targets = new ArrayList<>();
+        List<ArtifactObservation> servers = new ArrayList<>();
+        List<RelationshipObservation> targetRelationships = new ArrayList<>();
+        try (BedrockAgentCoreControlClient client = BedrockAgentCoreControlClient.builder()
+                .region(region).credentialsProvider(credentials)
+                .overrideConfiguration(c -> c.addExecutionInterceptor(providerCallInterceptor)).build()) {
+            String gatewayToken = null;
+            do {
+                var page = client.listGateways(ListGatewaysRequest.builder().nextToken(gatewayToken).build());
+                for (var summary : page.items()) {
+                    var gateway = client.getGateway(GetGatewayRequest.builder().gatewayIdentifier(summary.gatewayId()).build());
+                    String gatewayId = gateway.gatewayArn() == null ? arn(config, region, "gateway/" + summary.gatewayId()) : gateway.gatewayArn();
+                    Map<String, Object> attributes = new LinkedHashMap<>();
+                    attributes.put("status", gateway.statusAsString());
+                    attributes.put("protocol", gateway.protocolTypeAsString());
+                    attributes.put("inboundAuthType", gateway.authorizerTypeAsString());
+                    attributes.put("endpointHost", httpsAuthority(gateway.gatewayUrl()));
+                    gateways.add(new ArtifactObservation(gatewayId, "MCP_GATEWAY", "AWS_AGENTCORE_GATEWAY",
+                            gateway.name() == null ? summary.gatewayId() : gateway.name(), attributes));
+                    String targetToken = null;
+                    do {
+                        var targetPage = client.listGatewayTargets(ListGatewayTargetsRequest.builder()
+                                .gatewayIdentifier(summary.gatewayId()).nextToken(targetToken).build());
+                        for (var targetSummary : targetPage.items()) {
+                            var target = client.getGatewayTarget(GetGatewayTargetRequest.builder()
+                                    .gatewayIdentifier(summary.gatewayId()).targetId(targetSummary.targetId()).build());
+                            String targetId = gatewayId + "/target/" + target.targetId();
+                            String subtype = target.targetConfiguration() == null || target.targetConfiguration().type() == null
+                                    ? "UNKNOWN" : target.targetConfiguration().type().toString();
+                            Map<String, Object> targetAttributes = new LinkedHashMap<>();
+                            targetAttributes.put("status", target.statusAsString());
+                            targetAttributes.put("configurationSubtype", subtype);
+                            targetAttributes.put("lastSynchronizedAt", target.lastSynchronizedAt() == null
+                                    ? null : target.lastSynchronizedAt().toString());
+                            targetAttributes.put("outboundAuthType", target.hasCredentialProviderConfigurations()
+                                    ? target.credentialProviderConfigurations().stream().findFirst()
+                                    .map(value -> value.credentialProviderTypeAsString()).orElse("UNKNOWN") : "NONE");
+                            targets.add(new ArtifactObservation(targetId, "MCP_TARGET", "AWS_AGENTCORE_GATEWAY_TARGET",
+                                    target.name() == null ? target.targetId() : target.name(), targetAttributes));
+                            targetRelationships.add(new RelationshipObservation(gatewayId, targetId, "CONTAINS_MCP_TARGET", Map.of(
+                                    "confidence", "DIRECT", "evidence", Map.of("sourceApi", "AgentCore GetGatewayTarget", "field", "gatewayArn"))));
+                            String endpoint = target.targetConfiguration() == null || target.targetConfiguration().mcp() == null
+                                    || target.targetConfiguration().mcp().mcpServer() == null ? null
+                                    : httpsAuthority(target.targetConfiguration().mcp().mcpServer().endpoint());
+                            if (endpoint != null) {
+                                String serverId = targetId + "/mcp-server/" + sha256(endpoint).substring(0, 24);
+                                servers.add(new ArtifactObservation(serverId, "MCP_SERVER", "AWS_AGENTCORE_MCP_SERVER", endpoint,
+                                        Map.of("endpointHost", endpoint, "endpointExposure", "EXTERNAL_ENDPOINT")));
+                                targetRelationships.add(new RelationshipObservation(targetId, serverId, "ROUTES_TO", Map.of(
+                                        "confidence", "DIRECT", "evidence", Map.of("sourceApi", "AgentCore GetGatewayTarget", "field", "targetConfiguration.mcp.mcpServer.endpoint"))));
+                            }
+                        }
+                        targetToken = targetPage.nextToken();
+                    } while (hasText(targetToken));
+                }
+                gatewayToken = page.nextToken();
+            } while (hasText(gatewayToken));
+            scopes.add(complete("AWS_AGENTCORE_GATEWAYS", gateways, List.of()));
+            scopes.add(complete("AWS_AGENTCORE_GATEWAY_TARGETS", concat(targets, servers), targetRelationships));
+        } catch (Exception ex) {
+            scopes.add(failed("AWS_AGENTCORE_GATEWAYS", ex, List.of("bedrock-agentcore:ListGateways", "bedrock-agentcore:GetGateway")));
+            scopes.add(failed("AWS_AGENTCORE_GATEWAY_TARGETS", ex, List.of("bedrock-agentcore:ListGatewayTargets", "bedrock-agentcore:GetGatewayTarget")));
+        }
+    }
+
+    private List<ArtifactObservation> concat(List<ArtifactObservation> first, List<ArtifactObservation> second) {
+        List<ArtifactObservation> all = new ArrayList<>(first);
+        all.addAll(second);
+        return all;
+    }
+
+    /** Returns only a normalized HTTPS authority; malicious URLs are inert and never fetched. */
+    static String httpsAuthority(String value) {
+        if (value == null || value.isBlank() || value.length() > 2_048) return null;
+        try {
+            URI uri = URI.create(value.trim());
+            if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null) return null;
+            return uri.getHost().toLowerCase(Locale.ROOT) + (uri.getPort() < 0 ? "" : ":" + uri.getPort());
+        } catch (IllegalArgumentException ignored) {
+            return null;
         }
     }
 
@@ -897,18 +1021,15 @@ public class AwsBedrockDiscoveryService {
         }
     }
 
-    /** Captures the full GetGuardrail response as observed attributes — content filters, denied
+    /** Captures the bounded structural GetGuardrail metadata — content filters, denied
      *  topics, word/profanity filters, PII/sensitive-info entities, contextual grounding filters,
-     *  blocked messaging, and KMS key — instead of just the status/minimumStrength scalar summary,
+     *  topics, filter counts, and KMS key — instead of just the status/minimumStrength scalar summary,
      *  so the AI asset detail page's Observed Facts panel (a generic renderer over this map) shows
      *  the real guardrail configuration rather than two fields. */
     Map<String, Object> guardrailAttributes(GetGuardrailResponse detail, String strength) {
         Map<String, Object> attributes = new LinkedHashMap<>();
         attributes.put("status", detail.statusAsString());
         attributes.put("minimumStrength", strength);
-        if (hasText(detail.description())) {
-            attributes.put("description", detail.description());
-        }
         if (hasText(detail.version())) {
             attributes.put("version", detail.version());
         }
@@ -921,13 +1042,6 @@ public class AwsBedrockDiscoveryService {
         if (hasText(detail.kmsKeyArn())) {
             attributes.put("kmsKeyArn", detail.kmsKeyArn());
         }
-        if (hasText(detail.blockedInputMessaging())) {
-            attributes.put("blockedInputMessaging", detail.blockedInputMessaging());
-        }
-        if (hasText(detail.blockedOutputsMessaging())) {
-            attributes.put("blockedOutputsMessaging", detail.blockedOutputsMessaging());
-        }
-
         List<GuardrailContentFilter> contentFilters = detail.contentPolicy() == null
                 ? List.of() : detail.contentPolicy().filters();
         if (contentFilters != null && !contentFilters.isEmpty()) {
