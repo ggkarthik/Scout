@@ -1,6 +1,6 @@
 # VulnWatch Architecture
 
-Last updated: 2026-07-17
+Last updated: 2026-08-18
 
 ---
 
@@ -18,7 +18,7 @@ VulnWatch is a security operations prototype: SBOM ingestion → vulnerability i
 │  Spring Boot 3.3.2 — Java 17 (port 8080)                            │
 │  ┌──────────────┐  ┌────────────────┐  ┌──────────────────────────┐ │
 │  │ Controllers  │  │   Services     │  │  Scheduled Jobs          │ │
-│  │ (42 REST)    │  │   (238)        │  │  (daily + hourly + 2s)   │ │
+│  │ (54 REST)    │  │   (288)        │  │  (daily + hourly + 2s)   │ │
 │  └──────┬───────┘  └───────┬────────┘  └──────────────────────────┘ │
 │         │                  │                                         │
 │  ┌──────▼──────────────────▼──────┐   ┌────────────────────────────┐│
@@ -35,6 +35,8 @@ VulnWatch is a security operations prototype: SBOM ingestion → vulnerability i
 └────────────────────────────────────┘  │  AWS, Azure, OpenAI, Resend│
                                         └────────────────────────────┘
 ```
+
+Of the 54 controllers / 288 services, 11 controllers / 37 services live under `com.prototype.vulnwatch.aisecurity` — a separate top-level package implementing AI Security / AI Grid posture management (see [Core Data Flow](#7-ai-security--ai-grid) below and `docs/business-logic-guide.md#ai-security--ai-grid-pipeline`). Its tables are read/written via `JdbcTemplate` directly, bypassing the Spring Data JPA path shown above.
 
 ---
 
@@ -117,6 +119,16 @@ Daily sweep (00:15) catches components that crossed their EOL date between weekl
 
 `CampaignController` (`/api/campaigns`) groups findings/CVEs into a tracked remediation effort with a lifecycle (`DRAFT` → `ACTIVE` → `PAUSED`/`BLOCKED`/`IN_REVIEW` → `CLOSED`/`CANCELLED`), per-item exceptions, notify groups, and a watchlist. Frontend at `/vuln-repo/campaigns` (`CampaignsPage`, `CampaignDetailPage`) includes AI-assisted insights gated the same way as CVE investigation summaries.
 
+### 7. AI Security / AI Grid
+
+A separate discovery-and-governance pipeline, entitlement-gated (`ai.security`), that finds and assesses *other systems'* AI/ML resources rather than correlating CVEs:
+
+1. **Discovery** — AWS Bedrock and Azure AI connectors (`aisecurity.aws`/`aisecurity.azure`) emit sanitized `ObservationEnvelopeV1` chunks describing agents, models, guardrails, knowledge bases, and MCP servers.
+2. **AI Grid pipeline** — per completed scan scope: immutable snapshot → derived facts → ownership resolution → agent-rooted system grouping → policy assessment (JSON predicate engine) → R2 exposure correlation (cross-system risk chains, promoted to "validated" only on exact, fresh evidence) → coverage/setup-action reconciliation → bridge into the canonical `findings` table (`finding_kind = AI_POSTURE`/`AI_EXPOSURE`).
+3. **Platform governance** — a separate platform-owner track (answer-key precision review, release certification, GA/canary policy distribution) gates what policy/correlation content ever reaches tenants.
+
+Full mechanics: `docs/business-logic-guide.md#ai-security--ai-grid-pipeline`. Schema: `docs/database.md#ai-security--ai-grid-tables`.
+
 ---
 
 ## Multi-Tenant Architecture
@@ -182,6 +194,7 @@ For production, the same rollout runs from `ProductionBootstrapCli` — a standa
 | `READ_ONLY_AUDITOR` | Read-only across all tenant data |
 | `OPERATOR` | API key default — read/write operations, no admin |
 | `CREATOR` | Creator key default — includes all platform-level operations |
+| `SERVICE_ACCOUNT` | Trusted external evidence producers only — required by `AiGridEvidenceIngestionController` (`POST /api/internal/ai-grid/evidence/{producerId}`); the authenticated principal must equal `producerId` |
 
 These are role string constants checked across `SecurityConfig` authorization rules and various filters — there is no single formal role-hierarchy enum/service enforcing precedence between them; treat this table as the authoritative reference, not a class in the codebase.
 

@@ -53,8 +53,11 @@ Every `/api/**` request goes through `ApiKeyAuthenticationFilter` (runs before `
 
 **Authorization rules** (from `SecurityConfig`):
 - `/api/platform/**` and `/api/operations/**` → `ROLE_PLATFORM_OWNER` required
+- `/api/operations/quality/**` and `GET /api/operations/software-identities/search` → also permit `ROLE_TENANT_ADMIN`, `ROLE_INVENTORY_ADMIN`, `ROLE_SECURITY_ANALYST`, `ROLE_READ_ONLY_AUDITOR`
 - All other `/api/**` → authenticated
-- Public: OPTIONS, `/actuator/health`, `/actuator/info`, `POST /api/auth/login`, `POST /api/demo-requests`, `/api/demo-invites/**`
+- `/actuator/**` beyond health/info → authenticated (not public)
+- Public: OPTIONS, `/actuator/health` (+ `/health/readiness`, `/health/liveness`), `/actuator/info`, `POST /api/auth/login`, `POST /api/auth/setup-password`, `POST /api/auth/setup-session`, `POST /api/demo-requests`, `/api/demo-invites/**`, `/api/tenant-invites/**`
+- `POST /api/internal/ai-grid/evidence/{producerId}` requires `ROLE_SERVICE_ACCOUNT` and that the authenticated principal equals `producerId` — used by trusted external evidence producers (CIEM/DSPM/ASM/runtime tools) feeding the AI Grid pipeline
 
 ## Multi-tenancy
 
@@ -107,14 +110,15 @@ A scheduled poller/drain over a **per-tenant** table (`ingestion_jobs`, `finding
 
 There are **two independent Flyway migration lines** as of V42 — do not mix them up:
 
-- **Platform/`public` schema:** `src/main/resources/db/migration/postgres_reset/`. Flyway is configured to use this location (`spring.flyway.locations: classpath:db/migration/postgres_reset`) and it runs on application startup against `public` only. Every file must start with a `-- migration-guard: platform-only` comment — `PostgresResetMigrationGuardTest` enforces this so per-tenant DDL can't leak in here. Current latest: `V45__tenant_access_membership_provenance.sql`.
-- **Per-tenant schema:** `src/main/resources/db/migration/tenant/`, its own `<schema>.tenant_schema_history` table per tenant (baselined at version 41), applied once per tenant schema by `TenantSchemaMigrationService` (dev/test) or the standalone `ProductionBootstrapCli` (production) — **not** by the application's startup Flyway run. Files may use the `${tenantId}`/`${tenantSchema}` placeholders. Current latest: `V44__tenant_finding_workspace_projection.sql`. This is also where RLS enforcement now actually happens per tenant (`V42__enforce_tenant_rls.sql`) — see `docs/database.md#tenant-schema-control-plane` for the rollout mechanics (advisory lock, structural-fingerprint drift check, template → canary → batches of 10).
+- **Platform/`public` schema:** `src/main/resources/db/migration/postgres_reset/`. Flyway is configured to use this location (`spring.flyway.locations: classpath:db/migration/postgres_reset`) and it runs on application startup against `public` only. Every file must start with a `-- migration-guard: platform-only` comment — `PostgresResetMigrationGuardTest` enforces this so per-tenant DDL can't leak in here (**except** `V46__demo_request_active_email_uniqueness.sql`, which is missing the comment and reaches into `tenant_default.demo_requests` by schema-qualified DML — a known anomaly, not a pattern to repeat). Current latest: `V73__ai_grid_knowledge_mcp_normalized_facts.sql`.
+- **Per-tenant schema:** `src/main/resources/db/migration/tenant/`, its own `<schema>.tenant_schema_history` table per tenant (baselined at version 41), applied once per tenant schema by `TenantSchemaMigrationService` (dev/test) or the standalone `ProductionBootstrapCli` (production) — **not** by the application's startup Flyway run. Files may use the `${tenantId}`/`${tenantSchema}` placeholders. Current latest: `V64__ai_artifact_unknown_sensitivity.sql`. This is also where RLS enforcement now actually happens per tenant (`V42__enforce_tenant_rls.sql`) — see `docs/database.md#tenant-schema-control-plane` for the rollout mechanics (advisory lock, structural-fingerprint drift check, template → canary → batches of 10).
 
 - `V1__platform_and_default_tenant_schemas.sql` is a large consolidated baseline (60+ tables) — a prior drift-repair effort reset and renumbered the whole migration line into it, so it is not a "day one" schema.
 - `baseline-on-migrate` is `false` in `application.yml` (default) and `true` in `application-local.yml`.
 - All statements use `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`, making every migration idempotent to replay.
 - If `platform.app_user_global_roles` or other platform tables are missing, run the V1 SQL directly via psql: it will only create what is absent.
-- Notable recent migrations (platform line): `V29__tenant_rls_rollout_gate.sql` (pre-flight gate for the RLS enforcement rollout — confirms the runtime DB role is non-superuser/non-BYPASSRLS), `V38__tenant_entitlement_overrides.sql`, `V39__software_identity_metadata.sql`, `V40`/`V41` (Azure Discovery configs/targets), `V42__tenant_schema_control_plane.sql` (adds `platform.tenant_schema_versions`, the operational rollup of per-tenant migration state).
+- Notable recent migrations (platform line): `V29__tenant_rls_rollout_gate.sql` (pre-flight gate for the RLS enforcement rollout — confirms the runtime DB role is non-superuser/non-BYPASSRLS), `V38__tenant_entitlement_overrides.sql`, `V39__software_identity_metadata.sql`, `V40`/`V41` (Azure Discovery configs/targets), `V42__tenant_schema_control_plane.sql` (adds `platform.tenant_schema_versions`, the operational rollup of per-tenant migration state), `V45__tenant_access_membership_provenance.sql` (backs `TenantSupportAccessController`'s tenant-initiated support-grant flow). **Everything from platform `V47` / tenant `V45` onward is AI Security / AI Grid schema** (~50 migrations) — see `docs/database.md#ai-security--ai-grid-tables` for the full breakdown; those tables have no JPA entity or repository, they're accessed via `JdbcTemplate` directly from `com.prototype.vulnwatch.aisecurity.service` classes.
+- The platform line's tracked tenant-schema `target_version` (`platform.tenant_schema_versions`) currently sits at 61 (last bumped in `V68`) while the tenant line's actual latest file is `V64` — confirm with the AI Grid control-plane owner whether `V62`–`V64`'s rollout to existing tenants is deliberately staged before treating this as drift.
 - Never edit an already-applied migration, with one narrow, already-made exception: `V14__github_sbom_source_token.sql` and `V23__default_risk_policy_presets.sql` were later edited to be schema-qualified/search-path-independent (a correctness fix, not a schema change) — don't treat that as a new norm.
 
 ## Key env vars for local dev
@@ -133,6 +137,8 @@ Set in `application-local.yml` or as env vars:
 | `OPENAI_API_KEY` | OpenAI key for AI-assist features | (empty = AI features off) |
 | `NVD_API_KEY` | NVD rate-limited API key | (empty = unauthenticated) |
 | `GITHUB_API_TOKEN` | GitHub token for SBOM/GHSA | resolved from `backend/secrets/github-api-token` |
+
+`OPENAI_API_KEY`/`OPENAI_ENABLED` gate VulnWatch's own AI-assist features (EOL slug suggestion, CVE investigation summaries) — unrelated to the AI Security / AI Grid module, which discovers *other systems'* AI resources and is gated per-tenant by the `ai.security` entitlement, not an env var.
 
 ## Postgres integration test scaffolding
 
@@ -160,20 +166,34 @@ com.prototype.vulnwatch/
   config/      # Spring beans: SecurityConfig, ApiKeyAuthenticationFilter,
                # JwtDecoderConfig, TenantAwareDataSource, ProductionSafetyValidator,
                # TenantResolutionFilter, WebConfig, TenantSchemaReadinessHealthIndicator,
-               # TenantSchemaMigratorRunner (18 files)
-  controller/  # 42 REST controllers under /api/**
-  service/     # 238 business-logic services
+               # TenantSchemaMigratorRunner (22 files)
+  controller/  # 43 REST controllers under /api/**
+  service/     # 251 business-logic services, incl. subpackages cbom/, cmdbingestion/,
+               # sbomingestion/, vulningestion/ (feed sync + the @Scheduled entry points)
   domain/      # 121 JPA entities
-  dto/         # 258 API request/response objects
+  dto/         # 263 API request/response objects
   repo/        # 77 Spring Data JPA repositories
-  client/      # 21 external API clients (NVD, EUVD, JVN, GHSA, CSAF, EPSS, GitHub, ServiceNow, AWS, Azure…)
-  security/    # SensitiveTenantAction annotation + interceptor (2 files)
+  client/      # 22 external API clients (NVD, EUVD, JVN, GHSA, CSAF, EPSS, GitHub, ServiceNow, AWS, Azure…)
+  security/    # SensitiveTenantAction annotation + interceptor, PasswordSetupCookieService,
+               # PublicEndpointRateLimiter (5 files)
   util/        # CPE handling, version comparison, SBOM parsing (6 files)
   migration/   # Standalone (non-Spring) production bootstrap: ProductionBootstrapCli,
                # PlatformOwnerSetupLinkIssuer, TenantSchemaMigrationCli (3 files)
+  web/         # PlatformAdminRequestPaths — request-path classifier; no call site found
+               # outside its own unit test as of this writing, verify before relying on it
+  tools/       # LegacyGithubSyncRunBackfillTool — standalone main() CLI
+
+com.prototype.vulnwatch.aisecurity/   # separate top-level package, NOT under the tree above
+  controller/  # 11 REST controllers — AI Security / AI Grid (posture management for AI/ML
+               # resources discovered in AWS Bedrock / Azure AI Foundry)
+  service/     # 37 services — snapshot/facts/ownership/systems/policy-assessment/exposure-
+               # correlation pipeline + platform governance (answer-key, release certification)
+  model/, policy/, aws/, azure/  # contracts, predicate engine, AWS/Azure discovery clients
 ```
 
-Newer, less-obvious controllers worth knowing about: `CampaignController` (`/api/campaigns` — remediation campaigns), `CbomController` (`/api/bom/cbom` — cloud BOM posture), `BomController` (`/api/bom`), `AzureDiscoveryController` (`/api/connectors/azure-discovery`), `IngestionJobController` (`/api/ingestion-jobs`), `TenantSchemaStatusController` (`/api/platform/tenant-schema-status` — per-tenant schema migration status).
+`aisecurity/**` tables have **no JPA entity or Spring Data repository** — every read/write goes through `JdbcTemplate`/`NamedParameterJdbcTemplate` directly in the service classes. Full module map: `docs/business-logic-guide.md#ai-security--ai-grid-pipeline`, schema: `docs/database.md#ai-security--ai-grid-tables`.
+
+Newer, less-obvious controllers worth knowing about: `CampaignController` (`/api/campaigns` — remediation campaigns), `CbomController` (`/api/bom/cbom` — cloud BOM posture), `BomController` (`/api/bom`), `AzureDiscoveryController` (`/api/connectors/azure-discovery`), `IngestionJobController` (`/api/ingestion-jobs`), `TenantSchemaStatusController` (`/api/platform/tenant-schema-status` — per-tenant schema migration status), `DemoDatasetController` (`POST /api/platform/tenants/{tenantId}/demo-data`, `PLATFORM_OWNER` — manual demo dataset provisioning), `TenantSupportAccessController` (`/api/tenants/{tenantId}/support-grants` + `/api/auth/support-grants/**` — tenant-initiated break-glass support access, distinct from the platform-owner-initiated `tenant_support_grants` flow).
 
 ## Docker build
 
