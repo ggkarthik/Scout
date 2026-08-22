@@ -68,7 +68,7 @@ export function AiFindingDetailPage({ findingId }: AiFindingDetailPageProps) {
   });
   const policiesQuery = useQuery({
     queryKey: ['ai-security-policies'],
-    queryFn: api.listAiSecurityPolicies,
+    queryFn: api.listAiGridPolicyDetails,
   });
   const reviewMutation = useMutation({
     mutationFn: (disposition: 'CONFIRMED' | 'FALSE_POSITIVE' | 'NEEDS_INVESTIGATION') =>

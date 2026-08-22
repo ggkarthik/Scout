@@ -1,7 +1,7 @@
 import React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { AiGridOwaspCoverage, AiGridPolicyCandidate, AiGridPolicyDistribution, AiGridPolicyImpactPreview, AiGridPolicyReleaseReadiness, AiGridPolicySelection, AiGridPolicyTenantReconciliation } from '../features/ai-security/types';
+import type { AiGridOwaspCoverage, AiGridPolicyCandidate, AiGridPolicyDistribution, AiGridPolicyImpactPreview, AiGridPolicyReleaseReadiness, AiGridPolicySelection } from '../features/ai-security/types';
 
 const SELECTIONS: AiGridPolicySelection[] = ['REQUIRED', 'ENABLED', 'PREVIEW', 'DISABLED'];
 const STAGES: AiGridPolicyDistribution['rolloutStage'][] = ['GENERAL_AVAILABILITY', 'CANARY', 'PAUSED', 'RETIRED'];
@@ -15,12 +15,8 @@ export function PlatformAiPolicyStudio() {
     if (!tenantId && tenantsQuery.data?.[0]) setTenantId(tenantsQuery.data[0].id);
   }, [tenantId, tenantsQuery.data]);
   const [preview, setPreview] = React.useState<AiGridPolicyImpactPreview | null>(null);
-  const [reconciliation, setReconciliation] = React.useState<AiGridPolicyTenantReconciliation[] | null>(null);
-  const retirementQuery = useQuery({ queryKey: ['platform-ai-grid-policy-retirement'], queryFn: api.getPlatformAiGridPolicyRetirementStatus });
   const owaspQuery = useQuery({ queryKey: ['platform-ai-grid-policy-owasp'], queryFn: api.getPlatformAiGridOwaspCoverage });
   const candidatesQuery = useQuery({ queryKey: ['platform-ai-grid-policy-candidates'], queryFn: api.getPlatformAiGridPolicyCandidates });
-  const reconciliationQuery = useMutation({ mutationFn: api.getPlatformAiGridPolicyReconciliation, onSuccess: setReconciliation });
-  const migrationQuery = useMutation({ mutationFn: api.migratePlatformAiGridLegacySelections, onSuccess: setReconciliation });
   const mutation = useMutation({
     mutationFn: ({ policy, patch, canaryTenantIds }: { policy: AiGridPolicyDistribution; patch: Partial<AiGridPolicyDistribution>; canaryTenantIds?: string[] }) => api.updatePlatformAiGridPolicyDistribution(policy.policyId, {
       available: patch.available ?? policy.available,
@@ -62,12 +58,6 @@ export function PlatformAiPolicyStudio() {
       </div>
       {preview ? <ImpactPreview preview={preview} /> : null}
       <PolicyPortfolio owasp={owaspQuery.data ?? []} candidates={candidatesQuery.data ?? []} />
-      <section className="panel"><h3>Legacy migration reconciliation</h3><p>Verify that legacy settings and policy-linked data have governed equivalents before retiring compatibility reads.</p>
-        {retirementQuery.data ? <p><strong>{retirementQuery.data.eligibleForRetirement ? 'Ready to retire compatibility reads' : 'Compatibility reads still required'}</strong> — {retirementQuery.data.unmappedRecordCount} unmapped record(s) across {retirementQuery.data.activeTenantCount} active tenant(s). The deployment flag is currently {retirementQuery.data.legacyFallbackEnabled ? 'enabled' : 'disabled'}.</p> : null}
-        <button type="button" className="btn btn-secondary" disabled={reconciliationQuery.isPending} onClick={() => reconciliationQuery.mutate()}>Run reconciliation</button>
-        <button type="button" className="btn btn-link" disabled={migrationQuery.isPending} onClick={() => migrationQuery.mutate()}>Migrate remaining legacy selections</button>
-        {reconciliation ? <table className="data-table"><thead><tr><th>Tenant</th><th>Legacy</th><th>Governed</th><th>Unmapped records</th></tr></thead><tbody>{reconciliation.map((row) => <tr key={row.tenantId}><td>{row.tenantName}</td><td>{row.legacySelections}</td><td>{row.governedSelections}</td><td>{row.unmappedLegacySelections + row.unmappedScopes + row.unmappedExceptions + row.unmappedParameters + row.unmappedFindings}</td></tr>)}</tbody></table> : null}
-      </section>
     </section>
   );
 }

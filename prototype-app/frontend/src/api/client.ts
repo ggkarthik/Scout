@@ -524,8 +524,6 @@ import type {
   AiGridPolicyDistribution,
   AiGridPolicyImpactPreview,
   AiGridPolicyReleaseReadiness,
-  AiGridPolicyTenantReconciliation,
-  AiGridPolicyRetirementStatus,
   AiGridOwaspCoverage,
   AiGridPolicyCandidate,
   AiGridPolicySelection,
@@ -1375,9 +1373,6 @@ export const api = {
   publishPlatformAiGridPolicy: (policyId: string, version: string) => request<{ published: boolean; reason: string }>(
     `/platform/ai-grid/policies/${encodeURIComponent(policyId)}/versions/${encodeURIComponent(version)}/publish`, { method: 'POST' },
   ),
-  getPlatformAiGridPolicyReconciliation: () => request<AiGridPolicyTenantReconciliation[]>('/platform/ai-grid/policies/reconciliation'),
-  migratePlatformAiGridLegacySelections: () => request<AiGridPolicyTenantReconciliation[]>('/platform/ai-grid/policies/reconciliation/migrate-legacy-selections', { method: 'POST' }),
-  getPlatformAiGridPolicyRetirementStatus: () => request<AiGridPolicyRetirementStatus>('/platform/ai-grid/policies/reconciliation/retirement-status'),
   getPlatformAiGridOwaspCoverage: () => request<AiGridOwaspCoverage[]>('/platform/ai-grid/policies/portfolio/owasp'),
   getPlatformAiGridPolicyCandidates: () => request<AiGridPolicyCandidate[]>('/platform/ai-grid/policies/portfolio/candidates'),
   createPlatformAiGridPolicyCandidate: (payload: {
@@ -1529,44 +1524,44 @@ export const api = {
     method: 'PUT',
     body: JSON.stringify({ disposition, reason }),
   }),
-  listAiSecurityPolicies: () => request<AiSecurityPolicy[]>('/ai-security/policies'),
-  updateAiSecurityPolicy: (policyId: string, enabled: boolean) =>
-    request<AiSecurityPolicy>(`/ai-security/policies/${encodeURIComponent(policyId)}/enabled`, {
+  listAiGridPolicyDetails: () => request<AiSecurityPolicy[]>('/ai-policies/details'),
+  updateAiGridPolicyEnabled: (policyId: string, enabled: boolean) =>
+    request<AiSecurityPolicy>(`/ai-policies/${encodeURIComponent(policyId)}/enabled`, {
       method: 'PATCH',
       body: JSON.stringify({ enabled }),
     }),
-  getAiSecurityPolicyConfiguration: (policyId: string) =>
-    request<PolicyConfiguration>(`/ai-security/policies/${encodeURIComponent(policyId)}/configuration`),
-  updateAiSecurityPolicyScope: (
+  getAiGridPolicyConfiguration: (policyId: string) =>
+    request<PolicyConfiguration>(`/ai-policies/${encodeURIComponent(policyId)}/configuration`),
+  updateAiGridPolicyScope: (
     policyId: string,
     mode: PolicyScopeMode,
     conditionLogic: 'AND' | 'OR',
     conditions: PolicyScopeCondition[],
-  ) => request<PolicyConfiguration>(`/ai-security/policies/${encodeURIComponent(policyId)}/scope`, {
+  ) => request<PolicyConfiguration>(`/ai-policies/${encodeURIComponent(policyId)}/scope`, {
     method: 'PUT',
     body: JSON.stringify({ mode, conditionLogic, conditions }),
   }),
-  addAiSecurityPolicyException: (
+  addAiGridPolicyException: (
     policyId: string,
     artifactId: string,
     override: PolicyExceptionOverride,
     reason?: string,
-  ) => request<PolicyConfiguration>(`/ai-security/policies/${encodeURIComponent(policyId)}/exceptions`, {
+  ) => request<PolicyConfiguration>(`/ai-policies/${encodeURIComponent(policyId)}/exceptions`, {
     method: 'POST',
     body: JSON.stringify({ artifactId, override, reason }),
   }),
-  removeAiSecurityPolicyException: (policyId: string, artifactId: string) =>
+  removeAiGridPolicyException: (policyId: string, artifactId: string) =>
     request<PolicyConfiguration>(
-      `/ai-security/policies/${encodeURIComponent(policyId)}/exceptions/${encodeURIComponent(artifactId)}`,
+      `/ai-policies/${encodeURIComponent(policyId)}/exceptions/${encodeURIComponent(artifactId)}`,
       { method: 'DELETE' },
     ),
-  updateAiSecurityPolicyParameters: (policyId: string, parameters: Record<string, string>) =>
-    request<PolicyConfiguration>(`/ai-security/policies/${encodeURIComponent(policyId)}/parameters`, {
+  updateAiGridPolicyParameters: (policyId: string, parameters: Record<string, string>) =>
+    request<PolicyConfiguration>(`/ai-policies/${encodeURIComponent(policyId)}/parameters`, {
       method: 'PUT',
       body: JSON.stringify({ parameters }),
     }),
-  explainAiSecurityPolicy: (policyId: string) =>
-    request<PolicyAssistExplanation>(`/ai-security/policies/${encodeURIComponent(policyId)}/assist/explain`),
+  explainAiGridPolicy: (policyId: string) =>
+    request<PolicyAssistExplanation>(`/ai-policies/${encodeURIComponent(policyId)}/assist/explain`),
   listAiSecurityRuns: (provider?: 'AWS' | 'AZURE') =>
     request<AiSecurityRun[]>(`/ai-security/runs${provider ? `?provider=${provider}` : ''}`),
   listAiSecurityRunScopes: (runId: string) =>

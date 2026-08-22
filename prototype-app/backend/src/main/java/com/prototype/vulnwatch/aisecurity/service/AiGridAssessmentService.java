@@ -258,7 +258,7 @@ public class AiGridAssessmentService {
     private Map<String, ScopeConfig> loadScopes() {
         return jdbc.query("""
                 select policy_id, mode, condition_logic, conditions_json::text
-                  from ai_security_policy_scopes
+                  from ai_grid_policy_scopes
                 """, rs -> {
             Map<String, ScopeConfig> result = new LinkedHashMap<>();
             while (rs.next()) {
@@ -285,7 +285,7 @@ public class AiGridAssessmentService {
     private Map<String, Map<String, String>> loadOverrides() {
         return jdbc.query("""
                 select policy_id, artifact_id, override
-                  from ai_security_policy_artifact_overrides
+                  from ai_grid_policy_artifact_overrides
                 """, rs -> {
             Map<String, Map<String, String>> result = new LinkedHashMap<>();
             while (rs.next()) {
@@ -299,7 +299,7 @@ public class AiGridAssessmentService {
     private Map<String, Map<String, Object>> loadParameters() {
         return jdbc.query("""
                 select policy_id, parameters_json::text
-                  from ai_security_policy_parameters
+                  from ai_grid_policy_parameters
                 """, rs -> {
             Map<String, Map<String, Object>> result = new LinkedHashMap<>();
             while (rs.next()) {

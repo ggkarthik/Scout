@@ -56,7 +56,7 @@ describe('AiPolicyDetailPage', () => {
   });
 
   it('renders policy metadata, control mappings and required evidence in the overview tab', async () => {
-    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([buildPolicy()]);
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([buildPolicy()]);
     vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({ items: [buildFinding()], page: 0, size: 200, total: 1 });
     renderWithProviders(<AiPolicyDetailPage policyId="AWS_BEDROCK_PUBLIC_KB_S3" />);
 
@@ -69,7 +69,7 @@ describe('AiPolicyDetailPage', () => {
   });
 
   it('shows the impacted findings and AI artifacts in their own tabs', async () => {
-    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([buildPolicy()]);
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([buildPolicy()]);
     vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({
       items: [buildFinding()],
       page: 0,
@@ -87,7 +87,7 @@ describe('AiPolicyDetailPage', () => {
   });
 
   it('shows a not-found state for an unknown policy id', async () => {
-    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([buildPolicy()]);
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([buildPolicy()]);
     vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({ items: [], page: 0, size: 200, total: 0 });
     renderWithProviders(<AiPolicyDetailPage policyId="DOES_NOT_EXIST" />);
 

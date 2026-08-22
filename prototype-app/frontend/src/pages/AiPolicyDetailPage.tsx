@@ -97,14 +97,14 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
 
   const policiesQuery = useQuery({
     queryKey: ['ai-security-policies'],
-    queryFn: api.listAiSecurityPolicies,
+    queryFn: api.listAiGridPolicyDetails,
   });
   const findingsQuery = useQuery({
     queryKey: ['ai-security-findings-for-policy', policyId],
     queryFn: () => api.listAiSecurityFindings(policyId, undefined, 0, 200),
   });
   const mutation = useMutation({
-    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => api.updateAiSecurityPolicy(id, enabled),
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => api.updateAiGridPolicyEnabled(id, enabled),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['ai-security-policies'] }),
   });
 
@@ -117,7 +117,7 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
 
   const configQuery = useQuery({
     queryKey: ['ai-security-policy-configuration', policyId],
-    queryFn: () => api.getAiSecurityPolicyConfiguration(policyId),
+    queryFn: () => api.getAiGridPolicyConfiguration(policyId),
   });
   const configuration = configQuery.data ?? null;
 
@@ -151,7 +151,7 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
   const scopeMutation = useMutation({
     mutationFn: () => {
       if (!draftScope) throw new Error('Scope is not loaded yet');
-      return api.updateAiSecurityPolicyScope(policyId, draftScope.mode, draftScope.conditionLogic, draftScope.conditions);
+      return api.updateAiGridPolicyScope(policyId, draftScope.mode, draftScope.conditionLogic, draftScope.conditions);
     },
     onSuccess: (data) => {
       queryClient.setQueryData(['ai-security-policy-configuration', policyId], data);
@@ -161,7 +161,7 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
   });
 
   const parametersMutation = useMutation({
-    mutationFn: () => api.updateAiSecurityPolicyParameters(policyId, draftParameters),
+    mutationFn: () => api.updateAiGridPolicyParameters(policyId, draftParameters),
     onSuccess: (data) => {
       queryClient.setQueryData(['ai-security-policy-configuration', policyId], data);
       setParametersDirty(false);
@@ -180,7 +180,7 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
   const [exceptionReason, setExceptionReason] = React.useState('');
 
   const addExceptionMutation = useMutation({
-    mutationFn: () => api.addAiSecurityPolicyException(policyId, exceptionArtifactId, exceptionOverride, exceptionReason || undefined),
+    mutationFn: () => api.addAiGridPolicyException(policyId, exceptionArtifactId, exceptionOverride, exceptionReason || undefined),
     onSuccess: (data) => {
       queryClient.setQueryData(['ai-security-policy-configuration', policyId], data);
       setExceptionArtifactId('');
@@ -189,7 +189,7 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
     },
   });
   const removeExceptionMutation = useMutation({
-    mutationFn: (artifactId: string) => api.removeAiSecurityPolicyException(policyId, artifactId),
+    mutationFn: (artifactId: string) => api.removeAiGridPolicyException(policyId, artifactId),
     onSuccess: (data) => {
       queryClient.setQueryData(['ai-security-policy-configuration', policyId], data);
       refreshAfterConfigChange();
@@ -198,7 +198,7 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
 
   const explainQuery = useQuery({
     queryKey: ['ai-security-policy-explain', policyId],
-    queryFn: () => api.explainAiSecurityPolicy(policyId),
+    queryFn: () => api.explainAiGridPolicy(policyId),
     enabled: false,
   });
 

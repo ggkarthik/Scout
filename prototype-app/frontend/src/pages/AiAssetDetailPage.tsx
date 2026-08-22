@@ -93,7 +93,7 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
   });
   const policiesQuery = useQuery({
     queryKey: ['ai-security-policies'],
-    queryFn: api.listAiSecurityPolicies,
+    queryFn: api.listAiGridPolicyDetails,
   });
   const findingsQuery = useQuery({
     queryKey: ['ai-security-findings-all'],
@@ -113,7 +113,7 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
     enabled: tab === 'overview',
   });
   const policyMutation = useMutation({
-    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => api.updateAiSecurityPolicy(id, enabled),
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => api.updateAiGridPolicyEnabled(id, enabled),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['ai-security-policies'] }),
   });
 
