@@ -32,9 +32,8 @@ public class AiGridTestDataResetService {
             ai_grid_policy_selection_history, ai_grid_policy_selections, ai_grid_artifact_classifications,
             ai_grid_facts, ai_grid_host_context_facts, ai_grid_snapshot_bodies, ai_grid_snapshot_manifests,
             ai_grid_outbox, ai_grid_retention_purge_audit, ai_grid_retention_decisions, ai_grid_retention_policies,
-            ai_grid_scan_cadence_rules, ai_security_finding_reviews, ai_security_findings,
-            ai_security_policy_artifact_overrides, ai_security_policy_parameters, ai_security_policy_scopes,
-            ai_security_policy_evaluations, ai_security_policy_settings, ai_security_observation_receipts,
+            ai_grid_scan_cadence_rules, ai_grid_policy_artifact_overrides, ai_grid_policy_parameters,
+            ai_grid_policy_scopes, ai_security_observation_receipts,
             ai_security_snapshot_scopes, ai_security_relationships, ai_security_artifact_sources, ai_security_artifacts
             """.replaceAll("\\s+", " ").trim();
     /** Validation artefacts are reset; policy catalog, distribution and portfolio are deliberately retained. */

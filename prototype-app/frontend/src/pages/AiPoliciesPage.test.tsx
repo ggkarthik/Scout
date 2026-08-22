@@ -53,7 +53,7 @@ describe('AiPoliciesPage', () => {
   });
 
   it('renders one row per policy with severity, evidence, coverage and findings columns', async () => {
-    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([buildPolicy()]);
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([buildPolicy()]);
     renderPoliciesPage();
 
     expect(await screen.findByText('Public knowledge-base S3 source')).toBeInTheDocument();
@@ -63,7 +63,7 @@ describe('AiPoliciesPage', () => {
   });
 
   it('navigates to the policy detail page when a row is clicked', async () => {
-    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([buildPolicy()]);
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([buildPolicy()]);
     vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({ items: [], page: 0, size: 200, total: 0 });
     renderPoliciesPage();
 
@@ -75,7 +75,7 @@ describe('AiPoliciesPage', () => {
   });
 
   it('filters rows by severity pill and by search text', async () => {
-    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([
       buildPolicy(),
       buildPolicy({ id: 'AZURE_UNAUTH_LAMBDA', name: 'Unauthenticated action-group Lambda URL', severity: 'HIGH' }),
     ]);

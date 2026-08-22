@@ -89,7 +89,7 @@ describe('AiAssetDetailPage', () => {
 
   it('renders the asset identity and opens on the Overview tab by default', async () => {
     vi.spyOn(api, 'getAiSecurityArtifact').mockResolvedValue(buildArtifact());
-    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([buildPolicy()]);
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([buildPolicy()]);
     vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({ items: [buildFinding()], page: 0, size: 200, total: 1 });
     vi.spyOn(api, 'getAiSecurityGraph').mockResolvedValue({ nodes: [], edges: [], truncated: false });
 
@@ -116,7 +116,7 @@ describe('AiAssetDetailPage', () => {
         deniedTopics: [],
       },
     }));
-    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([]);
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([]);
     vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({ items: [], page: 0, size: 200, total: 0 });
     vi.spyOn(api, 'getAiSecurityGraph').mockResolvedValue({ nodes: [], edges: [], truncated: false });
 
@@ -137,7 +137,7 @@ describe('AiAssetDetailPage', () => {
       nativeKind: 'AZURE_STORAGE_ACCOUNT',
       piiScanStatus: 'UNKNOWN',
     }));
-    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([]);
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([]);
     vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({ items: [], page: 0, size: 200, total: 0 });
     vi.spyOn(api, 'getAiSecurityGraph').mockResolvedValue({ nodes: [], edges: [], truncated: false });
 
@@ -148,7 +148,7 @@ describe('AiAssetDetailPage', () => {
 
   it('shows applicable policies scoped to this artifact type in the Policies tab', async () => {
     vi.spyOn(api, 'getAiSecurityArtifact').mockResolvedValue(buildArtifact());
-    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([
       buildPolicy(),
       buildPolicy({ id: 'OTHER_MODEL_POLICY', name: 'Model-only policy', artifactTypes: ['AI_MODEL'] }),
     ]);
@@ -165,7 +165,7 @@ describe('AiAssetDetailPage', () => {
 
   it('shows only findings scoped to this artifact in the Findings tab', async () => {
     vi.spyOn(api, 'getAiSecurityArtifact').mockResolvedValue(buildArtifact());
-    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([buildPolicy()]);
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([buildPolicy()]);
     vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({
       items: [buildFinding(), buildFinding({ id: 'finding-2', displayId: 'AIF-002', artifactId: 'other-artifact' })],
       page: 0,
@@ -185,7 +185,7 @@ describe('AiAssetDetailPage', () => {
   it('shows connected resources in the Relationships tab', async () => {
     mockElementDimensionsForReactFlow();
     vi.spyOn(api, 'getAiSecurityArtifact').mockResolvedValue(buildArtifact());
-    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([buildPolicy()]);
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([buildPolicy()]);
     vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({ items: [], page: 0, size: 200, total: 0 });
     vi.spyOn(api, 'getAiSecurityGraph').mockResolvedValue({
       nodes: [
@@ -218,7 +218,7 @@ describe('AiAssetDetailPage', () => {
       ownerState: 'CONFIRMED',
       ownerSource: 'Manual confirmation',
     }));
-    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([buildPolicy()]);
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([buildPolicy()]);
     vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({ items: [], page: 0, size: 200, total: 0 });
     vi.spyOn(api, 'getAiSecurityGraph').mockResolvedValue({ nodes: [], edges: [], truncated: false });
 
@@ -232,7 +232,7 @@ describe('AiAssetDetailPage', () => {
 
   it('shows a not-found state for an unknown artifact', async () => {
     vi.spyOn(api, 'getAiSecurityArtifact').mockRejectedValue(new Error('not found'));
-    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([]);
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([]);
     vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({ items: [], page: 0, size: 200, total: 0 });
     vi.spyOn(api, 'getAiSecurityGraph').mockResolvedValue({ nodes: [], edges: [], truncated: false });
 

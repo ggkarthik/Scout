@@ -3,7 +3,6 @@ package com.prototype.vulnwatch.aisecurity.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ReviewDisposition;
-import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyRegistry;
 import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyRegistry.PolicyDefinition;
 import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyRegistry.PolicyParameterSpec;
 import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyScopeMatcher;
@@ -26,7 +25,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -40,41 +38,35 @@ public class AiSecurityApiService {
     private final ObjectMapper objectMapper;
     private final TenantSchemaExecutionService tenantExecution;
     private final TransactionTemplate transactionTemplate;
-    private final AiSecurityPolicyRegistry policyRegistry;
     private final AiGridReevaluationService reevaluationService;
     private final AiGridApiService aiGridApi;
     private final AiGridFindingService canonicalFindings;
     private final AiSecuritySyncRunFacade syncRunFacade;
     private final AuditEventService auditEventService;
     private final AiSecurityMetadataSanitizer metadataSanitizer;
-    private final boolean legacyPolicyFallbackEnabled;
 
     public AiSecurityApiService(
             NamedParameterJdbcTemplate jdbc,
             ObjectMapper objectMapper,
             TenantSchemaExecutionService tenantExecution,
             TransactionTemplate transactionTemplate,
-            AiSecurityPolicyRegistry policyRegistry,
             AiGridReevaluationService reevaluationService,
             AiGridApiService aiGridApi,
             AiGridFindingService canonicalFindings,
             AiSecuritySyncRunFacade syncRunFacade,
             AuditEventService auditEventService,
-            AiSecurityMetadataSanitizer metadataSanitizer,
-            @Value("${app.features.ai-grid-legacy-policy-fallback-enabled:false}") boolean legacyPolicyFallbackEnabled
+            AiSecurityMetadataSanitizer metadataSanitizer
     ) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
         this.tenantExecution = tenantExecution;
         this.transactionTemplate = transactionTemplate;
-        this.policyRegistry = policyRegistry;
         this.reevaluationService = reevaluationService;
         this.aiGridApi = aiGridApi;
         this.canonicalFindings = canonicalFindings;
         this.syncRunFacade = syncRunFacade;
         this.auditEventService = auditEventService;
         this.metadataSanitizer = metadataSanitizer;
-        this.legacyPolicyFallbackEnabled = legacyPolicyFallbackEnabled;
     }
 
     public SummaryResponse summary(Tenant tenant) {
@@ -778,7 +770,7 @@ public class AiSecurityApiService {
         }
         return tenantExecution.run(tenant, () -> transactionTemplate.execute(status -> {
             jdbc.update("""
-                    insert into ai_security_policy_scopes (
+                    insert into ai_grid_policy_scopes (
                         policy_id, tenant_id, mode, condition_logic, conditions_json, updated_by
                     ) values (
                         :policyId, :tenantId, :mode, :conditionLogic, cast(:conditions as jsonb), :actor
@@ -814,7 +806,7 @@ public class AiSecurityApiService {
         }
         return tenantExecution.run(tenant, () -> transactionTemplate.execute(status -> {
             jdbc.update("""
-                    insert into ai_security_policy_artifact_overrides (
+                    insert into ai_grid_policy_artifact_overrides (
                         id, tenant_id, policy_id, artifact_id, override, reason, created_by
                     ) values (
                         :id, :tenantId, :policyId, :artifactId, :override, :reason, :actor
@@ -840,7 +832,7 @@ public class AiSecurityApiService {
         PolicyDefinition definition = requirePolicy(policyId);
         return tenantExecution.run(tenant, () -> transactionTemplate.execute(status -> {
             jdbc.update("""
-                    delete from ai_security_policy_artifact_overrides
+                    delete from ai_grid_policy_artifact_overrides
                      where policy_id = :policyId and artifact_id = :artifactId
                     """, Map.of("policyId", policyId, "artifactId", artifactId));
             auditEventService.record("ai_security.policy.exception_removed", "ai_security_policy", policyId,
@@ -869,7 +861,7 @@ public class AiSecurityApiService {
         }
         return tenantExecution.run(tenant, () -> transactionTemplate.execute(status -> {
             jdbc.update("""
-                    insert into ai_security_policy_parameters (policy_id, tenant_id, parameters_json, updated_by)
+                    insert into ai_grid_policy_parameters (policy_id, tenant_id, parameters_json, updated_by)
                     values (:policyId, :tenantId, cast(:parameters as jsonb), :actor)
                     on conflict (policy_id) do update
                         set parameters_json = excluded.parameters_json,
@@ -932,7 +924,7 @@ public class AiSecurityApiService {
     }
 
     private PolicyDefinition requirePolicy(String policyId) {
-        return catalogDefinition(policyId).or(() -> legacyPolicyFallbackEnabled ? policyRegistry.find(policyId) : java.util.Optional.empty())
+        return catalogDefinition(policyId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "AI Security policy not found"));
     }
 
@@ -970,8 +962,7 @@ public class AiSecurityApiService {
                  order by published_at desc nulls last, version desc limit 1
                 """, Map.of("id", policyId), (rs, n) -> rs.getString(1));
         List<PolicyParameterSpec> catalogSpecs = definitions.isEmpty() ? List.of() : parameterSpecs(definitions.get(0));
-        if (!catalogSpecs.isEmpty() || !legacyPolicyFallbackEnabled) return catalogSpecs;
-        return policyRegistry.parameterSpecs(policyId);
+        return catalogSpecs;
     }
 
     private List<PolicyParameterSpec> parameterSpecs(String json) {
@@ -999,7 +990,7 @@ public class AiSecurityApiService {
     private PolicyConfigurationResponse buildConfiguration(PolicyDefinition definition) {
         Map<String, Object> scopeRow = jdbc.query("""
                 select mode, condition_logic, conditions_json::text, updated_by, updated_at
-                  from ai_security_policy_scopes where policy_id = :policyId
+                  from ai_grid_policy_scopes where policy_id = :policyId
                 """, Map.of("policyId", definition.id()), rs -> rs.next()
                 ? Map.of(
                         "mode", rs.getString("mode"),
@@ -1018,7 +1009,7 @@ public class AiSecurityApiService {
 
         List<PolicyExceptionResponse> exceptions = jdbc.query("""
                 select o.artifact_id, a.name as artifact_name, o.override, o.reason, o.created_by, o.created_at
-                  from ai_security_policy_artifact_overrides o
+                  from ai_grid_policy_artifact_overrides o
                   join ai_security_artifacts a on a.id = o.artifact_id
                  where o.policy_id = :policyId
                  order by o.created_at desc
@@ -1062,7 +1053,7 @@ public class AiSecurityApiService {
             return List.of();
         }
         Map<String, Object> stored = jdbc.query("""
-                select parameters_json::text from ai_security_policy_parameters where policy_id = :policyId
+                select parameters_json::text from ai_grid_policy_parameters where policy_id = :policyId
                 """, Map.of("policyId", policyId), rs -> rs.next() ? readMap(rs.getString("parameters_json")) : Map.of());
         return specs.stream()
                 .map(spec -> new PolicyParameterValueResponse(

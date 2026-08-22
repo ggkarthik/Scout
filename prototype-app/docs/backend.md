@@ -415,7 +415,7 @@ All write endpoints: `PLATFORM_OWNER`/`TENANT_ADMIN`/`SECURITY_ANALYST`.
 
 11 controllers under `com.prototype.vulnwatch.aisecurity.controller` (separate package from the rest of this doc — see [Service Layer](#ai-security--ai-grid-service-layer) below for the full pipeline). All tenant-facing endpoints additionally require the `ai.security` tenant entitlement (`AiSecurityAccessService.assertEntitled`); `SecurityConfig` has no dedicated path rule for `/api/ai-security/**` or `/api/ai-grid/**` — authorization is per-endpoint `@PreAuthorize` under the generic authenticated-`/api/**` rule.
 
-**AiSecurityController — `/api/ai-security`** (legacy artifact/finding/policy/graph/run API — reads open to entitled callers; mutations `PLATFORM_OWNER`/`TENANT_ADMIN`/`SECURITY_ANALYST`)
+**AiSecurityController — `/api/ai-security`** (shared artifact/finding/graph/run API — reads open to entitled callers; finding review mutations `PLATFORM_OWNER`/`TENANT_ADMIN`/`SECURITY_ANALYST`)
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -427,12 +427,6 @@ All write endpoints: `PLATFORM_OWNER`/`TENANT_ADMIN`/`SECURITY_ANALYST`.
 | GET | `/severity-grid`, `/top-risk-artifacts` | Inventory rollups |
 | GET | `/findings`, `/findings/{id}` | AI policy-failure findings |
 | PUT | `/findings/{id}/review` | Set review disposition (CONFIRMED/FALSE_POSITIVE/NEEDS_INVESTIGATION) |
-| GET | `/policies`, `/policies/{id}/configuration` | Legacy policy catalog + tenant configuration |
-| PATCH | `/policies/{id}/enabled` | Enable/disable a policy |
-| PUT | `/policies/{id}/scope` | Set scope mode + conditions |
-| POST/DELETE | `/policies/{id}/exceptions[/{artifactId}]` | Add/remove per-artifact exception |
-| PUT | `/policies/{id}/parameters` | Set policy parameters |
-| GET | `/policies/{id}/assist/explain` | AI-assisted plain-English policy explanation |
 | GET | `/runs`, `/runs/{id}/scopes` | Discovery run history + per-scope detail |
 
 **AiSecurityConnectorController — `/api/connectors/ai-security/aws`** — AWS Bedrock connector config; reads open, writes `PLATFORM_OWNER`/`TENANT_ADMIN`/`INVENTORY_ADMIN`. `GET`/`PUT` config, `POST /test`, `POST /run`.
@@ -440,8 +434,6 @@ All write endpoints: `PLATFORM_OWNER`/`TENANT_ADMIN`/`SECURITY_ANALYST`.
 **AiSecurityAzureConnectorController — `/api/connectors/ai-security/azure`** — multi-step Azure connector (credential profiles + connector config): list/save connector, `/requirements`, `/{id}/test`, `/{id}/run`, `/targets/{id}/run`, plus `/credentials` CRUD + test/rotate/revoke.
 
 **AiSecurityAzureFoundryConfigController — `/api/connectors/ai-security/azure-foundry`** — newer single-form Azure setup orchestrating config+target+credential+connector in one save. `GET`, `PUT`, `POST /test`, `POST /run`.
-
-**AiSecurityPlatformController — `/api/platform/ai-security/policies`** (`PLATFORM_OWNER` only) — legacy policy catalog availability/default-enabled toggle. `GET` list, `PATCH /{id}`.
 
 **AiGridController — `/api`** — the main AI Grid read/write API.
 
@@ -458,8 +450,12 @@ All write endpoints: `PLATFORM_OWNER`/`TENANT_ADMIN`/`SECURITY_ANALYST`.
 | GET | `/ai-policy-readiness`, `/ai-setup-actions` | Per-policy readiness + prioritized setup queue |
 | GET | `/ai-assessment-runs`, `/ai-assessment-runs/{id}/metrics` | Run history + economics telemetry |
 | POST | `/ai-assessment-runs/{id}/replay` | Re-run the latest assessment after a policy edit |
-| GET | `/ai-policies` | Tenant's governed policy selections |
+| GET | `/ai-policies`, `/ai-policies/details` | Tenant's governed policy selections and rich policy view |
 | PUT | `/ai-policies/{id}/selection` | Change REQUIRED/ENABLED/PREVIEW/DISABLED selection (`TENANT_ADMIN`+) |
+| PATCH | `/ai-policies/{id}/enabled` | Compatibility enable/disable action backed by governed selection |
+| GET/PUT | `/ai-policies/{id}/configuration`, `/scope`, `/parameters` | Governed policy configuration |
+| POST/DELETE | `/ai-policies/{id}/exceptions[/{artifactId}]` | Governed per-artifact exception |
+| GET | `/ai-policies/{id}/assist/explain` | Policy explanation using governed configuration |
 | GET | `/ai-overview` | Explainable prioritized exposure-intelligence overview |
 
 **AiGridEvidenceIngestionController — `/api/internal/ai-grid/evidence`** — `POST /{producerId}`, `ROLE_SERVICE_ACCOUNT` only, principal must equal `producerId`. Trusted third-party evidence ingestion port.
@@ -468,7 +464,7 @@ All write endpoints: `PLATFORM_OWNER`/`TENANT_ADMIN`/`SECURITY_ANALYST`.
 
 **AiGridOperationsGovernanceController — `/api/ai-governance`** — tenant scan budget & retention operations. Reads `TENANT_ADMIN`+`SECURITY_ANALYST`; writes `PLATFORM_OWNER`/`TENANT_ADMIN`. `GET`/`PUT /budget`, `PUT /cadence`, `POST /budget-alerts/{id}/acknowledge`, `GET /retention`, `PUT /retention/policies`, `POST /retention/holds[/…/release]`, `POST /retention/sweep`.
 
-**AiGridPolicyCatalogController — `/api/platform/ai-grid/policies`** (`PLATFORM_OWNER` only) — policy package import/distribution/rollout, legacy reconciliation, portfolio. `GET`/`POST` list/import, `PUT /{id}/distribution`, `GET .../impact-preview`, `GET/POST reconciliation[...]`, `GET/POST portfolio/*`, `POST /test-reset`.
+**AiGridPolicyCatalogController — `/api/platform/ai-grid/policies`** (`PLATFORM_OWNER` only) — policy package import/distribution/rollout and portfolio. `GET`/`POST` list/import, `PUT /{id}/distribution`, `GET .../impact-preview`, `GET/POST portfolio/*`, `POST /test-reset`.
 
 **AiGridValidationGovernanceController — `/api/platform/ai-grid/validation`** (`PLATFORM_OWNER` only) — answer-key/precision/bias review + R1/R2 release certification. `GET/POST /answer-keys[...]`, `POST /precision-reviews[...]`, `POST /policies/{id}/versions/{v}/publish`, `GET/POST /releases/r1/*`, `GET/POST /releases/r2/*`.
 
@@ -816,7 +812,7 @@ Suppression rules evaluated at finding creation and on the 15-minute reopen swee
 
 37 services under `com.prototype.vulnwatch.aisecurity.service`, backing the controllers in [AI Security / AI Grid](#ai-security--ai-grid) above. All tables are accessed via `JdbcTemplate` directly — there are no JPA entities or Spring Data repositories for this module. `AiSecurityJobWorkerService` polls `ingestion_jobs` (every 3s by default) for `AI_SECURITY_AWS_BEDROCK`/`AI_SECURITY_AZURE_DISCOVERY` jobs and dispatches to the AWS/Azure discovery providers, which emit sanitized `ObservationEnvelopeV1` chunks (`AiSecurityMetadataSanitizer` — allow-listed fields only, no prompt bodies/secrets/PII). Once a scan scope completes, `AiSecurityObservationService` hands off to `AiGridPipelineService.processCompleteScope()`, which runs in order: **snapshot** (`AiGridSnapshotService` — immutable, hash-deduped, derives facts) → **ownership** (`AiGridOwnershipService` — CONFIRMED/INFERRED/CANDIDATE/UNOWNED, reuses the tenant's `ownership_rules`) → **system grouping** (`AiGridSystemService` — bounded BFS, depth 6/fan-out 100, with split/merge/successor lineage) → **policy assessment** (`AiGridAssessmentService` + `AiGridPredicateEngine`, a JSON predicate evaluator) → **R2 exposure correlation** (`AiGridExposureService` — three hardcoded graph-traversal templates, promoting hypotheses to "validated" only on exact, fresh evidence; `AiGridExposureFreshnessService` demotes stale ones) → **coverage/setup** (`AiGridReconciliationService`, `AiGridCoverageService`, `AiGridReadinessService`) → **finding bridge** (`AiGridFindingService`/`AiGridExposureFindingService` — writes into the canonical `findings` table with `finding_kind = AI_POSTURE`/`AI_EXPOSURE`, reusing `FindingWorkflowService`/SLA/ServiceNow, not a separate table).
 
-A platform-owner-only governance track gates content before it reaches tenants: `AiGridPolicyCatalogService` (catalog import + `platform.ai_grid_policy_distribution` rollout stage/canary/pinned-version), `AiGridValidationGovernanceService` (labeled answer-key test cases + Wilson-interval precision/bias review, required before a policy version can publish), `AiGridR1CertificationService`/`AiGridR2CertificationService` (release-gate certification into an immutable `ai_grid_release_manifest_items` record), `AiGridPolicyPortfolioService` (OWASP LLM Top-10 coverage + RICE-scored candidate backlog), `AiGridPolicyMigrationService` (legacy-to-governed policy selection reconciliation). Operationally, `AiGridBudgetService` enforces per-tenant daily scan/API-call/byte budgets (new tenants start `OBSERVE`-only) and `AiGridRetentionService` classifies evidence into HOT/ARCHIVE/RESTRICTED_EVIDENCE tiers with legal-hold support and an audited purge sweep.
+A platform-owner-only governance track gates content before it reaches tenants: `AiGridPolicyCatalogService` (catalog import + `platform.ai_grid_policy_distribution` rollout stage/canary/pinned-version), `AiGridValidationGovernanceService` (labeled answer-key test cases + Wilson-interval precision/bias review, required before a policy version can publish), `AiGridR1CertificationService`/`AiGridR2CertificationService` (release-gate certification into an immutable `ai_grid_release_manifest_items` record), and `AiGridPolicyPortfolioService` (OWASP LLM Top-10 coverage + RICE-scored candidate backlog). AI Grid is the sole policy and tenant-configuration authority. Operationally, `AiGridBudgetService` enforces per-tenant daily scan/API-call/byte budgets (new tenants start `OBSERVE`-only) and `AiGridRetentionService` classifies evidence into HOT/ARCHIVE/RESTRICTED_EVIDENCE tiers with legal-hold support and an audited purge sweep.
 
 Full narrative: `docs/business-logic-guide.md#ai-security--ai-grid-pipeline`. Schema: `docs/database.md#ai-security--ai-grid-tables`.
 

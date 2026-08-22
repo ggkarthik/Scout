@@ -118,7 +118,7 @@ describe('AiFindingDetailPage', () => {
 
   it('renders finding identity and policy details on the Overview tab by default, with no evidence viewer', async () => {
     vi.spyOn(api, 'getAiSecurityFinding').mockResolvedValue(buildFinding());
-    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([buildPolicy()]);
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([buildPolicy()]);
 
     renderWithProviders(<AiFindingDetailPage findingId="finding-1" />);
 
@@ -132,7 +132,7 @@ describe('AiFindingDetailPage', () => {
 
   it('shows artifact details in the Artifact tab', async () => {
     vi.spyOn(api, 'getAiSecurityFinding').mockResolvedValue(buildFinding());
-    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([buildPolicy()]);
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([buildPolicy()]);
     vi.spyOn(api, 'getAiSecurityArtifact').mockResolvedValue(buildArtifact());
 
     renderWithProviders(<AiFindingDetailPage findingId="finding-1" />);
@@ -145,7 +145,7 @@ describe('AiFindingDetailPage', () => {
 
   it('submits a review disposition when an action button is clicked', async () => {
     vi.spyOn(api, 'getAiSecurityFinding').mockResolvedValue(buildFinding());
-    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([buildPolicy()]);
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([buildPolicy()]);
     const review = vi.spyOn(api, 'reviewAiSecurityFinding').mockResolvedValue(buildFinding({ reviewDisposition: 'CONFIRMED' }));
 
     renderWithProviders(<AiFindingDetailPage findingId="finding-1" />);
@@ -157,7 +157,7 @@ describe('AiFindingDetailPage', () => {
 
   it('navigates back to the AI findings list', async () => {
     vi.spyOn(api, 'getAiSecurityFinding').mockResolvedValue(buildFinding());
-    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([buildPolicy()]);
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([buildPolicy()]);
 
     renderWithProviders(<AiFindingDetailPage findingId="finding-1" />);
     await screen.findByText('AIF-101B8AF0');
@@ -168,7 +168,7 @@ describe('AiFindingDetailPage', () => {
 
   it('shows a not-found state for an unknown finding', async () => {
     vi.spyOn(api, 'getAiSecurityFinding').mockRejectedValue(new Error('not found'));
-    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([]);
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([]);
 
     renderWithProviders(<AiFindingDetailPage findingId="does-not-exist" />);
 
@@ -177,7 +177,7 @@ describe('AiFindingDetailPage', () => {
 
   it('does not show Create Incident or Resolve for a user with no workflow roles', async () => {
     vi.spyOn(api, 'getAiSecurityFinding').mockResolvedValue(buildFinding());
-    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([buildPolicy()]);
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([buildPolicy()]);
 
     renderWithProviders(<AiFindingDetailPage findingId="finding-1" />);
     await screen.findByText('AIF-101B8AF0');
@@ -188,7 +188,7 @@ describe('AiFindingDetailPage', () => {
 
   it('resolves an open finding via the workflow endpoint for a tenant admin', async () => {
     vi.spyOn(api, 'getAiSecurityFinding').mockResolvedValue(buildFinding({ status: 'OPEN' }));
-    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([buildPolicy()]);
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([buildPolicy()]);
     const workflow = vi.spyOn(api, 'updateFindingWorkflow').mockResolvedValue({});
 
     renderAsTenantAdmin(<AiFindingDetailPage findingId="finding-1" />);
@@ -203,7 +203,7 @@ describe('AiFindingDetailPage', () => {
 
   it('shows Re-open instead of Resolve once a finding is no longer open', async () => {
     vi.spyOn(api, 'getAiSecurityFinding').mockResolvedValue(buildFinding({ status: 'RESOLVED' }));
-    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([buildPolicy()]);
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([buildPolicy()]);
 
     renderAsTenantAdmin(<AiFindingDetailPage findingId="finding-1" />);
     await screen.findByText('AIF-101B8AF0');
@@ -214,7 +214,7 @@ describe('AiFindingDetailPage', () => {
 
   it('creates a ServiceNow incident and shows the incident number on success', async () => {
     vi.spyOn(api, 'getAiSecurityFinding').mockResolvedValue(buildFinding());
-    vi.spyOn(api, 'listAiSecurityPolicies').mockResolvedValue([buildPolicy()]);
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([buildPolicy()]);
     const createIncident = vi.spyOn(api, 'createFindingIncident').mockResolvedValue({
       incidentNumber: 'INC0012345',
       sysId: 'sys-1',

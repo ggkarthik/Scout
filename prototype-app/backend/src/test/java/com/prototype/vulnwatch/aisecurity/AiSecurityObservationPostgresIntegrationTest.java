@@ -360,9 +360,6 @@ class AiSecurityObservationPostgresIntegrationTest {
             assertEquals(1, jdbc.queryForObject(
                     "select count(*) from findings where finding_kind = 'AI_POSTURE' and status = 'OPEN'",
                     Map.of(), Integer.class));
-            assertEquals(0, jdbc.queryForObject(
-                    "select count(*) from ai_security_findings", Map.of(), Integer.class),
-                    "legacy findings silo stays empty by default; AI findings graduate to the host workflow");
             assertTrue(jdbc.queryForObject("""
                     select due_at is not null from findings where finding_kind = 'AI_POSTURE'
                     """, Map.of(), Boolean.class));

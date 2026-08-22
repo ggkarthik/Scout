@@ -17,10 +17,10 @@ export function AiPoliciesPage() {
   const [search, setSearch] = React.useState('');
   const policiesQuery = useQuery({
     queryKey: ['ai-security-policies'],
-    queryFn: api.listAiSecurityPolicies,
+    queryFn: api.listAiGridPolicyDetails,
   });
   const mutation = useMutation({
-    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => api.updateAiSecurityPolicy(id, enabled),
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => api.updateAiGridPolicyEnabled(id, enabled),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['ai-security-policies'] }),
   });
   const canManage = hasRole(actor, 'TENANT_ADMIN') || hasRole(actor, 'PLATFORM_OWNER');

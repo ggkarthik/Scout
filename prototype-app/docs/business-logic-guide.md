@@ -325,10 +325,7 @@ A **Campaign** groups findings/CVEs into a tracked remediation effort:
 
 Not to be confused with [AI Integration (OpenAI)](#ai-integration-openai) above — that section covers VulnWatch *using* an LLM internally (EOL slug suggestion, CVE investigation summaries). This section covers VulnWatch *discovering and governing other systems'* AI/ML resources (Bedrock agents, Azure AI Foundry projects, MCP servers, etc.) as a security posture management capability, entitlement-gated per tenant behind the `ai.security` key (`TenantEntitlementService.AI_SECURITY`). It backs the `/findings/ai`, `/policies`, and `/inventory/ai` frontend routes and lives in its own top-level backend package, `com.prototype.vulnwatch.aisecurity` (11 controllers, 37 services — separate from the main `controller`/`service` packages).
 
-Two generations coexist:
-
-- **Legacy "AI Security"** — a hardcoded catalog of ~14 misconfiguration policies (public S3 knowledge bases, unauthenticated Lambda URLs, wildcard IAM, weak Bedrock guardrails, disabled Azure RAI content filters, local-auth-enabled Azure AI/ML/Search, etc.), evaluated directly against discovered artifacts.
-- **"AI Grid"** — the platform-governed replacement, now the primary path for policy evaluation. `V60`/`V61` (tenant migrations) migrated legacy findings and policy selections into the canonical, governed tables; the legacy tables and `AiSecurityController` remain for artifacts/inventory reads and backward compatibility.
+AI Grid is the sole policy and findings generation. It evaluates governed, versioned policies against discovered artifacts; canonical findings retain the host workflow. `AiSecurityController` remains only for shared artifact inventory, graph, discovery-run, and compatibility finding reads.
 
 ### Discovery
 
@@ -357,11 +354,11 @@ Host-context evidence (from external CIEM/DSPM/ASM/runtime tools, or analyst att
 
 A separate platform-owner-only track gates what AI Grid content ever reaches tenants, mirroring how NVD/GHSA feeds are trusted inputs but with an explicit sign-off step because policy false positives here can misdirect security teams:
 
-- **Policy catalog & distribution** (`AiGridPolicyCatalogService`) — platform imports immutable policy/correlation *versions* into a catalog, then controls rollout via `platform.ai_grid_policy_distribution` (GA / canary / paused / retired, canary tenant list, pinned version) — this superseded the older `ai_security_policy_distribution` toggle table (`V67`, kept in sync during migration).
+- **Policy catalog & distribution** (`AiGridPolicyCatalogService`) — platform imports immutable policy/correlation *versions* into a catalog, then controls rollout via `platform.ai_grid_policy_distribution` (GA / canary / paused / retired, canary tenant list, pinned version). V67 backfilled the earlier toggle table once; AI Grid is the only runtime authority.
 - **Answer-key & precision review** (`AiGridValidationGovernanceService`) — a labeled test-case framework (`ai_grid_answer_key_*`) plus statistical (Wilson-interval) precision/bias review (`ai_grid_precision_reviews`) that a policy version must pass before it can be published.
 - **Release certification** (`AiGridR1CertificationService`, `AiGridR2CertificationService`) — combines platform-computed evidence with externally attested operational gates into an immutable release manifest (`ai_grid_release_manifest_items`, update/delete blocked by a database trigger).
 - **Portfolio** (`AiGridPolicyPortfolioService`) — tracks OWASP LLM Top-10 coverage and a RICE-scored intake backlog of candidate policies not yet authored.
-- **Legacy reconciliation** (`AiGridPolicyMigrationService`) — reconciles/migrates tenants still on legacy policy selections onto the governed catalog and tracks retirement status.
+- **Tenant policy configuration** — AI Grid owns selections, scopes, artifact overrides, and parameters; assessment reads only these governed records.
 
 ### Operations: Budget, Cadence, and Retention
 
