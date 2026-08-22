@@ -41,6 +41,7 @@ BEGIN
     FOREACH table_name IN ARRAY ARRAY['ai_grid_policy_scopes', 'ai_grid_policy_artifact_overrides', 'ai_grid_policy_parameters'] LOOP
         EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', table_name);
         EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', table_name);
+        EXECUTE format('DROP POLICY IF EXISTS tenant_isolation ON %I', table_name);
         EXECUTE format('CREATE POLICY tenant_isolation ON %I USING (tenant_id = nullif(current_setting(''app.current_tenant_id'', true), '''')::uuid) WITH CHECK (tenant_id = nullif(current_setting(''app.current_tenant_id'', true), '''')::uuid)', table_name);
     END LOOP;
 END
