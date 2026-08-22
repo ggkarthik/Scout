@@ -25,7 +25,7 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 /** Production-only bootstrap entry point. Does not initialize Spring or JPA. */
 public final class ProductionBootstrapCli {
 
-    private static final int TARGET_VERSION = 64;
+    private static final int TARGET_VERSION = 65;
     private static final String DEFAULT_TENANT_NAME = "Default Workspace";
     private static final String DEFAULT_TENANT_SLUG = "default-workspace";
     private static final String DEFAULT_TENANT_SCHEMA = "tenant_default";
@@ -408,15 +408,15 @@ public final class ProductionBootstrapCli {
                     tenant_id, schema_name, current_version, target_version, status,
                     structural_checksum, migration_started_at, migration_completed_at,
                     last_successful_version, failure_code, failure_message, updated_at, migration_run_id
-                ) values (?, ?, 64, 64, 'CURRENT', ?, now(), now(), 64, null, null, now(), ?)
+                ) values (?, ?, ?, ?, 'CURRENT', ?, now(), now(), ?, null, null, now(), ?)
                 on conflict (tenant_id) do update set
                     schema_name = excluded.schema_name,
-                    current_version = 64,
-                    target_version = 64,
+                    current_version = excluded.current_version,
+                    target_version = excluded.target_version,
                     status = 'CURRENT',
                     structural_checksum = excluded.structural_checksum,
                     migration_completed_at = now(),
-                    last_successful_version = 64,
+                    last_successful_version = excluded.last_successful_version,
                     failure_code = null,
                     failure_message = null,
                     updated_at = now(),
@@ -424,8 +424,11 @@ public final class ProductionBootstrapCli {
                 """)) {
             statement.setObject(1, tenant.tenantId());
             statement.setString(2, tenant.schemaName());
-            statement.setString(3, checksum);
-            statement.setObject(4, runId);
+            statement.setInt(3, TARGET_VERSION);
+            statement.setInt(4, TARGET_VERSION);
+            statement.setString(5, checksum);
+            statement.setInt(6, TARGET_VERSION);
+            statement.setObject(7, runId);
             statement.executeUpdate();
         }
     }
@@ -443,7 +446,7 @@ public final class ProductionBootstrapCli {
                     tenant_id, schema_name, current_version, target_version, status,
                     structural_checksum, migration_started_at, migration_completed_at,
                     last_successful_version, failure_code, failure_message, updated_at, migration_run_id
-                ) values (?, ?, 0, 64, ?, null, now(), now(), 0, ?, ?, now(), ?)
+                ) values (?, ?, 0, ?, ?, null, now(), now(), 0, ?, ?, now(), ?)
                 on conflict (tenant_id) do update set
                     schema_name = excluded.schema_name,
                     status = excluded.status,
@@ -454,10 +457,11 @@ public final class ProductionBootstrapCli {
                 """)) {
             statement.setObject(1, tenant.tenantId());
             statement.setString(2, tenant.schemaName());
-            statement.setString(3, status);
-            statement.setString(4, code);
-            statement.setString(5, sanitize(message));
-            statement.setObject(6, runId);
+            statement.setInt(3, TARGET_VERSION);
+            statement.setString(4, status);
+            statement.setString(5, code);
+            statement.setString(6, sanitize(message));
+            statement.setObject(7, runId);
             statement.executeUpdate();
         }
     }
@@ -619,8 +623,8 @@ public final class ProductionBootstrapCli {
                 where t.deleted_at is null
                   and upper(t.status) = 'ACTIVE'
                   and (v.tenant_id is null or v.status <> 'CURRENT'
-                       or v.current_version < 64 or v.last_successful_version < 64)
-                """, "active tenants missing current schema projection");
+                       or v.current_version < %d or v.last_successful_version < %d)
+                """.formatted(TARGET_VERSION, TARGET_VERSION), "active tenants missing current schema projection");
         verifyActiveTenantSchemaState(connection);
     }
 
@@ -641,8 +645,8 @@ public final class ProductionBootstrapCli {
                 requireMinimum(connection, """
                         select count(*)
                         from %s.tenant_schema_history
-                        where version = '64' and success
-                        """.formatted(quotedIdentifier(schemaName)), 1, schemaName + " tenant migration version");
+                        where version = '%d' and success
+                        """.formatted(quotedIdentifier(schemaName), TARGET_VERSION), 1, schemaName + " tenant migration version");
                 String actualChecksum = fingerprint(connection, schemaName);
                 if (recordedChecksum == null
                         || !recordedChecksum.equals(actualChecksum)
