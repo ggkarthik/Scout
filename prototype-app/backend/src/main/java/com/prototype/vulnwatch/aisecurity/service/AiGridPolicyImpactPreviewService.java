@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.aisecurity.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.NullNode;
 import com.prototype.vulnwatch.aisecurity.policy.AiGridPredicateEngine;
 import com.prototype.vulnwatch.aisecurity.policy.AiSecurityResourceFamilyCatalogue;
 import com.prototype.vulnwatch.domain.Tenant;
@@ -172,9 +173,16 @@ public class AiGridPolicyImpactPreviewService {
     }
 
     private Candidate throwNotFound() { throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Policy version not found"); }
-    private boolean providerMatches(String policyProvider, String artifactProvider) { return "MULTI_CLOUD".equals(policyProvider) || policyProvider.equalsIgnoreCase(artifactProvider); }
+    private boolean providerMatches(String policyProvider, String artifactProvider) {
+        return policyProvider == null || policyProvider.isBlank()
+                || "MULTI_CLOUD".equals(policyProvider)
+                || policyProvider.equalsIgnoreCase(artifactProvider);
+    }
     private String policyId(Candidate candidate) { return candidate.policyId(); }
-    private JsonNode parse(String value) { try { return mapper.readTree(value); } catch (Exception ex) { throw new IllegalArgumentException("Invalid stored policy JSON", ex); } }
+    private JsonNode parse(String value) {
+        if (value == null || value.isBlank()) return NullNode.getInstance();
+        try { return mapper.readTree(value); } catch (Exception ex) { throw new IllegalArgumentException("Invalid stored policy JSON", ex); }
+    }
     private List<String> strings(String value) { try { return mapper.readValue(value, new TypeReference<>() {}); } catch (Exception ex) { return List.of(); } }
     private List<AiGridAssessmentService.FactRequirement> requirements(String value) { try { return mapper.readValue(value, new TypeReference<>() {}); } catch (Exception ex) { return List.of(); } }
     private long count(String sql, Map<String, Object> params) { Long value=jdbc.queryForObject(sql,params,Long.class); return value==null?0:value; }

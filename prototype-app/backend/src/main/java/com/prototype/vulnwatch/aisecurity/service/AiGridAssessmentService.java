@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.aisecurity.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.NullNode;
 import com.prototype.vulnwatch.aisecurity.policy.AiGridPredicateEngine;
 import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyScopeMatcher;
 import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyScopeMatcher.ArtifactScopeFacts;
@@ -282,7 +283,7 @@ public class AiGridAssessmentService {
                        native_kinds_json::text, scope_resolution,
                        required_capabilities_json::text, required_relationships_json::text, required_resource_families_json::text,
                        required_facts_json::text, predicate_json::text, parameter_definitions_json::text, reason_code,
-                       evaluation_mode,evaluation_definition_json::text
+                       evaluation_mode,evaluation_definition_json::text,p.provider
                   from platform.ai_grid_policy_versions p
                   join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id and d.available=true
                  where p.lifecycle = 'PUBLISHED'
@@ -305,7 +306,12 @@ public class AiGridAssessmentService {
         });
     }
     private boolean providerMatches(String policyProvider, String artifactProvider) {
-        return "MULTI_CLOUD".equals(policyProvider) || policyProvider.equalsIgnoreCase(artifactProvider);
+        // Policies authored before the Phase 1 catalog did not declare a provider.  They
+        // remain provider-unscoped while the Phase 1 catalog is paused, preserving their
+        // pre-catalog evaluation behavior.
+        return policyProvider == null || policyProvider.isBlank()
+                || "MULTI_CLOUD".equals(policyProvider)
+                || policyProvider.equalsIgnoreCase(artifactProvider);
     }
 
     private Map<String, ScopeConfig> loadScopes() {
@@ -532,7 +538,10 @@ public class AiGridAssessmentService {
     private List<String> strings(String json) { try { return objectMapper.readValue(json, new TypeReference<>() {}); } catch (Exception e) { throw new IllegalArgumentException("Invalid catalog list", e); } }
     private List<String> strings(JsonNode node) { if (node == null || !node.isArray()) return List.of(); List<String> values = new ArrayList<>(); node.forEach(value -> { if (value.isTextual()) values.add(value.asText()); }); return List.copyOf(values); }
     List<FactRequirement> requirements(String json) { try { return objectMapper.readValue(json, new TypeReference<>() {}); } catch (Exception e) { throw new IllegalArgumentException("Invalid fact requirements", e); } }
-    private JsonNode tree(String json) { try { return objectMapper.readTree(json); } catch (Exception e) { throw new IllegalArgumentException("Invalid catalog JSON", e); } }
+    private JsonNode tree(String json) {
+        if (json == null || json.isBlank()) return NullNode.getInstance();
+        try { return objectMapper.readTree(json); } catch (Exception e) { throw new IllegalArgumentException("Invalid catalog JSON", e); }
+    }
     private Map<String, Object> readMap(String json) { try { return objectMapper.readValue(json, new TypeReference<>() {}); } catch (Exception e) { return Map.of(); } }
     private Map<String, Object> defaults(String json) { try { List<Map<String,Object>> definitions=objectMapper.readValue(json,new TypeReference<>() {}); Map<String,Object> result=new LinkedHashMap<>(); definitions.forEach(definition -> { if(definition.get("key") != null && definition.get("defaultValue") != null) result.put(String.valueOf(definition.get("key")), definition.get("defaultValue")); }); return result; } catch(Exception e) { return Map.of(); } }
     private String json(Object value) { try { return objectMapper.writeValueAsString(value); } catch (Exception e) { throw new IllegalArgumentException("Invalid assessment JSON", e); } }

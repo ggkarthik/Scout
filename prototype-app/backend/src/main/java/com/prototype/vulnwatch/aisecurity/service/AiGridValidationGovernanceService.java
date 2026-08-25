@@ -329,7 +329,9 @@ public class AiGridValidationGovernanceService {
 
     private PrecisionSampleProvenance validatePrecisionSampleProvenance(PrecisionReview review, PrecisionSampleCommand command) {
         PolicyCandidate candidate = policyCandidate(review.policyId(), review.policyVersion());
-        if (!candidate.provider().equals(command.provider()) || !candidate.severity().equals(command.severity())) {
+        boolean providerMatches = candidate.provider() == null || candidate.provider().isBlank()
+                || candidate.provider().equals(command.provider());
+        if (!providerMatches || !candidate.severity().equals(command.severity())) {
             throw conflict("Precision sample provider and severity must match the reviewed policy");
         }
         return tenantExecution.run(command.sourceTenantId(), () -> {
