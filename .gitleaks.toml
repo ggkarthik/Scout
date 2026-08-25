@@ -21,26 +21,3 @@ paths = [
   '''^prototype-app/backend/src/test/java/com/prototype/vulnwatch/controller/TenantDeletionPostgresIntegrationTest\.java$''',
   '''^prototype-app/backend/src/test/java/com/prototype/vulnwatch/service/TestPersonaServiceTest\.java$'''
 ]
-
-[[allowlists]]
-description = "Generated AGCF fact identifiers in the governed policy catalog"
-rules = ["generic-api-key"]
-regexTarget = "match"
-regexes = [
-  '''agcf\.agcf-(?:aws|azr|xsp)-[0-9]{3}\.evidence'''
-]
-paths = [
-  '''^prototype-app/policy-packages/agcf/AGCF-(?:AWS|AZR|XSP)-[0-9]{3}/1\.0\.0\.json$''',
-  '''^prototype-app/backend/src/main/resources/db/migration/postgres_reset/V76__seed_ai_grid_phase_1_catalog\.sql$'''
-]
-
-[[allowlists]]
-description = "AI Grid Key Vault relationship-type enum"
-rules = ["generic-api-key"]
-regexTarget = "match"
-regexes = [
-  '''USES_KEY_VAULT_KEY'''
-]
-paths = [
-  '''^prototype-app/backend/src/main/resources/db/migration/postgres_reset/V77__ai_grid_resource_and_relationship_catalog\.sql$'''
-]
