@@ -174,9 +174,8 @@ class AiGridValidationGovernancePostgresIntegrationTest {
                 "Deterministic stratified sample across secure and insecure answer-key populations",
                 100, 0.95, 0.95), "precision-owner");
         for (int index = 1; index <= 100; index++) {
-            var sample = governance.addPrecisionSample(review.id(), new PrecisionSampleCommand(
-                    "finding-" + index, "AWS", "BEDROCK_AGENTS", "HIGH", "FAIL", true,
-                    "review://finding/" + index));
+            var sample = governance.addPrecisionSample(review.id(), precisionSample(
+                    "finding-" + index, policyId, version, provenance, 100 + index));
             labelTruePositive(review.id(), sample.id());
         }
         governance.assessBias(review.id(), true,
@@ -211,13 +210,13 @@ class AiGridValidationGovernancePostgresIntegrationTest {
     @Test
     void rejectsUnderpoweredPerfectPrecisionWhenWilsonLowerBoundMissesThreshold() {
         String policyId = "GOVERNANCE_UNDERPOWERED_POLICY";
+        ProvenanceFixture provenance = seedProvenanceRun(policyId, "1.0.0");
         var review = governance.createPrecisionReview(new PrecisionReviewCommand(
                 policyId, "1.0.0", "Two reviewed findings", "Deterministic sample",
                 2, 0.95, 0.95), "precision-owner");
         for (int index = 1; index <= 2; index++) {
-            var sample = governance.addPrecisionSample(review.id(), new PrecisionSampleCommand(
-                    "underpowered-" + index, "AWS", "BEDROCK_AGENTS", "HIGH", "FAIL", true,
-                    "review://underpowered/" + index));
+            var sample = governance.addPrecisionSample(review.id(), precisionSample(
+                    "underpowered-" + index, policyId, "1.0.0", provenance, 200 + index));
             labelTruePositive(review.id(), sample.id());
         }
         governance.assessBias(review.id(), true, "The declared two-item sample was reviewed as specified",
@@ -256,7 +255,15 @@ class AiGridValidationGovernancePostgresIntegrationTest {
         UUID pass = seedAssessment(tenant, runId, policyId, policyVersion, "PASS", false, 1);
         UUID fail = seedAssessment(tenant, runId, policyId, policyVersion, "FAIL", true, 2);
         UUID noDecision = seedAssessment(tenant, runId, policyId, policyVersion, "NO_DECISION", false, 3);
-        return new ProvenanceFixture(tenant.getId(), runId, pass, fail, noDecision);
+        return new ProvenanceFixture(tenant, runId, pass, fail, noDecision);
+    }
+
+    private PrecisionSampleCommand precisionSample(String sampleKey, String policyId, String policyVersion,
+                                                    ProvenanceFixture provenance, int ordinal) {
+        UUID assessmentId = seedAssessment(provenance.tenant(), provenance.runId(), policyId, policyVersion,
+                "FAIL", true, ordinal);
+        return new PrecisionSampleCommand(sampleKey, "AWS", "BEDROCK_AGENTS", "HIGH", "FAIL", true,
+                "review://" + sampleKey, provenance.tenantId(), provenance.runId(), assessmentId);
     }
 
     private UUID seedAssessment(Tenant tenant, UUID runId, String policyId, String policyVersion,
@@ -319,8 +326,12 @@ class AiGridValidationGovernancePostgresIntegrationTest {
         });
     }
 
-    private record ProvenanceFixture(UUID tenantId, UUID runId, UUID passAssessmentId,
-                                     UUID failAssessmentId, UUID noDecisionAssessmentId) {}
+    private record ProvenanceFixture(Tenant tenant, UUID runId, UUID passAssessmentId,
+                                     UUID failAssessmentId, UUID noDecisionAssessmentId) {
+        UUID tenantId() {
+            return tenant.getId();
+        }
+    }
 
     private Map<String, Object> expected(String decision, boolean finding, String evidenceState) {
         return Map.of(

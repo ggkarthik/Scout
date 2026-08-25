@@ -325,8 +325,8 @@ class AiGridR2ExposurePostgresIntegrationTest {
             exposures.correlateCompleteRun(tenant, runId);
             assertEquals(101, count("select count(*) from ai_grid_system_memberships"),
                     "system membership is root plus the first 100 current edges");
-            assertEquals(200, count("select graph_traversed_path_count from ai_grid_run_metrics"),
-                    "two applicable templates each traverse at most 100 first-hop paths");
+            assertEquals(300, count("select graph_traversed_path_count from ai_grid_run_metrics"),
+                    "three applicable templates each traverse at most 100 first-hop paths");
             return null;
         });
     }

@@ -342,7 +342,7 @@ class AiSecurityObservationPostgresIntegrationTest {
                     "select count(*) from ai_grid_snapshot_bodies",
                     Map.of(), Integer.class),
                     "the same guardrail evidence in two manifests must reuse one content-addressed body");
-            assertEquals(3, jdbc.queryForObject(
+            assertEquals(2, jdbc.queryForObject(
                     "select count(*) from ai_grid_facts where run_id = :runId",
                     Map.of("runId", runId), Integer.class));
             assertEquals("FAIL", jdbc.queryForObject("""
