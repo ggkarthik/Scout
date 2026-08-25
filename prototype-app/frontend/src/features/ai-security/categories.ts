@@ -13,7 +13,7 @@ export const AI_ARTIFACT_CATEGORIES: AiArtifactCategory[] = [
   { key: 'AGENTS', label: 'Agents', nativeKinds: ['AWS_BEDROCK_AGENT', 'AZURE_BOT_SERVICES', 'AZURE_FOUNDRY_AGENTS'] },
   { key: 'MODELS', label: 'Models', nativeKinds: ['AWS_BEDROCK_MODEL', 'AZURE_FOUNDRY_DEPLOYMENTS', 'AZURE_ML_MODELS'] },
   { key: 'GUARDRAILS', label: 'Guardrails', nativeKinds: ['AWS_BEDROCK_GUARDRAIL', 'AZURE_RAI_POLICIES'] },
-  { key: 'IDENTITY', label: 'Identity', nativeKinds: ['AZURE_RBAC_GLOBAL', 'AZURE_IDENTITY'] },
+  { key: 'IDENTITY', label: 'Identities', nativeKinds: ['AZURE_RBAC_GLOBAL', 'AZURE_IDENTITY'] },
 ];
 
 const NATIVE_KIND_TO_CATEGORY = new Map<string, AiArtifactCategory>(

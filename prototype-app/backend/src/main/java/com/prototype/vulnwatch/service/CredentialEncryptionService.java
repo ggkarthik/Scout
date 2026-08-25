@@ -17,6 +17,8 @@ public class CredentialEncryptionService {
     private static final String PREFIX = "enc:v1:";
     private static final int IV_BYTES = 12;
     private static final int TAG_BITS = 128;
+    private static final String DECRYPTION_FAILURE = "Encrypted credential cannot be decrypted. "
+            + "Restore the original APP_CREDENTIAL_ENCRYPTION_KEY or replace the credential profile.";
 
     private final SecretKeySpec keySpec;
     private final SecureRandom secureRandom = new SecureRandom();
@@ -58,7 +60,7 @@ public class CredentialEncryptionService {
         try {
             byte[] envelope = Base64.getDecoder().decode(storedValue.substring(PREFIX.length()));
             if (envelope.length <= IV_BYTES) {
-                throw new IllegalStateException("Failed to decrypt credential");
+                throw new CredentialDecryptionException(DECRYPTION_FAILURE);
             }
             ByteBuffer buffer = ByteBuffer.wrap(envelope);
             byte[] iv = new byte[IV_BYTES];
@@ -69,7 +71,7 @@ public class CredentialEncryptionService {
             cipher.init(Cipher.DECRYPT_MODE, keySpec, new GCMParameterSpec(TAG_BITS, iv));
             return new String(cipher.doFinal(ciphertext), StandardCharsets.UTF_8);
         } catch (GeneralSecurityException | IllegalArgumentException ex) {
-            throw new IllegalStateException("Failed to decrypt credential", ex);
+            throw new CredentialDecryptionException(DECRYPTION_FAILURE, ex);
         }
     }
 
@@ -79,5 +81,16 @@ public class CredentialEncryptionService {
 
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    /** Signals that an encrypted value cannot be opened with the configured key. */
+    public static final class CredentialDecryptionException extends IllegalStateException {
+        public CredentialDecryptionException(String message) {
+            super(message);
+        }
+
+        public CredentialDecryptionException(String message, Throwable cause) {
+            super(message, cause);
+        }
     }
 }

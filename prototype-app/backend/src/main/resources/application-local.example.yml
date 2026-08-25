@@ -1,5 +1,5 @@
 # Copy to application-local.yml (which is ignored) only when a local profile file is needed.
-# Prefer environment variables from backend/.env.local.
+# application.yml automatically imports backend/.env.local when present.
 app:
   security:
     api-key: ${APP_API_KEY:}

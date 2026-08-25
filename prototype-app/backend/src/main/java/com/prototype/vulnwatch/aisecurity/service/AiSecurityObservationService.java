@@ -48,6 +48,7 @@ public class AiSecurityObservationService {
     private final AiSecuritySyncRunFacade syncRunFacade;
     private final AiSecurityMetadataSanitizer metadataSanitizer;
     private AiGridPipelineService aiGridPipelineService;
+    private AiGridCapabilityService aiGridCapabilityService;
 
     public AiSecurityObservationService(
             NamedParameterJdbcTemplate jdbc,
@@ -68,6 +69,11 @@ public class AiSecurityObservationService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setAiGridPipelineService(AiGridPipelineService aiGridPipelineService) {
         this.aiGridPipelineService = aiGridPipelineService;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setAiGridCapabilityService(AiGridCapabilityService aiGridCapabilityService) {
+        this.aiGridCapabilityService = aiGridCapabilityService;
     }
 
     public IngestionResult ingest(Tenant tenant, ObservationEnvelopeV1 envelope) {
@@ -158,6 +164,7 @@ public class AiSecurityObservationService {
                     ? ScopeStatus.PARTIAL
                     : envelope.completionStatus();
             finishScope(envelope, finalStatus, accepted, combinedDiagnostics);
+            if (aiGridCapabilityService != null) aiGridCapabilityService.recordScope(tenant, envelope, finalStatus);
             if (finalStatus == ScopeStatus.COMPLETE) {
                 reconcileCompleteScope(envelope);
                 if (aiGridPipelineService != null) {

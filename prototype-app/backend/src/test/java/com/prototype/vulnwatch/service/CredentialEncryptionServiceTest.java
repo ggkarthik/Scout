@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 class CredentialEncryptionServiceTest {
 
     private static final String TEST_KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+    private static final String OTHER_TEST_KEY = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=";
 
     @Test
     void encryptsAndDecryptsCredential() {
@@ -41,5 +42,19 @@ class CredentialEncryptionServiceTest {
     @Test
     void rejectsNon256BitKey() {
         assertThrows(IllegalStateException.class, () -> new CredentialEncryptionService("AAAA"));
+    }
+
+    @Test
+    void explainsHowToRecoverWhenCiphertextUsesAnotherKey() {
+        String ciphertext = new CredentialEncryptionService(TEST_KEY).encrypt("super-secret-token");
+
+        CredentialEncryptionService.CredentialDecryptionException exception = assertThrows(
+                CredentialEncryptionService.CredentialDecryptionException.class,
+                () -> new CredentialEncryptionService(OTHER_TEST_KEY).decrypt(ciphertext));
+
+        assertEquals(
+                "Encrypted credential cannot be decrypted. "
+                        + "Restore the original APP_CREDENTIAL_ENCRYPTION_KEY or replace the credential profile.",
+                exception.getMessage());
     }
 }

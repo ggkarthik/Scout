@@ -1,4 +1,8 @@
 spring:
+  config:
+    # Local developer credentials live in this ignored properties-format file.
+    # Environment variables still take precedence for containers and deployments.
+    import: optional:file:.env.local[.properties]
   application:
     name: vulnwatch-backend
   datasource:

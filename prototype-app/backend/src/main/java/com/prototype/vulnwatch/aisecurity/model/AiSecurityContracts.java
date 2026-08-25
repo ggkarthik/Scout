@@ -11,6 +11,8 @@ public final class AiSecurityContracts {
 
     public enum ScopeStatus {
         COMPLETE,
+        DISABLED,
+        UNAUTHORIZED,
         PARTIAL,
         FAILED,
         UNSUPPORTED

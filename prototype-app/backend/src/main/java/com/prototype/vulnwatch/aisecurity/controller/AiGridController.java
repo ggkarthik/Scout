@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.aisecurity.controller;
 
 import com.prototype.vulnwatch.aisecurity.service.AiGridApiService;
+import com.prototype.vulnwatch.aisecurity.service.AiGridCapabilityService;
 import com.prototype.vulnwatch.aisecurity.service.AiExposureIntelligenceService;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityAccessService;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityApiService;
@@ -32,17 +33,20 @@ public class AiGridController {
     private final AiSecurityAccessService access;
     private final AiGridApiService api;
     private final AiExposureIntelligenceService intelligence;
+    private final ObjectProvider<AiGridCapabilityService> capabilities;
     private final ObjectProvider<AiSecurityApiService> policyCompatibility;
 
     public AiGridController(WorkspaceService workspaces, RequestActorService actors,
                             AiSecurityAccessService access, AiGridApiService api,
                             AiExposureIntelligenceService intelligence,
+                            ObjectProvider<AiGridCapabilityService> capabilities,
                             ObjectProvider<AiSecurityApiService> policyCompatibility) {
         this.workspaces = workspaces;
         this.actors = actors;
         this.access = access;
         this.api = api;
         this.intelligence = intelligence;
+        this.capabilities = capabilities;
         this.policyCompatibility = policyCompatibility;
     }
 
@@ -119,6 +123,10 @@ public class AiGridController {
     @GetMapping("/ai-policy-readiness")
     public List<com.prototype.vulnwatch.aisecurity.service.AiGridReadinessService.PolicyReadinessView> policyReadiness() {
         return api.policyReadiness(tenant());
+    }
+    @GetMapping("/ai-connector-capabilities")
+    public List<AiGridCapabilityService.CapabilityView> connectorCapabilities() {
+        return capabilities.getObject().latest(tenant());
     }
     @GetMapping("/ai-setup-actions")
     public List<com.prototype.vulnwatch.aisecurity.service.AiGridReadinessService.SetupActionView> setupActions() {

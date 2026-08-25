@@ -1,0 +1,86 @@
+{
+  "policyId": "AGCF-AZR-023",
+  "version": "1.0.0",
+  "name": "Azure ML endpoint traffic references a missing or non-ready deployment",
+  "description": "Detects when azure ML endpoint traffic references a missing or non-ready deployment using only declared evidence.",
+  "securityIntent": "Prevent the risk condition described by AGCF-AZR-023.",
+  "remediationIntent": "Correct the provider configuration or relationship and reassess with complete, fresh evidence.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-AZR-023",
+  "provider": "AZURE",
+  "evaluationMode": "DIRECT_RELATIONSHIP",
+  "evaluationDefinition": {
+    "mode": "DIRECT_RELATIONSHIP",
+    "directRelationship": {
+      "sourcePredicate": {
+        "fact": "agcf.agcf-azr-023.evidence",
+        "eq": true
+      },
+      "edgeConstraints": [
+        "DIRECT_PROVIDER_RELATIONSHIP"
+      ],
+      "targetPredicate": {
+        "fact": "agcf.agcf-azr-023.evidence",
+        "eq": true
+      },
+      "targetCardinality": "ONE_OR_MORE"
+    }
+  },
+  "baseEvidenceTiers": [
+    "E1",
+    "E2"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "ENABLED",
+  "releaseFamily": "AGCF_PHASE_1",
+  "wave": "PHASE_1",
+  "workflowClass": "POSTURE_FINDING",
+  "artifactTypes": [
+    "AI_ARTIFACT"
+  ],
+  "nativeKinds": [],
+  "requiredCapabilities": [
+    "ML_WORKSPACES_ENDPOINTS"
+  ],
+  "requiredRelationships": [
+    "DIRECT_PROVIDER_RELATIONSHIP"
+  ],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [
+    {
+      "factKey": "agcf.agcf-azr-023.evidence",
+      "valueType": "BOOLEAN",
+      "evidenceClasses": [
+        "E1",
+        "E2"
+      ],
+      "maxAgeSeconds": 86400
+    }
+  ],
+  "frameworkMappings": [
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM04",
+      "mappingType": "PARTIAL",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "MDS-11",
+      "mappingType": "DIRECT",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "CCC-06",
+      "mappingType": "PARTIAL",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    }
+  ],
+  "packageSourceRef": "policy-packages/agcf/AGCF-AZR-023/1.0.0.json"
+}

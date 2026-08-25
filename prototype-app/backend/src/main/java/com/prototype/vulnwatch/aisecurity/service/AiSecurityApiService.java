@@ -368,6 +368,8 @@ public class AiSecurityApiService {
             String provider,
             String subscription,
             String severity,
+            String excludeNativeKinds,
+            String excludeArtifactTypes,
             int page,
             int size
     ) {
@@ -381,6 +383,8 @@ public class AiSecurityApiService {
                     .addValue("provider", normalizedProvider(provider), Types.VARCHAR)
                     .addValue("subscription", blankToNull(subscription), Types.VARCHAR)
                     .addValue("severity", blankToNull(severity), Types.VARCHAR)
+                    .addValue("excludeNativeKinds", blankToNull(excludeNativeKinds), Types.VARCHAR)
+                    .addValue("excludeArtifactTypes", blankToNull(excludeArtifactTypes), Types.VARCHAR)
                     .addValue("limit", safeSize, Types.INTEGER)
                     .addValue("offset", safePage * safeSize, Types.INTEGER);
             String severityFilter = """
@@ -399,6 +403,8 @@ public class AiSecurityApiService {
                         or (:otherArtifacts = true and a.artifact_type not in ('AI_AGENT', 'AI_MODEL'))
                         or (:otherArtifacts = false and a.artifact_type = :artifactType))
                        and (:nativeKind is null or a.native_kind = any(string_to_array(:nativeKind, ',')))
+                       and (:excludeNativeKinds is null or not (a.native_kind = any(string_to_array(:excludeNativeKinds, ','))))
+                       and (:excludeArtifactTypes is null or not (a.artifact_type = any(string_to_array(:excludeArtifactTypes, ','))))
                        and (:provider is null or a.provider = :provider)
                        and (:subscription is null or a.account_id = :subscription)
                     """ + severityFilter;

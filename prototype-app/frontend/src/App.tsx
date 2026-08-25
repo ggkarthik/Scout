@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { PerformanceInstrumentation } from './lib/performanceMonitoring';
 import type { InventoryViewKey } from './features/inventory/types';
+import { AI_ARTIFACT_CATEGORIES, combinedNativeKindFilterValue } from './features/ai-security/categories';
 import type { AdminRouteView, AppTab, ConfigurationsRouteView, ConnectRouteView, VulnerabilityIntelRouteView } from './app/routes';
 import {
   activeTabForPath,
@@ -14,6 +15,7 @@ import {
   normalizeOperationsRouteView,
   normalizePlatformRouteView,
   pathForAdminView,
+  pathForAiInventoryOverview,
   pathForConfigurationsView,
   pathForConnectView,
   pathForInventoryView,
@@ -222,8 +224,16 @@ const INVENTORY_PILL_ORDER: Array<{ key: InventoryViewKey; label: string; countK
   { key: 'container-images', label: 'Container Images', countKey: 'containerImages' },
   { key: 'sbom', label: 'Applications', countKey: 'applications' },
   { key: 'bom-components', label: 'BOM Components', countKey: 'bomInventory' },
-  { key: 'bom-inventory', label: 'BOM Inventory', countKey: 'bomInventory' },
-  { key: 'ai', label: 'AI Inventory' }
+  { key: 'bom-inventory', label: 'BOM Inventory', countKey: 'bomInventory' }
+];
+type AiInventoryNavItem = { key: string; label: string; nativeKind?: string };
+
+const AI_INVENTORY_NAV_ITEMS: AiInventoryNavItem[] = [
+  { key: 'overview', label: 'Overview' },
+  ...AI_ARTIFACT_CATEGORIES.map((category) => ({ key: category.key, label: category.label, nativeKind: combinedNativeKindFilterValue(category.nativeKinds) })),
+  { key: 'mcp-servers', label: 'MCP Servers' },
+  { key: 'data-stores', label: 'Data stores' },
+  { key: 'others', label: 'Others' },
 ];
 const VULN_REPO_NAV_ITEMS: Array<{ key: VulnerabilityIntelRouteView; label: string }> = [
   { key: 'dashboard', label: 'Dashboard' },
@@ -701,6 +711,7 @@ function AppShell() {
   const [settingsMenuOpen, setSettingsMenuOpen] = React.useState(false);
   const [personaDialogOpen, setPersonaDialogOpen] = React.useState(false);
   const [inventoryNavExpanded, setInventoryNavExpanded] = React.useState(false);
+  const [aiInventoryNavExpanded, setAiInventoryNavExpanded] = React.useState(false);
   const [findingsNavExpanded, setFindingsNavExpanded] = React.useState(false);
   const [adminNavExpanded, setAdminNavExpanded] = React.useState(false);
   const [configurationsNavExpanded, setConfigurationsNavExpanded] = React.useState(false);
@@ -781,9 +792,8 @@ function AppShell() {
     };
   }, [inventoryAssetsQuery.data, inventoryBomQuery.data?.length, inventorySoftwareQuery.data?.totalElements]);
   const visibleInventoryPills = React.useMemo(
-    () => INVENTORY_PILL_ORDER.filter((item) =>
-      (item.key !== 'ai' || aiSecurityEnabled) && (!item.countKey || inventoryPillCounts[item.countKey] > 0)),
-    [aiSecurityEnabled, inventoryPillCounts]
+    () => INVENTORY_PILL_ORDER.filter((item) => !item.countKey || inventoryPillCounts[item.countKey] > 0),
+    [inventoryPillCounts]
   );
 
   React.useEffect(() => {
@@ -941,7 +951,7 @@ function AppShell() {
           </div>
 
           <div className="nav-main-section">
-            {visiblePrimaryNavTabs.map((tab) => {
+            {visiblePrimaryNavTabs.filter((tab) => tab !== 'admin' && tab !== 'configurations').map((tab) => {
               if (tab === 'findings' && aiSecurityEnabled) {
                 return renderExpandableNavButton(
                   tab,
@@ -965,28 +975,31 @@ function AppShell() {
                   (key) => navigate(pathForInventoryView(key as InventoryViewKey))
                 );
               }
-              if (tab === 'admin') {
-                return renderExpandableNavButton(
-                  tab,
-                  adminNavExpanded,
-                  () => setAdminNavExpanded((current) => !current),
-                  ADMIN_PILL_ORDER,
-                  (key) => activeTab === 'admin' && activeAdminView === key,
-                  (key) => navigate(pathForAdminView(key as AdminRouteView))
-                );
-              }
-              if (tab === 'configurations') {
-                return renderExpandableNavButton(
-                  tab,
-                  configurationsNavExpanded,
-                  () => setConfigurationsNavExpanded((current) => !current),
-                  CONFIGURATIONS_PILL_ORDER,
-                  (key) => activeTab === 'configurations' && activeConfigurationsView === key,
-                  (key) => navigate(pathForConfigurationsView(key as ConfigurationsRouteView))
-                );
-              }
               return renderNavButton(tab);
             })}
+            {aiSecurityEnabled && renderExpandableNavButton(
+              'ai',
+              aiInventoryNavExpanded,
+              () => setAiInventoryNavExpanded((current) => !current),
+              AI_INVENTORY_NAV_ITEMS,
+              (key) => {
+                const params = new URLSearchParams(location.search);
+                if (key === 'overview') return location.pathname === '/inventory/ai' || location.pathname === '/inventory/ai/overview';
+                if (key === 'mcp-servers') return location.pathname === '/inventory/ai/mcp' && params.get('artifactRole') === 'MCP_SERVER';
+                if (key === 'data-stores') return location.pathname === '/inventory/ai/knowledge-data' && params.get('artifactRole') === 'DATA_STORE';
+                if (key === 'others') return location.pathname === '/inventory/ai/assets' && params.get('view') === 'others';
+                const item = AI_INVENTORY_NAV_ITEMS.find((candidate) => candidate.key === key);
+                return location.pathname === '/inventory/ai/assets' && params.get('nativeKind') === item?.nativeKind;
+              },
+              (key) => {
+                if (key === 'overview') return navigate(pathForAiInventoryOverview());
+                if (key === 'mcp-servers') return navigate('/inventory/ai/mcp?artifactRole=MCP_SERVER');
+                if (key === 'data-stores') return navigate('/inventory/ai/knowledge-data?artifactRole=DATA_STORE');
+                if (key === 'others') return navigate('/inventory/ai/assets?view=others');
+                const item = AI_INVENTORY_NAV_ITEMS.find((candidate) => candidate.key === key);
+                return navigate(`/inventory/ai/assets?nativeKind=${encodeURIComponent(item?.nativeKind ?? '')}`);
+              }
+            )}
           </div>
 
           {platformScopeOwner && (
@@ -1002,6 +1015,22 @@ function AppShell() {
 
           <div className="nav-bottom-section">
             {BOTTOM_NAV_TABS.map((tab) => renderNavButton(tab))}
+            {visiblePrimaryNavTabs.includes('admin') && renderExpandableNavButton(
+              'admin',
+              adminNavExpanded,
+              () => setAdminNavExpanded((current) => !current),
+              ADMIN_PILL_ORDER,
+              (key) => activeTab === 'admin' && activeAdminView === key,
+              (key) => navigate(pathForAdminView(key as AdminRouteView))
+            )}
+            {visiblePrimaryNavTabs.includes('configurations') && renderExpandableNavButton(
+              'configurations',
+              configurationsNavExpanded,
+              () => setConfigurationsNavExpanded((current) => !current),
+              CONFIGURATIONS_PILL_ORDER,
+              (key) => activeTab === 'configurations' && activeConfigurationsView === key,
+              (key) => navigate(pathForConfigurationsView(key as ConfigurationsRouteView))
+            )}
           </div>
         </aside>
 
@@ -1144,6 +1173,7 @@ function AppShell() {
               <Route path="/vuln-repo/org-cves/:cveId/software" element={<VulnRepoCveSoftwarePage />} />
               <Route path="/vuln-repo/org-cves/:cveId?" element={<VulnRepoWorkbenchRoute />} />
               <Route path="/inventory/hosts/:assetId" element={<InventoryHostAssetRoute />} />
+              <Route path="/inventory/ai/overview" element={<AiSecurityRoute><AiInventoryPage /></AiSecurityRoute>} />
               <Route path="/inventory/ai/assets" element={<AiSecurityRoute><AiInventoryAssetsPage /></AiSecurityRoute>} />
               <Route path="/inventory/ai/knowledge-data" element={<AiSecurityRoute><AiKnowledgeMcpInventoryPage kind="knowledge-data" /></AiSecurityRoute>} />
               <Route path="/inventory/ai/mcp" element={<AiSecurityRoute><AiKnowledgeMcpInventoryPage kind="mcp" /></AiSecurityRoute>} />

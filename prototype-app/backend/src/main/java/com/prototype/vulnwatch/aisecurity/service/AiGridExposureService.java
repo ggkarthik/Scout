@@ -32,15 +32,19 @@ public class AiGridExposureService {
     private static final int HARD_MAX_PATHS = 10_000;
     private static final Set<String> DATA_EDGES = Set.of("USES_KNOWLEDGE_BASE", "USES_DATA_SOURCE", "READS_FROM_S3", "USES_SEARCH_INDEX");
     private static final Set<String> TOOL_EDGES = Set.of("USES_TOOL", "INVOKES_LAMBDA", "ASSUMES_ROLE", "HAS_ROLE_ASSIGNMENT", "USES_KEY_VAULT_KEY");
+    private static final Set<String> MCP_EDGES = Set.of("EXPOSES_MCP", "CONNECTS_TO_MCP", "CONTAINS_MCP_TARGET");
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final AiGridExposureFindingService findingService;
+    private final AiGridGraphEvidenceResolver graphEvidence;
 
     public AiGridExposureService(NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper,
-                                 AiGridExposureFindingService findingService) {
+                                 AiGridExposureFindingService findingService,
+                                 AiGridGraphEvidenceResolver graphEvidence) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
         this.findingService = findingService;
+        this.graphEvidence = graphEvidence;
     }
 
     public CorrelationResult correlateCompleteRun(Tenant tenant, UUID runId) {
@@ -394,15 +398,9 @@ public class AiGridExposureService {
 
     private Map<UUID, List<Edge>> graph(UUID runId, Instant asOf) {
         Map<UUID, List<Edge>> result = new HashMap<>();
-        jdbc.query("""
-                select id,source_artifact_id,target_artifact_id,relationship_type,valid_from,valid_until
-                  from ai_grid_relationship_snapshots where run_id=:runId
-                   and valid_from<=:asOf and (valid_until is null or valid_until>=:asOf)
-                 order by source_artifact_id,relationship_type,target_artifact_id
-                """, new MapSqlParameterSource().addValue("runId", runId).addValue("asOf", Timestamp.from(asOf)), rs -> {
-            Edge edge = new Edge(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class),
-                    rs.getObject(3, UUID.class), rs.getString(4), rs.getTimestamp(5).toInstant(),
-                    rs.getTimestamp(6) == null ? null : rs.getTimestamp(6).toInstant());
+        graphEvidence.graphForRun(runId, asOf).forEach(value -> {
+            Edge edge = new Edge(value.id(), value.sourceArtifactId(), value.targetArtifactId(), value.type(),
+                    value.validFrom(), value.validUntil());
             result.computeIfAbsent(edge.source(), ignored -> new ArrayList<>()).add(edge);
         });
         return result;
@@ -531,6 +529,36 @@ public class AiGridExposureService {
                 rootCause = artifactWith(path, facts, "control.execution_boundary_inadequate_verified", system.rootArtifactId());
                 impact = "Untrusted input may influence autonomous execution without an adequate control boundary.";
                 breakpoint = "Add verified guardrail, isolation, or human approval before autonomous execution.";
+            }
+            case "R2_EXTERNAL_MCP_SENSITIVE_ACCESS" -> {
+                validated = hasEdge(path, MCP_EDGES)
+                        && exactTrueOn(path.nodes().get(0), facts, "mcp.external_or_unapproved_verified", factRules, asOf)
+                        && exactTrueOn(path.nodes().get(path.nodes().size() - 1), facts, "data.sensitive_access_confirmed", factRules, asOf);
+                hypothesis = hasEdge(path, MCP_EDGES) && hasWeakMcpAuthentication(path, facts, asOf)
+                        && (hasTrue(path, facts, "data.source_linked", asOf) || hasEdge(path, DATA_EDGES));
+                rootCause = artifactWith(path, facts, "mcp.external_or_unapproved_verified", system.rootArtifactId());
+                impact = "An externally reachable or unapproved MCP path may reach sensitive data.";
+                breakpoint = "Approve the MCP endpoint, require strong authentication, or remove the sensitive-data path.";
+            }
+            case "R2_MCP_WEAK_AUTH_EXECUTION" -> {
+                validated = hasEdge(path, MCP_EDGES)
+                        && exactTrueOn(path.nodes().get(0), facts, "agent.autonomous_execution_verified", factRules, asOf)
+                        && exactTrueOn(path.nodes().get(path.nodes().size() - 1), facts, "mcp.auth_inadequate_verified", factRules, asOf);
+                hypothesis = hasEdge(path, MCP_EDGES) && hasAutonomousProxy(path, facts, asOf)
+                        && hasWeakMcpAuthentication(path, facts, asOf);
+                rootCause = artifactWith(path, facts, "mcp.auth_inadequate_verified", system.rootArtifactId());
+                impact = "High-impact execution may route through an MCP target without reliable authentication.";
+                breakpoint = "Require verified MCP target authentication before permitting autonomous or high-impact execution.";
+            }
+            case "R2_SENSITIVE_RETRIEVAL_CONTROL_GAP" -> {
+                validated = hasEdge(path, DATA_EDGES)
+                        && exactTrueOn(path.nodes().get(path.nodes().size() - 1), facts, "data.sensitive_access_confirmed", factRules, asOf)
+                        && exactTrueOn(path.nodes().get(0), facts, "control.execution_boundary_inadequate_verified", factRules, asOf);
+                hypothesis = hasEdge(path, DATA_EDGES) && hasWeakControlProxy(path, facts, asOf)
+                        && (hasTrue(path, facts, "data.source_linked", asOf) || hasTrue(path, facts, "data.sensitive_access_confirmed", asOf));
+                rootCause = artifactWith(path, facts, "control.execution_boundary_inadequate_verified", system.rootArtifactId());
+                impact = "An AI retrieval path may access sensitive data without the required guardrail or PII-filter baseline.";
+                breakpoint = "Apply and verify the guardrail or PII-filter baseline before sensitive retrieval.";
             }
             default -> { return null; }
         }
@@ -770,8 +798,9 @@ public class AiGridExposureService {
         if (evidence.size() != requiredEvidenceCount(correlationId)) return false;
         double minimum = switch (correlationId) {
             case "R2_EXTERNAL_SENSITIVE_ACCESS" -> 0.95;
-            case "R2_EXCESSIVE_TOOL_PRIVILEGE" -> 0.93;
-            case "R2_UNTRUSTED_AUTONOMOUS_EXECUTION" -> 0.92;
+            case "R2_EXCESSIVE_TOOL_PRIVILEGE", "R2_MCP_WEAK_AUTH_EXECUTION" -> 0.93;
+            case "R2_UNTRUSTED_AUTONOMOUS_EXECUTION", "R2_SENSITIVE_RETRIEVAL_CONTROL_GAP" -> 0.92;
+            case "R2_EXTERNAL_MCP_SENSITIVE_ACCESS" -> 0.95;
             default -> 1.0;
         };
         return evidence.stream().allMatch(f -> f.confidence() != null && f.confidence() >= minimum
@@ -781,7 +810,11 @@ public class AiGridExposureService {
     }
 
     private int requiredEvidenceCount(String correlationId) {
-        return "R2_EXCESSIVE_TOOL_PRIVILEGE".equals(correlationId) ? 2 : 3;
+        return switch (correlationId) {
+            case "R2_EXCESSIVE_TOOL_PRIVILEGE", "R2_EXTERNAL_MCP_SENSITIVE_ACCESS",
+                    "R2_MCP_WEAK_AUTH_EXECUTION", "R2_SENSITIVE_RETRIEVAL_CONTROL_GAP" -> 2;
+            default -> 3;
+        };
     }
 
     private List<Fact> validatingEvidence(Path path, Map<UUID, Map<String, Fact>> facts, String correlationId) {
@@ -792,6 +825,12 @@ public class AiGridExposureService {
                     "impact.secret_or_consequential_access_confirmed");
             case "R2_UNTRUSTED_AUTONOMOUS_EXECUTION" -> Set.of("input.untrusted_path_verified",
                     "agent.autonomous_execution_verified", "control.execution_boundary_inadequate_verified");
+            case "R2_EXTERNAL_MCP_SENSITIVE_ACCESS" -> Set.of("mcp.external_or_unapproved_verified",
+                    "data.sensitive_access_confirmed");
+            case "R2_MCP_WEAK_AUTH_EXECUTION" -> Set.of("agent.autonomous_execution_verified",
+                    "mcp.auth_inadequate_verified");
+            case "R2_SENSITIVE_RETRIEVAL_CONTROL_GAP" -> Set.of("data.sensitive_access_confirmed",
+                    "control.execution_boundary_inadequate_verified");
             default -> Set.of();
         };
         return path.nodes().stream().flatMap(id -> facts.getOrDefault(id, Map.of()).values().stream())
@@ -815,6 +854,13 @@ public class AiGridExposureService {
                 .anyMatch(f -> f != null && Set.of("NONE", "LOW").contains(f.value().asText().toUpperCase())
                         && (f.validUntil() == null || !f.validUntil().isBefore(asOf)));
     }
+    private boolean hasWeakMcpAuthentication(Path path, Map<UUID, Map<String, Fact>> facts, Instant asOf) {
+        return List.of("mcp.configured_auth_type", "mcp.inbound_auth_type", "mcp.outbound_auth_type").stream()
+                .map(key -> path.nodes().stream().map(id -> facts.getOrDefault(id, Map.of()).get(key)))
+                .flatMap(java.util.function.Function.identity())
+                .anyMatch(f -> f != null && Set.of("NONE", "UNKNOWN", "").contains(f.value().asText().toUpperCase())
+                        && (f.validUntil() == null || !f.validUntil().isBefore(asOf)));
+    }
     private boolean hasEdge(Path path, Set<String> types) { return path.edges().stream().anyMatch(e -> types.contains(e.type())); }
     private UUID artifactWith(Path path, Map<UUID, Map<String, Fact>> facts, String key, UUID fallback) {
         return path.nodes().stream().filter(id -> facts.getOrDefault(id, Map.of()).containsKey(key)).findFirst().orElse(fallback);
@@ -834,6 +880,16 @@ public class AiGridExposureService {
                     "input.untrusted_path_verified", "agent.autonomous_execution_verified",
                     "control.execution_boundary_inadequate_verified", "data.source_linked", "agent.code_interpreter_enabled_configured",
                     "bedrock.agent.guardrail_attached_configured", "bedrock.guardrail.minimum_strength_configured");
+            case "R2_EXTERNAL_MCP_SENSITIVE_ACCESS" -> Set.of("mcp.external_or_unapproved_verified",
+                    "data.sensitive_access_confirmed", "mcp.configured_auth_type", "mcp.inbound_auth_type",
+                    "mcp.outbound_auth_type", "data.source_linked");
+            case "R2_MCP_WEAK_AUTH_EXECUTION" -> Set.of("agent.autonomous_execution_verified",
+                    "mcp.auth_inadequate_verified", "agent.code_interpreter_enabled_configured", "mcp.configured_auth_type",
+                    "mcp.inbound_auth_type", "mcp.outbound_auth_type");
+            case "R2_SENSITIVE_RETRIEVAL_CONTROL_GAP" -> Set.of("data.sensitive_access_confirmed",
+                    "control.execution_boundary_inadequate_verified", "data.source_linked",
+                    "bedrock.agent.guardrail_attached_configured", "bedrock.guardrail.minimum_strength_configured",
+                    "guardrail.rai_non_blocking_filter_observed");
             default -> Set.of();
         };
         return path.nodes().stream().flatMap(id -> facts.getOrDefault(id, Map.of()).values().stream())

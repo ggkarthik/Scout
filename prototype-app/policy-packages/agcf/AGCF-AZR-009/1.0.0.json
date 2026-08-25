@@ -1,0 +1,91 @@
+{
+  "policyId": "AGCF-AZR-009",
+  "version": "1.0.0",
+  "name": "Managed AI resource lacks required environment or criticality tags",
+  "description": "Detects when managed AI resource lacks required environment or criticality tags using only declared evidence.",
+  "securityIntent": "Prevent the risk condition described by AGCF-AZR-009.",
+  "remediationIntent": "Correct the provider configuration or relationship and reassess with complete, fresh evidence.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-AZR-009",
+  "provider": "AZURE",
+  "evaluationMode": "ARTIFACT_FACTS",
+  "evaluationDefinition": {
+    "mode": "ARTIFACT_FACTS",
+    "artifactFacts": {
+      "predicate": {
+        "fact": "agcf.agcf-azr-009.evidence",
+        "eq": true
+      }
+    }
+  },
+  "baseEvidenceTiers": [
+    "E1"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "DISABLED",
+  "releaseFamily": "AGCF_PHASE_1",
+  "wave": "PHASE_1",
+  "workflowClass": "POSTURE_FINDING",
+  "artifactTypes": [
+    "AI_ARTIFACT"
+  ],
+  "nativeKinds": [],
+  "requiredCapabilities": [
+    "AI_ACCOUNTS"
+  ],
+  "requiredRelationships": [],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [
+    {
+      "factKey": "agcf.agcf-azr-009.evidence",
+      "valueType": "BOOLEAN",
+      "evidenceClasses": [
+        "E1"
+      ],
+      "maxAgeSeconds": 86400
+    }
+  ],
+  "frameworkMappings": [
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "DCS-06",
+      "mappingType": "PARTIAL",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "DCS-07",
+      "mappingType": "PARTIAL",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "GRC-02",
+      "mappingType": "PARTIAL",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    }
+  ],
+  "parameterDefinitions": [
+    {
+      "key": "approvedBaseline",
+      "type": "STRING",
+      "defaultValue": "DEFAULT"
+    }
+  ],
+  "certificationParameterProfile": {
+    "immutable": true,
+    "pass": {
+      "approvedBaseline": "DEFAULT"
+    },
+    "fail": {
+      "approvedBaseline": "STRICT"
+    },
+    "invalid": {}
+  },
+  "packageSourceRef": "policy-packages/agcf/AGCF-AZR-009/1.0.0.json"
+}

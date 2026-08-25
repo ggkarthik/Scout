@@ -75,6 +75,24 @@ class AiGridValidationGovernancePostgresIntegrationTest {
                     default_selection, artifact_types_json, required_capabilities_json,
                     required_relationships_json, required_resource_families_json, required_facts_json,
                     predicate_json, reason_code, remediation, framework_mappings_json,
+                    native_kinds_json, scope_resolution, release_family, package_digest)
+                select 'GOVERNANCE_PHASE1_LOW_POLICY', version, 'Phase 1 low governance test policy',
+                    description, 'LOW', lifecycle, workflow_class, default_selection,
+                    artifact_types_json, required_capabilities_json, required_relationships_json,
+                    required_resource_families_json, required_facts_json, predicate_json,
+                    'GOVERNANCE_PHASE1_LOW_REASON', remediation, framework_mappings_json,
+                    native_kinds_json, scope_resolution, 'AGCF_PHASE_1',
+                    'phase-1-low-policy-material-digest'
+                  from platform.ai_grid_policy_versions
+                 where policy_id = 'GOVERNANCE_TEST_POLICY' and version = '1.0.0'
+                on conflict do nothing
+                """, Map.of()));
+        TenantContext.runAsPlatform(() -> jdbc.update("""
+                insert into platform.ai_grid_policy_versions (
+                    policy_id, version, name, description, severity, lifecycle, workflow_class,
+                    default_selection, artifact_types_json, required_capabilities_json,
+                    required_relationships_json, required_resource_families_json, required_facts_json,
+                    predicate_json, reason_code, remediation, framework_mappings_json,
                     native_kinds_json, scope_resolution)
                 select 'GOVERNANCE_UNDERPOWERED_POLICY', version, 'Underpowered governance test policy',
                     description, severity, lifecycle, workflow_class, default_selection,
@@ -210,6 +228,15 @@ class AiGridValidationGovernancePostgresIntegrationTest {
         assertEquals("FAILED", finalized.status());
         assertEquals(1.0, finalized.precisionValue());
         assertTrue(finalized.confidenceLower() < finalized.precisionThreshold());
+    }
+
+    @Test
+    void phaseOneLowSeverityPoliciesStillRequireFreshPrecisionReview() {
+        var readiness = governance.releaseReadiness("GOVERNANCE_PHASE1_LOW_POLICY", "1.0.0");
+
+        assertFalse(readiness.ready());
+        assertTrue(readiness.blockers().contains("FRESH_PASSING_ANSWER_KEY_REQUIRED"));
+        assertTrue(readiness.blockers().contains("PASSING_PRECISION_REVIEW_REQUIRED"));
     }
 
     private void labelTruePositive(UUID reviewId, UUID sampleId) {

@@ -12,6 +12,11 @@ import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceServ
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.PrecisionReviewCommand;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.PrecisionSample;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.PrecisionSampleCommand;
+import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.Phase1CertificationReadiness;
+import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.Phase1CorpusBootstrap;
+import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.Phase1CorpusBootstrapCommand;
+import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.Phase1CorpusCertification;
+import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.Phase1CorpusReadiness;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.ReleaseDecision;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.ReleaseReadiness;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.RunCommand;
@@ -87,6 +92,26 @@ public class AiGridValidationGovernanceController {
     @GetMapping("/policies/{policyId}/versions/{version}/release-readiness")
     public ReleaseReadiness releaseReadiness(@PathVariable String policyId, @PathVariable String version) {
         return governance.releaseReadiness(policyId, version);
+    }
+
+    @GetMapping("/releases/phase-1/certification-readiness")
+    public Phase1CertificationReadiness phase1CertificationReadiness() {
+        return governance.phase1CertificationReadiness();
+    }
+
+    @PostMapping("/releases/phase-1/certification-corpus/bootstrap")
+    public Phase1CorpusBootstrap bootstrapPhase1Corpus(@RequestBody Phase1CorpusBootstrapCommand command) {
+        return governance.bootstrapPhase1Corpus(command, actor());
+    }
+
+    @GetMapping("/releases/phase-1/certification-corpus/readiness")
+    public Phase1CorpusReadiness phase1CorpusReadiness() {
+        return governance.phase1CorpusReadiness();
+    }
+
+    @PostMapping("/releases/phase-1/certification-corpus/certify")
+    public Phase1CorpusCertification certifyPhase1Corpus() {
+        return governance.certifyPhase1Corpus(actor());
     }
 
     @PostMapping("/precision-reviews")

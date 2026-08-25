@@ -1,0 +1,101 @@
+{
+  "policyId": "AGCF-AWS-008",
+  "version": "1.0.0",
+  "name": "Agent action-group Lambda target is outside the approved target allowlist",
+  "description": "Detects when agent action-group Lambda target is outside the approved target allowlist using only declared evidence.",
+  "securityIntent": "Prevent the risk condition described by AGCF-AWS-008.",
+  "remediationIntent": "Correct the provider configuration or relationship and reassess with complete, fresh evidence.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-AWS-008",
+  "provider": "AWS",
+  "evaluationMode": "DIRECT_RELATIONSHIP",
+  "evaluationDefinition": {
+    "mode": "DIRECT_RELATIONSHIP",
+    "directRelationship": {
+      "sourcePredicate": {
+        "fact": "agcf.agcf-aws-008.evidence",
+        "eq": true
+      },
+      "edgeConstraints": [
+        "DIRECT_PROVIDER_RELATIONSHIP"
+      ],
+      "targetPredicate": {
+        "fact": "agcf.agcf-aws-008.evidence",
+        "eq": true
+      },
+      "targetCardinality": "ONE_OR_MORE"
+    }
+  },
+  "baseEvidenceTiers": [
+    "E2"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "DISABLED",
+  "releaseFamily": "AGCF_PHASE_1",
+  "wave": "PHASE_1",
+  "workflowClass": "POSTURE_FINDING",
+  "artifactTypes": [
+    "AI_ARTIFACT"
+  ],
+  "nativeKinds": [],
+  "requiredCapabilities": [
+    "LAMBDA_URLS"
+  ],
+  "requiredRelationships": [
+    "DIRECT_PROVIDER_RELATIONSHIP"
+  ],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [
+    {
+      "factKey": "agcf.agcf-aws-008.evidence",
+      "valueType": "BOOLEAN",
+      "evidenceClasses": [
+        "E2"
+      ],
+      "maxAgeSeconds": 86400
+    }
+  ],
+  "frameworkMappings": [
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM03",
+      "mappingType": "DIRECT",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "IAM-18",
+      "mappingType": "DIRECT",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "AIS-11",
+      "mappingType": "DIRECT",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    }
+  ],
+  "parameterDefinitions": [
+    {
+      "key": "approvedBaseline",
+      "type": "STRING",
+      "defaultValue": "DEFAULT"
+    }
+  ],
+  "certificationParameterProfile": {
+    "immutable": true,
+    "pass": {
+      "approvedBaseline": "DEFAULT"
+    },
+    "fail": {
+      "approvedBaseline": "STRICT"
+    },
+    "invalid": {}
+  },
+  "packageSourceRef": "policy-packages/agcf/AGCF-AWS-008/1.0.0.json"
+}

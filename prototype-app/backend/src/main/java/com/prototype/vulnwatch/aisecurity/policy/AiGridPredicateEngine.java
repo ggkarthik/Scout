@@ -2,6 +2,7 @@ package com.prototype.vulnwatch.aisecurity.policy;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.Iterator;
 import java.util.Map;
 import org.springframework.stereotype.Component;
@@ -70,7 +71,7 @@ public class AiGridPredicateEngine {
         JsonNode expected = node.get(operator);
         if (expected != null && expected.isObject() && expected.hasNonNull("parameter")) {
             Object parameter = parameters.get(expected.path("parameter").asText());
-            if (parameter == null) return false;
+            if (parameter == null) throw new IllegalArgumentException("Required policy parameter is not configured");
             expected = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(parameter);
         }
         return switch (operator) {
@@ -82,6 +83,15 @@ public class AiGridPredicateEngine {
             case "lt" -> compare(value, expected) < 0;
             case "lte" -> compare(value, expected) <= 0;
             case "strength_lt" -> strength(value.asText()) < strength(expected.asText());
+            case "empty" -> isEmpty(value) == expected.asBoolean();
+            case "non_empty" -> isEmpty(value) != expected.asBoolean();
+            case "count_gt" -> count(value) > expected.intValue();
+            case "count_gte" -> count(value) >= expected.intValue();
+            case "count_lt" -> count(value) < expected.intValue();
+            case "count_lte" -> count(value) <= expected.intValue();
+            case "count_eq" -> count(value) == expected.intValue();
+            case "age_gt_seconds" -> ageSeconds(value) > expected.longValue();
+            case "age_gte_seconds" -> ageSeconds(value) >= expected.longValue();
             default -> throw new IllegalArgumentException("Unsupported predicate operator");
         };
     }
@@ -92,14 +102,15 @@ public class AiGridPredicateEngine {
         while (fields.hasNext()) {
             String field = fields.next();
             if ("fact".equals(field)) continue;
-            if (!java.util.Set.of("exists", "eq", "neq", "in", "gt", "gte", "lt", "lte", "strength_lt").contains(field)
+            if (!java.util.Set.of("exists", "eq", "neq", "in", "gt", "gte", "lt", "lte", "strength_lt",
+                    "empty", "non_empty", "count_gt", "count_gte", "count_lt", "count_lte", "count_eq", "age_gt_seconds", "age_gte_seconds").contains(field)
                     || found != null) {
                 throw new IllegalArgumentException("Leaf predicate requires exactly one allowed operator");
             }
             found = field;
         }
         if (found == null) throw new IllegalArgumentException("Leaf predicate has no operator");
-        if ("in".equals(found) && !node.get(found).isArray()) {
+        if ("in".equals(found) && !node.get(found).isArray() && !parameterReference(node.get(found))) {
             throw new IllegalArgumentException("in requires an array");
         }
         return found;
@@ -113,8 +124,26 @@ public class AiGridPredicateEngine {
     }
 
     private boolean contains(JsonNode values, JsonNode actual) {
+        if (!values.isArray()) throw new IllegalArgumentException("in requires an array value");
         for (JsonNode value : values) if (value.equals(actual)) return true;
         return false;
+    }
+    private boolean parameterReference(JsonNode value) { return value != null && value.isObject() && value.hasNonNull("parameter") && value.size() == 1; }
+    private boolean isEmpty(JsonNode value) {
+        if (value.isArray() || value.isObject()) return value.isEmpty();
+        if (value.isTextual()) return value.asText().isBlank();
+        throw new IllegalArgumentException("empty requires a collection or string fact");
+    }
+    private int count(JsonNode value) {
+        if (value.isArray() || value.isObject()) return value.size();
+        if (value.isTextual()) return value.asText().length();
+        if (value.isIntegralNumber()) return value.intValue();
+        throw new IllegalArgumentException("count comparison requires a collection, string, or integral numeric fact");
+    }
+    private long ageSeconds(JsonNode value) {
+        if (!value.isTextual()) throw new IllegalArgumentException("age comparison requires an ISO-8601 timestamp fact");
+        try { return Math.max(0, Instant.now().getEpochSecond() - Instant.parse(value.asText()).getEpochSecond()); }
+        catch (Exception ex) { throw new IllegalArgumentException("age comparison requires an ISO-8601 timestamp fact", ex); }
     }
     private int strength(String value) { return switch (value == null ? "" : value.toUpperCase()) { case "NONE" -> 0; case "LOW" -> 1; case "MEDIUM" -> 2; case "HIGH" -> 3; default -> -1; }; }
 

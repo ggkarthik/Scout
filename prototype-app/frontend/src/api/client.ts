@@ -524,6 +524,13 @@ import type {
   AiGridPolicyDistribution,
   AiGridPolicyImpactPreview,
   AiGridPolicyReleaseReadiness,
+  AiGridPhase1CertificationReadiness,
+  AiGridPhase1CorpusBootstrap,
+  AiGridPhase1CorpusReadiness,
+  AiGridPhase1CorpusCertification,
+  AiGridPhase1MigrationPreview,
+  AiGridPhase1MigrationResult,
+  AiGridControlCoverage,
   AiGridOwaspCoverage,
   AiGridPolicyCandidate,
   AiGridPolicySelection,
@@ -1373,7 +1380,29 @@ export const api = {
   publishPlatformAiGridPolicy: (policyId: string, version: string) => request<{ published: boolean; reason: string }>(
     `/platform/ai-grid/policies/${encodeURIComponent(policyId)}/versions/${encodeURIComponent(version)}/publish`, { method: 'POST' },
   ),
+  getPlatformAiGridPhase1CertificationReadiness: () => request<AiGridPhase1CertificationReadiness>(
+    '/platform/ai-grid/validation/releases/phase-1/certification-readiness',
+  ),
+  bootstrapPlatformAiGridPhase1CertificationCorpus: (payload: { engineeringOwner: string; securityReviewer: string; reviewDueAt: string }) =>
+    request<AiGridPhase1CorpusBootstrap>('/platform/ai-grid/validation/releases/phase-1/certification-corpus/bootstrap', {
+      method: 'POST', body: JSON.stringify(payload),
+    }),
+  getPlatformAiGridPhase1CorpusReadiness: () => request<AiGridPhase1CorpusReadiness>(
+    '/platform/ai-grid/validation/releases/phase-1/certification-corpus/readiness',
+  ),
+  certifyPlatformAiGridPhase1Corpus: () => request<AiGridPhase1CorpusCertification>(
+    '/platform/ai-grid/validation/releases/phase-1/certification-corpus/certify', { method: 'POST' },
+  ),
+  getPlatformAiGridPhase1MigrationPreview: (tenantId: string) => request<AiGridPhase1MigrationPreview>(
+    `/platform/ai-grid/migrations/phase-1/tenants/${encodeURIComponent(tenantId)}/preview`,
+  ),
+  applyPlatformAiGridPhase1Migration: (tenantId: string) => request<AiGridPhase1MigrationResult>(
+    `/platform/ai-grid/migrations/phase-1/tenants/${encodeURIComponent(tenantId)}/apply`, { method: 'POST' },
+  ),
+  /** @deprecated Retained for one release; use getPlatformAiGridFrameworkCoverage. */
   getPlatformAiGridOwaspCoverage: () => request<AiGridOwaspCoverage[]>('/platform/ai-grid/policies/portfolio/owasp'),
+  getPlatformAiGridFrameworkCoverage: (framework = 'OWASP_GENAI_LLM_TOP_10', version = '2026') =>
+    request<AiGridControlCoverage[]>(`/platform/ai-grid/policies/portfolio/frameworks?framework=${encodeURIComponent(framework)}&version=${encodeURIComponent(version)}`),
   getPlatformAiGridPolicyCandidates: () => request<AiGridPolicyCandidate[]>('/platform/ai-grid/policies/portfolio/candidates'),
   createPlatformAiGridPolicyCandidate: (payload: {
     title: string; sourceType: string; status: string; technologyId?: string; rationale: string;
@@ -1438,6 +1467,8 @@ export const api = {
     subscription?: string,
     nativeKind?: string,
     severity?: string,
+    excludeNativeKinds?: string,
+    excludeArtifactTypes?: string,
   ) => {
     const params = new URLSearchParams({ page: String(page), size: String(size) });
     if (artifactType) params.set('artifactType', artifactType);
@@ -1445,6 +1476,8 @@ export const api = {
     if (subscription) params.set('subscription', subscription);
     if (nativeKind) params.set('nativeKind', nativeKind);
     if (severity) params.set('severity', severity);
+    if (excludeNativeKinds) params.set('excludeNativeKinds', excludeNativeKinds);
+    if (excludeArtifactTypes) params.set('excludeArtifactTypes', excludeArtifactTypes);
     return request<AiSecurityPage<AiArtifactSummary>>(`/ai-security/artifact-summaries?${params.toString()}`);
   },
   listAiKnowledgeDataInventory: (

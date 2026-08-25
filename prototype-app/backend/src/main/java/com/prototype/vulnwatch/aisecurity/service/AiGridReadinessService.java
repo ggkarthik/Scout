@@ -231,6 +231,8 @@ public class AiGridReadinessService {
                     "Fix evidence collection error", detail(gap));
             case "INCOMPLETE_SCOPE" -> new Action(gap, 5, "PERMISSIONS", "RESTORE_SCOPE_ACCESS",
                     "Restore required discovery scope", detail(gap));
+            case "CAPABILITY_UNAVAILABLE" -> new Action(gap, 6, "CONNECTOR", "RESTORE_CONNECTOR_CAPABILITY",
+                    "Restore required connector capability", detail(gap));
             case "MISSING_FACTS" -> new Action(gap, 10, "EVIDENCE", "ENABLE_EVIDENCE_COLLECTION",
                     "Enable required evidence collection", detail(gap));
             case "UNSUPPORTED" -> new Action(gap, 15, "CONNECTOR", "UPGRADE_CONNECTOR_CAPABILITY",

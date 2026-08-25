@@ -47,7 +47,7 @@ describe('AiInventoryAssetsPage', () => {
     const listArtifacts = vi.spyOn(api, 'listAiArtifactSummaries').mockResolvedValue({
       items: [buildArtifact()],
       page: 0,
-      size: 100,
+      size: 50,
       total: 1,
     });
     vi.spyOn(api, 'getAiSecuritySummary').mockResolvedValue({
@@ -66,11 +66,58 @@ describe('AiInventoryAssetsPage', () => {
     await waitFor(() => expect(listArtifacts).toHaveBeenCalledWith(
       undefined,
       0,
-      100,
+      50,
       undefined,
       undefined,
       undefined,
       undefined,
+    ));
+  });
+
+  it('paginates AI artifacts using the inventory pagination controls', async () => {
+    mockBaseline();
+    const listArtifacts = vi.spyOn(api, 'listAiArtifactSummaries')
+      .mockResolvedValueOnce({ items: [buildArtifact()], page: 0, size: 50, total: 51 })
+      .mockResolvedValueOnce({ items: [buildArtifact({ id: 'artifact-51', name: 'Page two artifact' })], page: 1, size: 50, total: 51 });
+    vi.spyOn(api, 'getAiSecuritySummary').mockResolvedValue(emptySummary());
+
+    renderWithProviders(<AiInventoryAssetsPage />, { route: '/inventory/ai/assets' });
+
+    expect(await screen.findByText('Page 1 of 2')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(await screen.findByText('Page two artifact')).toBeInTheDocument();
+    expect(screen.getByText('Page 2 of 2')).toBeInTheDocument();
+    await waitFor(() => expect(listArtifacts).toHaveBeenLastCalledWith(
+      undefined,
+      1,
+      50,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ));
+  });
+
+  it('excludes dedicated native types from the Others inventory view', async () => {
+    mockBaseline();
+    const listArtifacts = vi.spyOn(api, 'listAiArtifactSummaries').mockResolvedValue({ items: [], page: 0, size: 50, total: 0 });
+    vi.spyOn(api, 'getAiSecuritySummary').mockResolvedValue(emptySummary());
+
+    renderWithProviders(<AiInventoryAssetsPage />, { route: '/inventory/ai/assets?view=others' });
+
+    expect(await screen.findByText('No AI assets discovered')).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Artifact kind' })).not.toBeInTheDocument();
+    await waitFor(() => expect(listArtifacts).toHaveBeenCalledWith(
+      undefined,
+      0,
+      50,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      expect.stringContaining('AZURE_IDENTITY'),
+      'DATA_STORE,MCP_SERVER',
     ));
   });
 
@@ -89,7 +136,7 @@ describe('AiInventoryAssetsPage', () => {
         policiesTotal: 5,
       })],
       page: 0,
-      size: 100,
+      size: 50,
       total: 1,
     });
     vi.spyOn(api, 'getAiSecuritySummary').mockResolvedValue(emptySummary());
@@ -125,7 +172,7 @@ describe('AiInventoryAssetsPage', () => {
     vi.spyOn(api, 'listAiArtifactSummaries').mockResolvedValue({
       items: [buildArtifact()],
       page: 0,
-      size: 100,
+      size: 50,
       total: 1,
     });
     vi.spyOn(api, 'getAiSecuritySummary').mockResolvedValue(emptySummary());
@@ -142,7 +189,7 @@ describe('AiInventoryAssetsPage', () => {
     const listArtifacts = vi.spyOn(api, 'listAiArtifactSummaries').mockResolvedValue({
       items: [],
       page: 0,
-      size: 100,
+      size: 50,
       total: 0,
     });
     vi.spyOn(api, 'getAiSecuritySummary').mockResolvedValue({
@@ -170,7 +217,7 @@ describe('AiInventoryAssetsPage', () => {
     await waitFor(() => expect(listArtifacts).toHaveBeenLastCalledWith(
       undefined,
       0,
-      100,
+      50,
       undefined,
       undefined,
       'AWS_BEDROCK_GUARDRAIL,AZURE_RAI_POLICIES',
@@ -183,7 +230,7 @@ describe('AiInventoryAssetsPage', () => {
     const listArtifacts = vi.spyOn(api, 'listAiArtifactSummaries').mockResolvedValue({
       items: [],
       page: 0,
-      size: 100,
+      size: 50,
       total: 0,
     });
     vi.spyOn(api, 'getAiSecuritySummary').mockResolvedValue({
@@ -204,7 +251,7 @@ describe('AiInventoryAssetsPage', () => {
     await waitFor(() => expect(listArtifacts).toHaveBeenLastCalledWith(
       undefined,
       0,
-      100,
+      50,
       undefined,
       undefined,
       'AWS_BEDROCK_INFERENCE_PROFILE',
@@ -214,7 +261,7 @@ describe('AiInventoryAssetsPage', () => {
 
   it('reads nativeKind, provider, and severity filters from the URL when arriving from the dashboard', async () => {
     mockBaseline();
-    const listArtifacts = vi.spyOn(api, 'listAiArtifactSummaries').mockResolvedValue({ items: [], page: 0, size: 100, total: 0 });
+    const listArtifacts = vi.spyOn(api, 'listAiArtifactSummaries').mockResolvedValue({ items: [], page: 0, size: 50, total: 0 });
     vi.spyOn(api, 'getAiSecuritySummary').mockResolvedValue(emptySummary());
 
     renderWithProviders(<AiInventoryAssetsPage />, {
@@ -225,7 +272,7 @@ describe('AiInventoryAssetsPage', () => {
     await waitFor(() => expect(listArtifacts).toHaveBeenCalledWith(
       undefined,
       0,
-      100,
+      50,
       'AWS',
       undefined,
       'AWS_BEDROCK_GUARDRAIL,AZURE_RAI_POLICIES',
@@ -235,7 +282,7 @@ describe('AiInventoryAssetsPage', () => {
 
   it('clears the severity filter chip', async () => {
     mockBaseline();
-    const listArtifacts = vi.spyOn(api, 'listAiArtifactSummaries').mockResolvedValue({ items: [], page: 0, size: 100, total: 0 });
+    const listArtifacts = vi.spyOn(api, 'listAiArtifactSummaries').mockResolvedValue({ items: [], page: 0, size: 50, total: 0 });
     vi.spyOn(api, 'getAiSecuritySummary').mockResolvedValue(emptySummary());
 
     renderWithProviders(<AiInventoryAssetsPage />, { route: '/inventory/ai/assets?severity=HIGH' });
@@ -247,7 +294,7 @@ describe('AiInventoryAssetsPage', () => {
     await waitFor(() => expect(listArtifacts).toHaveBeenLastCalledWith(
       undefined,
       0,
-      100,
+      50,
       undefined,
       undefined,
       undefined,
@@ -255,21 +302,9 @@ describe('AiInventoryAssetsPage', () => {
     ));
   });
 
-  it('the View dashboard action returns to the AI Inventory dashboard', async () => {
-    mockBaseline();
-    vi.spyOn(api, 'listAiArtifactSummaries').mockResolvedValue({ items: [], page: 0, size: 100, total: 0 });
-    vi.spyOn(api, 'getAiSecuritySummary').mockResolvedValue(emptySummary());
-
-    renderWithProviders(<AiInventoryAssetsPage />);
-
-    fireEvent.click(await screen.findByRole('button', { name: 'View dashboard' }));
-
-    expect(navigateMock).toHaveBeenCalledWith('/inventory/ai');
-  });
-
   it('routes empty inventory CTA to the connectors landing page', async () => {
     mockBaseline();
-    vi.spyOn(api, 'listAiArtifactSummaries').mockResolvedValue({ items: [], page: 0, size: 100, total: 0 });
+    vi.spyOn(api, 'listAiArtifactSummaries').mockResolvedValue({ items: [], page: 0, size: 50, total: 0 });
     vi.spyOn(api, 'getAiSecuritySummary').mockResolvedValue(emptySummary());
 
     renderWithProviders(<AiInventoryAssetsPage />, { route: '/inventory/ai/assets' });

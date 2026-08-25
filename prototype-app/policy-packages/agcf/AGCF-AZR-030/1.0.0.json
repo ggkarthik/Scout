@@ -1,0 +1,93 @@
+{
+  "policyId": "AGCF-AZR-030",
+  "version": "1.0.0",
+  "name": "High-privilege Azure role assignment is broader than the approved AI resource scope",
+  "description": "Detects when high-privilege Azure role assignment is broader than the approved AI resource scope using only declared evidence.",
+  "securityIntent": "Prevent the risk condition described by AGCF-AZR-030.",
+  "remediationIntent": "Correct the provider configuration or relationship and reassess with complete, fresh evidence.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-AZR-030",
+  "provider": "AZURE",
+  "evaluationMode": "DIRECT_RELATIONSHIP",
+  "evaluationDefinition": {
+    "mode": "DIRECT_RELATIONSHIP",
+    "directRelationship": {
+      "sourcePredicate": {
+        "fact": "agcf.agcf-azr-030.evidence",
+        "eq": true
+      },
+      "edgeConstraints": [
+        "DIRECT_PROVIDER_RELATIONSHIP"
+      ],
+      "targetPredicate": {
+        "fact": "agcf.agcf-azr-030.evidence",
+        "eq": true
+      },
+      "targetCardinality": "ONE_OR_MORE"
+    }
+  },
+  "baseEvidenceTiers": [
+    "E1",
+    "E2"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "REQUIRED",
+  "releaseFamily": "AGCF_PHASE_1",
+  "wave": "PHASE_1",
+  "workflowClass": "POSTURE_FINDING",
+  "artifactTypes": [
+    "AI_ARTIFACT"
+  ],
+  "nativeKinds": [],
+  "requiredCapabilities": [
+    "RBAC_ASSIGNMENTS"
+  ],
+  "requiredRelationships": [
+    "DIRECT_PROVIDER_RELATIONSHIP"
+  ],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [
+    {
+      "factKey": "agcf.agcf-azr-030.evidence",
+      "valueType": "BOOLEAN",
+      "evidenceClasses": [
+        "E1",
+        "E2"
+      ],
+      "maxAgeSeconds": 86400
+    }
+  ],
+  "frameworkMappings": [
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM03",
+      "mappingType": "DIRECT",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "IAM-05",
+      "mappingType": "DIRECT",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "IAM-09",
+      "mappingType": "PARTIAL",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "IAM-18",
+      "mappingType": "DIRECT",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    }
+  ],
+  "packageSourceRef": "policy-packages/agcf/AGCF-AZR-030/1.0.0.json"
+}

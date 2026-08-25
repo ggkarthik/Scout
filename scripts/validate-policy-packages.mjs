@@ -7,6 +7,10 @@ const required = ['policyId', 'version', 'name', 'description', 'severity', 'wor
 const files = [];
 async function walk(directory) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
+    // The governed Phase 1 AGCF catalog has its own schema and validator
+    // (scripts/compile-ai-grid-phase1.mjs); this legacy validator only covers
+    // the original flat-shape example packages.
+    if (entry.isDirectory() && entry.name === 'agcf') continue;
     const path = join(directory, entry.name);
     if (entry.isDirectory()) await walk(path);
     else if (entry.name.endsWith('.json')) files.push(path);

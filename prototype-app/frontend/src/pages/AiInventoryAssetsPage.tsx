@@ -7,11 +7,13 @@ import { AI_ARTIFACT_CATEGORIES, combinedNativeKindFilterValue, stripProviderPre
 import { ProviderLogo } from '../features/ai-security/ProviderLogo';
 import { FindingSeverityChips } from '../features/findings/components/FindingSeverityChips';
 import { InventoryShell } from '../features/inventory/InventoryShell';
-import { pathForAiKnowledgeData, pathForAiMcpInventory, pathForInventoryAiAsset, pathForInventoryView } from '../app/routes';
+import { pathForInventoryAiAsset } from '../app/routes';
 import { RUN_QUEUE_REFRESH_INTERVAL_MS } from '../lib/polling';
 
 const ALL_KIND = 'ALL';
 const CATEGORIZED_NATIVE_KINDS = new Set(AI_ARTIFACT_CATEGORIES.flatMap((category) => category.nativeKinds));
+const DEDICATED_NATIVE_KINDS = combinedNativeKindFilterValue([...CATEGORIZED_NATIVE_KINDS]);
+const DEDICATED_ARTIFACT_TYPES = 'DATA_STORE,MCP_SERVER';
 
 function shouldPollAiRuns(runs: Array<{ status: string }> | undefined): boolean {
   return (runs ?? []).some((run) => {
@@ -31,8 +33,18 @@ export function AiInventoryAssetsPage() {
       ? (searchParams.get('provider') as 'AWS' | 'AZURE')
       : '',
   );
-  const [subscription, setSubscription] = React.useState('');
-  const deferredSubscription = React.useDeferredValue(subscription.trim());
+  const [page, setPage] = React.useState(0);
+  const pageSize = 50;
+  const isOthersView = searchParams.get('view') === 'others';
+
+  React.useEffect(() => {
+    setNativeKind(searchParams.get('nativeKind') ?? ALL_KIND);
+    setSeverity(searchParams.get('severity') ?? undefined);
+    setProvider(searchParams.get('provider') === 'AWS' || searchParams.get('provider') === 'AZURE'
+      ? searchParams.get('provider') as 'AWS' | 'AZURE'
+      : '');
+    setPage(0);
+  }, [searchParams]);
 
   const runsQuery = useQuery({
     queryKey: ['ai-security-runs'],
@@ -43,16 +55,28 @@ export function AiInventoryAssetsPage() {
   });
   const shouldPoll = shouldPollAiRuns(runsQuery.data);
   const artifactsQuery = useQuery({
-    queryKey: ['ai-artifact-summaries', nativeKind, provider, deferredSubscription, severity],
-    queryFn: () => api.listAiArtifactSummaries(
-      undefined,
-      0,
-      100,
-      provider || undefined,
-      deferredSubscription || undefined,
-      nativeKind === ALL_KIND ? undefined : nativeKind,
-      severity,
-    ),
+    queryKey: ['ai-artifact-summaries', isOthersView, nativeKind, provider, severity, page],
+    queryFn: () => isOthersView
+      ? api.listAiArtifactSummaries(
+        undefined,
+        page,
+        pageSize,
+        provider || undefined,
+        undefined,
+        nativeKind === ALL_KIND ? undefined : nativeKind,
+        severity,
+        DEDICATED_NATIVE_KINDS,
+        DEDICATED_ARTIFACT_TYPES,
+      )
+      : api.listAiArtifactSummaries(
+        undefined,
+        page,
+        pageSize,
+        provider || undefined,
+        undefined,
+        nativeKind === ALL_KIND ? undefined : nativeKind,
+        severity,
+      ),
     refetchInterval: shouldPoll ? RUN_QUEUE_REFRESH_INTERVAL_MS : false,
   });
   const summaryQuery = useQuery({
@@ -62,6 +86,7 @@ export function AiInventoryAssetsPage() {
   });
 
   const items = artifactsQuery.data?.items ?? [];
+  const total = artifactsQuery.data?.total ?? 0;
   const summary = summaryQuery.data;
   const totalArtifacts = Object.values(summary?.artifactCounts ?? {}).reduce((total, count) => total + count, 0);
   const nativeKindCounts = summary?.nativeKindCounts ?? {};
@@ -78,55 +103,42 @@ export function AiInventoryAssetsPage() {
   return (
     <InventoryShell
       eyebrow="AWS and Azure AI estate"
-      title="AI Asset Inventory"
-      description="Every discovered AI artifact across AWS and Azure, filterable by kind, provider, and severity."
+      title={isOthersView ? 'Other AI Artifacts' : 'AI Asset Inventory'}
+      description={isOthersView
+        ? 'Discovered AI resources whose native type does not have a dedicated AI Inventory sidebar view.'
+        : 'Every discovered AI artifact across AWS and Azure, filterable by kind, provider, and severity.'}
       legacyClassName="ai-security-page"
-      actions={(
-        <div className="inventory-fpl-toolbar">
-          <button type="button" className="btn btn-secondary" onClick={() => navigate(pathForInventoryView('ai'))}>View dashboard</button>
-          <button type="button" className="btn btn-secondary" onClick={() => navigate(pathForAiKnowledgeData())}>Knowledge &amp; Data</button>
-          <button type="button" className="btn btn-secondary" onClick={() => navigate(pathForAiMcpInventory())}>MCP</button>
-        </div>
-      )}
     >
       <PageFreshnessStatus updatedAt={summary?.lastCompleteSnapshotAt} />
 
       <div className="inventory-fpl-toolbar">
-        <label className="findings-filter-chip">
-          <span className="panel-caption">Artifact kind</span>
-          <select value={nativeKind} onChange={(event) => setNativeKind(event.target.value)} aria-label="Artifact kind">
-            <option value={ALL_KIND}>All AI Assets ({totalArtifacts.toLocaleString()})</option>
-            {categoryOptions.map((option) => (
-              <option key={option.key} value={option.key}>{option.label} ({option.count.toLocaleString()})</option>
-            ))}
-            {remainingKindOptions.map((option) => (
-              <option key={option.key} value={option.key}>{option.label} ({option.count.toLocaleString()})</option>
-            ))}
-          </select>
-        </label>
+        {!isOthersView && (
+          <label className="findings-filter-chip">
+            <span className="panel-caption">Artifact kind</span>
+            <select value={nativeKind} onChange={(event) => { setNativeKind(event.target.value); setPage(0); }} aria-label="Artifact kind">
+              <option value={ALL_KIND}>All AI Assets ({totalArtifacts.toLocaleString()})</option>
+              {categoryOptions.map((option) => (
+                <option key={option.key} value={option.key}>{option.label} ({option.count.toLocaleString()})</option>
+              ))}
+              {remainingKindOptions.map((option) => (
+                <option key={option.key} value={option.key}>{option.label} ({option.count.toLocaleString()})</option>
+              ))}
+            </select>
+          </label>
+        )}
         <label className="findings-filter-chip">
           <span className="panel-caption">Provider</span>
-          <select value={provider} onChange={(event) => setProvider(event.target.value as '' | 'AWS' | 'AZURE')} aria-label="Cloud provider">
+          <select value={provider} onChange={(event) => { setProvider(event.target.value as '' | 'AWS' | 'AZURE'); setPage(0); }} aria-label="Cloud provider">
             <option value="">All providers</option>
             <option value="AWS">AWS</option>
             <option value="AZURE">Azure</option>
           </select>
         </label>
-        <label className="findings-filter-chip inventory-fpl-search">
-          <span className="panel-caption">Azure subscription</span>
-          <input
-            type="search"
-            value={subscription}
-            placeholder="Filter subscription ID"
-            aria-label="Azure subscription"
-            onChange={(event) => setSubscription(event.target.value)}
-          />
-        </label>
         {severity ? (
           <div className="fpl-active-chips">
             <span className="fpl-chip">
               Severity: {severity}
-              <button type="button" onClick={() => setSeverity(undefined)} aria-label="Clear severity filter">×</button>
+              <button type="button" onClick={() => { setSeverity(undefined); setPage(0); }} aria-label="Clear severity filter">×</button>
             </span>
           </div>
         ) : null}
@@ -158,7 +170,7 @@ export function AiInventoryAssetsPage() {
       ) : (
         <section className="panel ai-security-table-panel">
           <div className="panel-header">
-            <div><h3>AI asset inventory</h3><p className="panel-caption">{items.length.toLocaleString()} of {totalArtifacts.toLocaleString()} assets shown</p></div>
+            <div><h3>AI asset inventory</h3><p className="panel-caption">{items.length.toLocaleString()} of {total.toLocaleString()} assets shown</p></div>
           </div>
           <table className="data-table">
             <thead>
@@ -185,6 +197,11 @@ export function AiInventoryAssetsPage() {
               })}
             </tbody>
           </table>
+          <div className="pagination-row">
+            <button type="button" className="btn btn-secondary" disabled={page === 0 || artifactsQuery.isFetching} onClick={() => setPage((current) => current - 1)}>Previous</button>
+            <span className="panel-caption pagination-caption">Page {page + 1} of {Math.max(1, Math.ceil(total / pageSize))}</span>
+            <button type="button" className="btn btn-secondary" disabled={artifactsQuery.isFetching || (page + 1) * pageSize >= total} onClick={() => setPage((current) => current + 1)}>Next</button>
+          </div>
         </section>
       )}
     </InventoryShell>

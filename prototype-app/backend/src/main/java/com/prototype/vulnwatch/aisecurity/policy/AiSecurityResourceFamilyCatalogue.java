@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class AiSecurityResourceFamilyCatalogue {
 
-    public static final String VERSION = "1.5";
+    public static final String VERSION = "1.6";
 
     private static final Map<String, ScopeSemantics> FAMILIES = Map.ofEntries(
             Map.entry("BEDROCK_AGENTS", ScopeSemantics.REGIONAL),
@@ -37,6 +37,7 @@ public class AiSecurityResourceFamilyCatalogue {
             Map.entry("SAGEMAKER_NETWORKING", ScopeSemantics.REGIONAL),
             Map.entry("LAMBDA_URLS", ScopeSemantics.REGIONAL),
             Map.entry("S3_EXPOSURE", ScopeSemantics.REGIONAL),
+            Map.entry("AWS_MACIE_PII", ScopeSemantics.REGIONAL),
             Map.entry("IAM_GLOBAL", ScopeSemantics.ACCOUNT_GLOBAL),
             Map.entry("AZURE_AI_ACCOUNTS", ScopeSemantics.REGIONAL),
             Map.entry("AZURE_FOUNDRY_PROJECTS", ScopeSemantics.REGIONAL),
@@ -62,7 +63,9 @@ public class AiSecurityResourceFamilyCatalogue {
             Map.entry("AZURE_BOT_CHANNELS", ScopeSemantics.ACCOUNT_GLOBAL),
             Map.entry("AZURE_BOT_IDENTITIES", ScopeSemantics.ACCOUNT_GLOBAL),
             Map.entry("AZURE_DIAGNOSTIC_SETTINGS", ScopeSemantics.REGIONAL),
-            Map.entry("AZURE_RBAC_GLOBAL", ScopeSemantics.ACCOUNT_GLOBAL));
+            Map.entry("AZURE_RBAC_GLOBAL", ScopeSemantics.ACCOUNT_GLOBAL),
+            Map.entry("AZURE_RBAC_ASSIGNMENTS", ScopeSemantics.REGIONAL),
+            Map.entry("AZURE_PURVIEW_CLASSIFICATION", ScopeSemantics.REGIONAL));
 
     public Optional<String> requiredRegion(String resourceFamily, String artifactRegion) {
         ScopeSemantics semantics = FAMILIES.get(resourceFamily);
