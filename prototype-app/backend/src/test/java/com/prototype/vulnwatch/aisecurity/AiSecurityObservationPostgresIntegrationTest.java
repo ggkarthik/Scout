@@ -556,6 +556,12 @@ class AiSecurityObservationPostgresIntegrationTest {
                     Map.of("runId", runId));
             jdbc.update("update ai_grid_facts set observed_at = now() - interval '49 hours' where run_id = :runId",
                     Map.of("runId", runId));
+            jdbc.update("""
+                    update ai_grid_relationship_snapshots
+                       set observed_at = now() - interval '48 hours',
+                           valid_from = now() - interval '48 hours'
+                     where run_id = :runId
+                    """, Map.of("runId", runId));
             return null;
         });
         aiGridApiService.replay(tenant, runId);
