@@ -12,7 +12,16 @@ public class AwsAiGridFactProducer implements AiGridFactProducer {
         List<ProducedFact> facts = AiGridFactProducerSupport.facts();
         AiGridFactProducerSupport.copy(input, "status", "resource.status_observed", facts);
         AiGridFactProducerSupport.copy(input, "guardrailAttached", "bedrock.agent.guardrail_attached_configured", facts);
-        AiGridFactProducerSupport.copy(input, "minimumStrength", "bedrock.guardrail.minimum_strength_configured", facts);
+        // Bedrock discovery exposes this as guardrailMinimumStrength.  Keep the
+        // normalized minimumStrength alias for package-driven inputs, but prefer
+        // the connector field so existing observations remain evaluable.
+        if (input.attributes().hasNonNull("guardrailMinimumStrength")) {
+            AiGridFactProducerSupport.copy(input, "guardrailMinimumStrength",
+                    "bedrock.guardrail.minimum_strength_configured", facts);
+        } else {
+            AiGridFactProducerSupport.copy(input, "minimumStrength",
+                    "bedrock.guardrail.minimum_strength_configured", facts);
+        }
         AiGridFactProducerSupport.copy(input, "publicNetworkUnrestricted", "network.public_access_configured", facts);
         AiGridFactProducerSupport.copy(input, "s3Public", "data.s3_public_access_configured", facts);
         AiGridFactProducerSupport.copy(input, "lambdaUrlAuthType", "compute.lambda_url_auth_type_configured", facts);

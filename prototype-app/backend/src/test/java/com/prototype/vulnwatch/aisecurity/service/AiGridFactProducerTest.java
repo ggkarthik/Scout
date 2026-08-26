@@ -15,12 +15,13 @@ class AiGridFactProducerTest {
     @Test
     void awsProducerEmitsOnlyOwnedDirectProviderEvidence() throws Exception {
         var input = new AiGridFactProducer.FactInput("AWS", "BEDROCK_AGENTS", "AI_AGENT", "BEDROCK_AGENT",
-                mapper.readTree("{\"guardrailAttached\":false,\"localAuthEnabled\":true}"), null, null, Instant.now());
+                mapper.readTree("{\"guardrailAttached\":false,\"guardrailMinimumStrength\":\"LOW\",\"localAuthEnabled\":true}"), null, null, Instant.now());
 
         Map<String, AiGridFactProducer.ProducedFact> facts = new AwsAiGridFactProducer().produce(input).stream()
                 .collect(java.util.stream.Collectors.toMap(AiGridFactProducer.ProducedFact::factKey, value -> value));
 
         assertFalse(facts.get("bedrock.agent.guardrail_attached_configured").value().asBoolean());
+        assertEquals("LOW", facts.get("bedrock.guardrail.minimum_strength_configured").value().asText());
         assertEquals("KNOWN", facts.get("bedrock.agent.guardrail_attached_configured").state());
         assertEquals("DIRECT_PROVIDER_ATTRIBUTE", facts.get("bedrock.agent.guardrail_attached_configured").confidenceMethod());
         assertFalse(facts.containsKey("identity.local_auth_enabled_configured"));
