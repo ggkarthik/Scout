@@ -134,6 +134,34 @@ class ProductionBootstrapCliPostgresIntegrationTest {
         verifyRuntimeIsolation(tenantId);
     }
 
+    @Test
+    void repairsOnlyTheExplicitlyApprovedHistoricalV45Checksum() throws Exception {
+        withBootstrapProperties(() -> {
+            ProductionBootstrapCli.main(new String[0]);
+            try (Connection connection = DriverManager.getConnection(
+                    DATABASE.url(), DATABASE.username(), DATABASE.password());
+                 Statement statement = connection.createStatement()) {
+                statement.executeUpdate("""
+                        update tenant_default.tenant_schema_history
+                        set checksum = -1614728776
+                        where version = '45' and success
+                        """);
+            }
+            set("BOOTSTRAP_REPAIR_TENANT_V45_CHECKSUM", "true");
+            ProductionBootstrapCli.main(new String[0]);
+            assertEquals(1, queryInt("""
+                    select count(*)
+                    from tenant_default.tenant_schema_history
+                    where version = '45' and success and checksum <> -1614728776
+                    """));
+            assertEquals(1, queryInt("""
+                    select count(*)
+                    from tenant_default.tenant_schema_history
+                    where version = '66' and success
+                    """));
+        });
+    }
+
     private void withBootstrapProperties(ThrowingRunnable runnable) throws Exception {
         set("DB_URL", DATABASE.url());
         set("DB_USERNAME", DATABASE.username());
@@ -155,6 +183,7 @@ class ProductionBootstrapCliPostgresIntegrationTest {
             clear("APP_SECURITY_BOOTSTRAP_PLATFORM_OWNERS_USERS_0_EMAIL");
             clear("APP_SECURITY_BOOTSTRAP_PLATFORM_OWNERS_USERS_0_DISPLAY_NAME");
             clear("BOOTSTRAP_REPORT_ONLY");
+            clear("BOOTSTRAP_REPAIR_TENANT_V45_CHECKSUM");
         }
     }
 

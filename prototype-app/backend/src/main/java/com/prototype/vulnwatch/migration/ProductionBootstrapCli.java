@@ -19,6 +19,8 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationVersion;
+import org.flywaydb.core.api.output.RepairResult;
+import org.flywaydb.core.api.output.ValidateResult;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
@@ -30,6 +32,8 @@ public final class ProductionBootstrapCli {
     private static final String DEFAULT_TENANT_SLUG = "default-workspace";
     private static final String DEFAULT_TENANT_SCHEMA = "tenant_default";
     private static final String LOCK_NAME = "scout-production-bootstrap";
+    private static final String REPAIRABLE_TENANT_MIGRATION_VERSION = "45";
+    private static final int REPAIRABLE_TENANT_MIGRATION_CHECKSUM = -1614728776;
     private static final UUID DEFAULT_TENANT_ID = UUID.nameUUIDFromBytes(
             "scout-default-tenant".getBytes(StandardCharsets.UTF_8));
     private static final Pattern UUID_VALUE = Pattern.compile(
@@ -63,6 +67,9 @@ public final class ProductionBootstrapCli {
                         }
                         TenantSchema defaultTenant = ensureDefaultTenant(connection);
                         phases.add(Phase.success("default_tenant_registration", defaultTenant.schemaName()));
+                        if (repairTenantV45ChecksumIfApproved(connection, config, defaultTenant)) {
+                            phases.add(Phase.success("tenant_v45_checksum_repair", defaultTenant.schemaName()));
+                        }
                         migrateTenant(config, defaultTenant);
                         String templateChecksum = fingerprint(connection, defaultTenant.schemaName());
                         markCurrent(connection, defaultTenant, templateChecksum, runId);
@@ -346,8 +353,64 @@ public final class ProductionBootstrapCli {
         markCurrent(connection, tenant, tenantChecksum, runId);
     }
 
+    private static boolean repairTenantV45ChecksumIfApproved(
+            Connection connection,
+            Config config,
+            TenantSchema tenant
+    ) throws SQLException {
+        if (!config.repairTenantV45Checksum()) {
+            return false;
+        }
+
+        Flyway flyway = tenantFlyway(config, tenant);
+        ValidateResult validation = flyway.validateWithResult();
+        if (validation.validationSuccessful) {
+            return false;
+        }
+        if (validation.invalidMigrations.size() != 1
+                || !REPAIRABLE_TENANT_MIGRATION_VERSION.equals(validation.invalidMigrations.get(0).version)) {
+            throw new BootstrapFailure(
+                    "tenant_checksum_repair_refused",
+                    "Checksum repair is limited to the known tenant migration V45 mismatch");
+        }
+        try (PreparedStatement statement = connection.prepareStatement("""
+                select checksum
+                from %s.tenant_schema_history
+                where version = ? and success
+                """.formatted(quotedIdentifier(tenant.schemaName())))) {
+            statement.setString(1, REPAIRABLE_TENANT_MIGRATION_VERSION);
+            try (ResultSet result = statement.executeQuery()) {
+                if (!result.next() || result.getInt(1) != REPAIRABLE_TENANT_MIGRATION_CHECKSUM) {
+                    throw new BootstrapFailure(
+                            "tenant_checksum_repair_refused",
+                            "V45 does not have the expected historical checksum");
+                }
+            }
+        }
+
+        RepairResult repair = flyway.repair();
+        if (repair.migrationsAligned == null
+                || repair.migrationsAligned.size() != 1
+                || !REPAIRABLE_TENANT_MIGRATION_VERSION.equals(repair.migrationsAligned.get(0).version)) {
+            throw new BootstrapFailure(
+                    "tenant_checksum_repair_refused",
+                    "Repair changed migration history outside the approved V45 checksum");
+        }
+        ValidateResult repairedValidation = flyway.validateWithResult();
+        if (!repairedValidation.validationSuccessful) {
+            throw new BootstrapFailure(
+                    "tenant_checksum_repair_failed",
+                    "V45 checksum repair did not restore Flyway validation");
+        }
+        return true;
+    }
+
     private static void migrateTenant(Config config, TenantSchema tenant) {
-        Flyway.configure()
+        tenantFlyway(config, tenant).migrate();
+    }
+
+    private static Flyway tenantFlyway(Config config, TenantSchema tenant) {
+        return Flyway.configure()
                 .dataSource(config.dbUrl(), config.dbUsername(), config.dbPassword())
                 .schemas(tenant.schemaName())
                 .defaultSchema(tenant.schemaName())
@@ -362,8 +425,7 @@ public final class ProductionBootstrapCli {
                 .validateOnMigrate(true)
                 .outOfOrder(false)
                 .initSql("SET statement_timeout = '5min'")
-                .load()
-                .migrate();
+                .load();
     }
 
     private static void provisionTenantSchema(Connection connection, String schemaName) throws SQLException {
@@ -951,6 +1013,7 @@ public final class ProductionBootstrapCli {
             String runtimeDbPassword,
             String expectedDatabase,
             boolean reportOnly,
+            boolean repairTenantV45Checksum,
             boolean platformOwnerBootstrapEnabled,
             String platformOwnerBootstrapEmail,
             String platformOwnerBootstrapExternalSubject,
@@ -986,6 +1049,7 @@ public final class ProductionBootstrapCli {
                     Boolean.parseBoolean(env(
                             "BOOTSTRAP_REPORT_ONLY",
                             env("APP_SCHEMA_MIGRATION_REPORT_ONLY", "false"))),
+                    Boolean.parseBoolean(env("BOOTSTRAP_REPAIR_TENANT_V45_CHECKSUM", "false")),
                     ownerBootstrapEnabled,
                     ownerBootstrapEmail,
                     env("APP_SECURITY_BOOTSTRAP_PLATFORM_OWNERS_USERS_0_EXTERNAL_SUBJECT", ownerBootstrapEmail),
