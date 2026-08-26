@@ -28,7 +28,7 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 /** Production-only bootstrap entry point. Does not initialize Spring or JPA. */
 public final class ProductionBootstrapCli {
 
-    private static final int TARGET_VERSION = 66;
+    private static final int TARGET_VERSION = 67;
     private static final String DEFAULT_TENANT_NAME = "Default Workspace";
     private static final String DEFAULT_TENANT_SLUG = "default-workspace";
     private static final String DEFAULT_TENANT_SCHEMA = "tenant_default";
