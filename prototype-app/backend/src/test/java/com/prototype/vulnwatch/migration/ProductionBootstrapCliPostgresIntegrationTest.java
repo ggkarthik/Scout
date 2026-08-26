@@ -11,8 +11,6 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.UUID;
-import org.flywaydb.core.Flyway;
-import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
@@ -175,8 +173,8 @@ class ProductionBootstrapCliPostgresIntegrationTest {
         withBootstrapProperties(() -> {
             ProductionBootstrapCli.main(new String[0]);
             insertProvisioningTenant(tenantId, schemaName);
-            migrateTenantToVersion45(tenantId, schemaName);
-            setTenantStatus(tenantId, "ACTIVE");
+            ProductionBootstrapCli.main(new String[0]);
+            rewindTenantHistoryToVersion45(schemaName);
             try (Connection connection = DriverManager.getConnection(
                     DATABASE.url(), DATABASE.username(), DATABASE.password());
                  Statement statement = connection.createStatement()) {
@@ -242,25 +240,14 @@ class ProductionBootstrapCliPostgresIntegrationTest {
         }
     }
 
-    private void migrateTenantToVersion45(UUID tenantId, String schemaName) throws Exception {
+    private void rewindTenantHistoryToVersion45(String schemaName) throws SQLException {
         try (Connection connection = DriverManager.getConnection(DATABASE.url(), DATABASE.username(), DATABASE.password());
              Statement statement = connection.createStatement()) {
-            statement.execute("create schema " + schemaName);
+            statement.executeUpdate(("""
+                    delete from %s.tenant_schema_history
+                    where version ~ '^[0-9]+$' and version::integer > 45
+                    """).formatted(schemaName));
         }
-        Flyway.configure()
-                .dataSource(DATABASE.url(), DATABASE.username(), DATABASE.password())
-                .schemas(schemaName)
-                .defaultSchema(schemaName)
-                .table("tenant_schema_history")
-                .locations("classpath:db/migration/tenant")
-                .baselineOnMigrate(true)
-                .baselineVersion(MigrationVersion.fromVersion("41"))
-                .placeholders(java.util.Map.of(
-                        "tenantId", tenantId.toString(),
-                        "tenantSchema", schemaName))
-                .target(MigrationVersion.fromVersion("45"))
-                .load()
-                .migrate();
     }
 
     private void setTenantStatus(UUID tenantId, String status) throws SQLException {
