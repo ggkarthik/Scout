@@ -10,6 +10,8 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -175,11 +177,7 @@ class ProductionBootstrapCliPostgresIntegrationTest {
             insertProvisioningTenant(tenantId, schemaName);
             ProductionBootstrapCli.main(new String[0]);
             rewindTenantHistoryToVersion45(schemaName);
-            try (Connection connection = DriverManager.getConnection(
-                    DATABASE.url(), DATABASE.username(), DATABASE.password());
-                 Statement statement = connection.createStatement()) {
-                statement.execute("drop table " + schemaName + ".ai_security_connector_configs cascade");
-            }
+            dropV45AndLaterSchemaObjects(schemaName);
 
             ProductionBootstrapCli.main(new String[0]);
 
@@ -248,6 +246,33 @@ class ProductionBootstrapCliPostgresIntegrationTest {
                     where version ~ '^[0-9]+$' and version::integer > 45
                     """).formatted(schemaName));
         }
+    }
+
+    private void dropV45AndLaterSchemaObjects(String schemaName) throws SQLException {
+        List<String> tableNames = new ArrayList<>();
+        try (Connection connection = DriverManager.getConnection(DATABASE.url(), DATABASE.username(), DATABASE.password());
+             var select = connection.prepareStatement("""
+                     select table_name
+                     from information_schema.tables
+                     where table_schema = ?
+                       and (table_name like 'ai_security_%' or table_name like 'ai_grid_%')
+                     """)) {
+            select.setString(1, schemaName);
+            try (ResultSet result = select.executeQuery()) {
+                while (result.next()) {
+                    tableNames.add(result.getString(1));
+                }
+            }
+            try (Statement statement = connection.createStatement()) {
+                for (String tableName : tableNames) {
+                    statement.execute("drop table " + quotedIdentifier(schemaName) + "." + quotedIdentifier(tableName) + " cascade");
+                }
+            }
+        }
+    }
+
+    private String quotedIdentifier(String value) {
+        return "\"" + value.replace("\"", "\"\"") + "\"";
     }
 
     private void setTenantStatus(UUID tenantId, String status) throws SQLException {
