@@ -96,6 +96,17 @@ class IngestionJobWorkerServiceTest {
     }
 
     @Test
+    void recoverInterruptedJobsDoesNotPreventStartupWhenTenantSchemaIsNotReady() {
+        when(ingestionJobService.recoverInterruptedRunningJobs())
+                .thenThrow(new IllegalStateException("Tenant schema is not at the minimum compatible version"));
+
+        org.assertj.core.api.Assertions.assertThatCode(service::recoverInterruptedJobs)
+                .doesNotThrowAnyException();
+
+        verify(ingestionJobService).recoverInterruptedRunningJobs();
+    }
+
+    @Test
     void pollJobsSkipsWhenRuntimeRoleIsApi() {
         service.setBackgroundTaskExecutionPolicy(BackgroundTaskExecutionPolicy.forRole("api"));
 

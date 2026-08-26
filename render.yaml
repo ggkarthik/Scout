@@ -1,3 +1,6 @@
+# Render hosts the pre-production backend only. The public React SPA is deployed
+# exclusively by Vercel from prototype-app/frontend/vercel.json; do not add a
+# frontend service here.
 services:
   - type: web
     name: scout-backend
