@@ -364,17 +364,25 @@ public final class ProductionBootstrapCli {
 
         Flyway flyway = tenantFlyway(config, tenant);
         try (PreparedStatement statement = connection.prepareStatement("""
-                select checksum
+                select version, checksum
                 from %s.tenant_schema_history
                 where (version = ? or version like ?) and success
                 """.formatted(quotedIdentifier(tenant.schemaName())))) {
             statement.setString(1, REPAIRABLE_TENANT_MIGRATION_VERSION);
             statement.setString(2, REPAIRABLE_TENANT_MIGRATION_VERSION + ".%");
             try (ResultSet result = statement.executeQuery()) {
-                if (!result.next() || result.getInt(1) != REPAIRABLE_TENANT_MIGRATION_CHECKSUM) {
+                if (!result.next()) {
                     throw new BootstrapFailure(
                             "tenant_checksum_repair_refused",
-                            "V45 does not have the expected historical checksum");
+                            "V45 history record was not found");
+                }
+                String observedVersion = result.getString("version");
+                int observedChecksum = result.getInt("checksum");
+                if (observedChecksum != REPAIRABLE_TENANT_MIGRATION_CHECKSUM) {
+                    throw new BootstrapFailure(
+                            "tenant_checksum_repair_refused",
+                            "V45 history checksum is not approved: version=" + observedVersion
+                                    + " checksum=" + observedChecksum);
                 }
                 if (result.next()) {
                     throw new BootstrapFailure(
