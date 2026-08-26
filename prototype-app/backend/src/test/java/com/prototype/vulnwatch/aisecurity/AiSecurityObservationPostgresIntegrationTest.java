@@ -496,13 +496,13 @@ class AiSecurityObservationPostgresIntegrationTest {
                     default_selection, artifact_types_json, required_capabilities_json,
                     required_relationships_json, required_resource_families_json, required_facts_json,
                     predicate_json, reason_code, remediation, framework_mappings_json,
-                    native_kinds_json, scope_resolution, published_at)
+                    parameter_definitions_json, native_kinds_json, scope_resolution, published_at)
                 select 'AI_GRID_COVERAGE_OMISSION_TEST', version, 'Coverage omission test', description,
                        severity, 'PUBLISHED', workflow_class, 'PREVIEW', artifact_types_json,
                        required_capabilities_json, required_relationships_json,
                        required_resource_families_json, required_facts_json, predicate_json,
                        'AI_GRID_COVERAGE_OMISSION', remediation, framework_mappings_json,
-                       native_kinds_json, scope_resolution, now()
+                       parameter_definitions_json, native_kinds_json, scope_resolution, now()
                   from platform.ai_grid_policy_versions
                  where policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL' and version = '2.0.0'
                 on conflict do nothing
