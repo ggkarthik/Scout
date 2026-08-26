@@ -66,7 +66,7 @@ jobs:
           category: trivy-backend-image
 
       - name: Build frontend image
-        run: docker build -f prototype-app/frontend/Dockerfile -t vulnwatch-frontend:${{ github.sha }} prototype-app/frontend
+        run: docker build -f prototype-app/frontend/Dockerfile.ci -t vulnwatch-frontend:${{ github.sha }} prototype-app/frontend
 
       - name: Scan frontend image
         uses: aquasecurity/trivy-action@v0.36.0

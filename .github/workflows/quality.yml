@@ -130,4 +130,4 @@ jobs:
       - name: Build backend image
         run: docker build -f prototype-app/backend/Dockerfile -t vulnwatch-backend:${{ github.sha }} prototype-app/backend
       - name: Build frontend image
-        run: docker build -f prototype-app/frontend/Dockerfile -t vulnwatch-frontend:${{ github.sha }} prototype-app/frontend
+        run: docker build -f prototype-app/frontend/Dockerfile.ci -t vulnwatch-frontend:${{ github.sha }} prototype-app/frontend

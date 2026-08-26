@@ -68,9 +68,18 @@ public class IngestionJobWorkerService {
         if (!backgroundTaskExecutionPolicy.allowsBackgroundTask("ingestion-job-worker.recover-interrupted-jobs")) {
             return;
         }
-        int recovered = ingestionJobService.recoverInterruptedRunningJobs();
-        if (recovered > 0) {
-            LOG.warn("Recovered {} interrupted ingestion jobs left RUNNING during the previous process lifetime", recovered);
+        // Recovery is best-effort housekeeping. In pre-production, a newly deployed API can be
+        // ahead of a tenant schema while the separately operated schema migrator is still running.
+        // Never let that expected migration gate prevent the API (and its readiness endpoint) from
+        // starting; work for that tenant remains blocked by TenantSchemaExecutionService until it
+        // is compatible, and the scheduled poller retries it on subsequent cycles.
+        try {
+            int recovered = ingestionJobService.recoverInterruptedRunningJobs();
+            if (recovered > 0) {
+                LOG.warn("Recovered {} interrupted ingestion jobs left RUNNING during the previous process lifetime", recovered);
+            }
+        } catch (Exception ex) {
+            LOG.warn("Skipped interrupted ingestion-job recovery during startup: {}", ex.getMessage(), ex);
         }
     }
 
