@@ -451,6 +451,9 @@ public final class ProductionBootstrapCli {
     }
 
     private static boolean hasSingleSuccessfulV45History(Connection connection, TenantSchema tenant) throws SQLException {
+        if (!tableExists(connection, tenant, "tenant_schema_history")) {
+            return false;
+        }
         try (PreparedStatement statement = connection.prepareStatement("""
                 select count(*)
                 from %s.tenant_schema_history
