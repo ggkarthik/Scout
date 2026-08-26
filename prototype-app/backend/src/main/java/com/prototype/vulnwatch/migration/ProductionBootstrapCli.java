@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.migration;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.client.ResendEmailClient;
 import com.prototype.vulnwatch.service.TenantSchemaService;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.sql.Connection;
@@ -35,6 +36,8 @@ public final class ProductionBootstrapCli {
     private static final String REPAIRABLE_TENANT_MIGRATION_VERSION = "45";
     private static final int REPAIRABLE_TENANT_MIGRATION_CHECKSUM = -1614728776;
     private static final int CURRENT_TENANT_MIGRATION_CHECKSUM = 1898972758;
+    private static final String V45_MIGRATION_RESOURCE = "db/migration/tenant/V45__ai_security_bounded_context.sql";
+    private static final String V45_CONNECTOR_CONFIG_TABLE = "ai_security_connector_configs";
     private static final UUID DEFAULT_TENANT_ID = UUID.nameUUIDFromBytes(
             "scout-default-tenant".getBytes(StandardCharsets.UTF_8));
     private static final Pattern UUID_VALUE = Pattern.compile(
@@ -71,6 +74,10 @@ public final class ProductionBootstrapCli {
                         int repairedTenantCount = repairTenantV45ChecksumsIfApproved(connection, config);
                         if (repairedTenantCount > 0) {
                             phases.add(Phase.success("tenant_v45_checksum_repair", "count=" + repairedTenantCount));
+                        }
+                        int reconciledTenantCount = reconcileMissingV45SchemaObjects(connection);
+                        if (reconciledTenantCount > 0) {
+                            phases.add(Phase.success("tenant_v45_schema_reconciliation", "count=" + reconciledTenantCount));
                         }
                         migrateTenant(config, defaultTenant);
                         String templateChecksum = fingerprint(connection, defaultTenant.schemaName());
@@ -424,6 +431,91 @@ public final class ProductionBootstrapCli {
                     "V45 checksum repair did not restore Flyway validation");
         }
         return true;
+    }
+
+    private static int reconcileMissingV45SchemaObjects(Connection connection) throws Exception {
+        int reconciledTenantCount = 0;
+        for (TenantSchema tenant : tenants(connection, "ACTIVE")) {
+            if (!hasSingleSuccessfulV45History(connection, tenant) || tableExists(connection, tenant, V45_CONNECTOR_CONFIG_TABLE)) {
+                continue;
+            }
+            executeV45MigrationIdempotently(connection, tenant);
+            if (!tableExists(connection, tenant, V45_CONNECTOR_CONFIG_TABLE)) {
+                throw new BootstrapFailure(
+                        "tenant_v45_schema_reconciliation_failed",
+                        "V45 reconciliation did not create " + V45_CONNECTOR_CONFIG_TABLE + " in " + tenant.schemaName());
+            }
+            reconciledTenantCount++;
+        }
+        return reconciledTenantCount;
+    }
+
+    private static boolean hasSingleSuccessfulV45History(Connection connection, TenantSchema tenant) throws SQLException {
+        if (!tableExists(connection, tenant, "tenant_schema_history")) {
+            return false;
+        }
+        try (PreparedStatement statement = connection.prepareStatement("""
+                select count(*)
+                from %s.tenant_schema_history
+                where (version = ? or version like ?) and success
+                """.formatted(quotedIdentifier(tenant.schemaName())))) {
+            statement.setString(1, REPAIRABLE_TENANT_MIGRATION_VERSION);
+            statement.setString(2, REPAIRABLE_TENANT_MIGRATION_VERSION + ".%");
+            try (ResultSet result = statement.executeQuery()) {
+                result.next();
+                int count = result.getInt(1);
+                if (count > 1) {
+                    throw new BootstrapFailure(
+                            "tenant_v45_schema_reconciliation_refused",
+                            "V45 history lookup returned more than one migration for " + tenant.schemaName());
+                }
+                return count == 1;
+            }
+        }
+    }
+
+    private static boolean tableExists(Connection connection, TenantSchema tenant, String tableName) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("""
+                select exists (
+                    select 1
+                    from information_schema.tables
+                    where table_schema = ? and table_name = ?
+                )
+                """)) {
+            statement.setString(1, tenant.schemaName());
+            statement.setString(2, tableName);
+            try (ResultSet result = statement.executeQuery()) {
+                result.next();
+                return result.getBoolean(1);
+            }
+        }
+    }
+
+    private static void executeV45MigrationIdempotently(Connection connection, TenantSchema tenant) throws Exception {
+        try (InputStream stream = ProductionBootstrapCli.class.getClassLoader().getResourceAsStream(V45_MIGRATION_RESOURCE)) {
+            if (stream == null) {
+                throw new BootstrapFailure(
+                        "tenant_v45_schema_reconciliation_failed",
+                        "Missing approved V45 migration resource");
+            }
+            String script = new String(stream.readAllBytes(), StandardCharsets.UTF_8)
+                    .replace("${tenantId}", tenant.tenantId().toString())
+                    .replace("${tenantSchema}", tenant.schemaName());
+            boolean originalAutoCommit = connection.getAutoCommit();
+            try {
+                connection.setAutoCommit(false);
+                try (Statement statement = connection.createStatement()) {
+                    statement.execute("set local search_path to " + quotedIdentifier(tenant.schemaName()) + ", platform");
+                    statement.execute(script);
+                }
+                connection.commit();
+            } catch (Exception exception) {
+                connection.rollback();
+                throw exception;
+            } finally {
+                connection.setAutoCommit(originalAutoCommit);
+            }
+        }
     }
 
     private static void migrateTenant(Config config, TenantSchema tenant) {

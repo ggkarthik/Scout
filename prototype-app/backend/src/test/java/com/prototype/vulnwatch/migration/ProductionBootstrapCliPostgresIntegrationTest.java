@@ -10,6 +10,8 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -166,6 +168,32 @@ class ProductionBootstrapCliPostgresIntegrationTest {
         });
     }
 
+    @Test
+    void reconcilesMissingV45SchemaObjectsBeforeMigratingAnActiveTenant() throws Exception {
+        UUID tenantId = UUID.randomUUID();
+        String schemaName = "tenant_v45_reconcile_" + tenantId.toString().replace("-", "").substring(0, 12);
+        withBootstrapProperties(() -> {
+            ProductionBootstrapCli.main(new String[0]);
+            insertProvisioningTenant(tenantId, schemaName);
+            ProductionBootstrapCli.main(new String[0]);
+            rewindTenantHistoryToVersion45(schemaName);
+            dropV45AndLaterSchemaObjects(schemaName);
+
+            ProductionBootstrapCli.main(new String[0]);
+
+            assertEquals(1, queryInt("""
+                    select count(*)
+                    from information_schema.tables
+                    where table_schema = ? and table_name = 'ai_security_connector_configs'
+                    """, schemaName));
+            assertEquals(1, queryInt("""
+                    select count(*)
+                    from %s.tenant_schema_history
+                    where version = '66' and success
+                    """.formatted(schemaName)));
+        });
+    }
+
     private void withBootstrapProperties(ThrowingRunnable runnable) throws Exception {
         set("DB_URL", DATABASE.url());
         set("DB_USERNAME", DATABASE.username());
@@ -206,6 +234,52 @@ class ProductionBootstrapCliPostgresIntegrationTest {
             statement.setString(2, "Bootstrap Customer " + schemaName);
             statement.setString(3, "bootstrap-" + schemaName.replace('_', '-'));
             statement.setString(4, schemaName);
+            statement.executeUpdate();
+        }
+    }
+
+    private void rewindTenantHistoryToVersion45(String schemaName) throws SQLException {
+        try (Connection connection = DriverManager.getConnection(DATABASE.url(), DATABASE.username(), DATABASE.password());
+             Statement statement = connection.createStatement()) {
+            statement.executeUpdate(("""
+                    delete from %s.tenant_schema_history
+                    where version ~ '^[0-9]+$' and version::integer > 45
+                    """).formatted(schemaName));
+        }
+    }
+
+    private void dropV45AndLaterSchemaObjects(String schemaName) throws SQLException {
+        List<String> tableNames = new ArrayList<>();
+        try (Connection connection = DriverManager.getConnection(DATABASE.url(), DATABASE.username(), DATABASE.password());
+             var select = connection.prepareStatement("""
+                     select table_name
+                     from information_schema.tables
+                     where table_schema = ?
+                       and (table_name like 'ai_security_%' or table_name like 'ai_grid_%')
+                     """)) {
+            select.setString(1, schemaName);
+            try (ResultSet result = select.executeQuery()) {
+                while (result.next()) {
+                    tableNames.add(result.getString(1));
+                }
+            }
+            try (Statement statement = connection.createStatement()) {
+                for (String tableName : tableNames) {
+                    statement.execute("drop table " + quotedIdentifier(schemaName) + "." + quotedIdentifier(tableName) + " cascade");
+                }
+            }
+        }
+    }
+
+    private String quotedIdentifier(String value) {
+        return "\"" + value.replace("\"", "\"\"") + "\"";
+    }
+
+    private void setTenantStatus(UUID tenantId, String status) throws SQLException {
+        try (Connection connection = DriverManager.getConnection(DATABASE.url(), DATABASE.username(), DATABASE.password());
+             var statement = connection.prepareStatement("update platform.tenants set status = ? where id = ?")) {
+            statement.setString(1, status);
+            statement.setObject(2, tenantId);
             statement.executeUpdate();
         }
     }
