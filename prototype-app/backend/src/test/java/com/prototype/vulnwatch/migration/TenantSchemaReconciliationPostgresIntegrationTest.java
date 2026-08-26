@@ -74,11 +74,25 @@ class TenantSchemaReconciliationPostgresIntegrationTest {
                 where c.table_schema = ? and c.table_name = 'audit_events' and c.column_name = 'tenant_id'
                 """, Boolean.class, schemaName);
 
-        assertEquals(66, version);
+        Integer demoRequestsActiveEmailIndex = platformJdbcTemplate.queryForObject("""
+                select count(*) from pg_indexes
+                where schemaname = ? and tablename = 'demo_requests'
+                  and indexname = 'uk_demo_requests_active_email'
+                """, Integer.class, schemaName);
+        Integer ingestionDedupeIndex = platformJdbcTemplate.queryForObject("""
+                select count(*) from pg_indexes
+                where schemaname = ? and tablename = 'ingestion_jobs'
+                  and indexname = 'uk_ingestion_jobs_dedupe_active'
+                """, Integer.class, schemaName);
+
+        assertEquals(67, version);
         assertNotNull(checksum);
         assertEquals(0, incompleteRls);
         assertEquals(false, demoRlsEnabled);
         assertEquals(true, auditAllowsPlatformEvents);
+        // V67 converges these platform-line objects onto every tenant schema.
+        assertEquals(1, demoRequestsActiveEmailIndex);
+        assertEquals(1, ingestionDedupeIndex);
 
         platformJdbcTemplate.execute("ALTER TABLE tenant_default.assets ADD COLUMN reconciliation_probe text");
         assertColumnCount(schemaName, "assets", "reconciliation_probe", 0);
