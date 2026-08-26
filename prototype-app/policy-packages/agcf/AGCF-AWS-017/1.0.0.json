@@ -1,0 +1,88 @@
+{
+  "policyId": "AGCF-AWS-017",
+  "version": "1.0.0",
+  "name": "Bedrock knowledge base uses an S3 source with public policy exposure",
+  "description": "Detects when bedrock knowledge base uses an S3 source with public policy exposure using only declared evidence.",
+  "securityIntent": "Prevent the risk condition described by AGCF-AWS-017.",
+  "remediationIntent": "Correct the provider configuration or relationship and reassess with complete, fresh evidence.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-AWS-017",
+  "provider": "AWS",
+  "evaluationMode": "ARTIFACT_FACTS",
+  "evaluationDefinition": {
+    "mode": "ARTIFACT_FACTS",
+    "artifactFacts": {
+      "predicate": {
+        "fact": "agcf.agcf-aws-017.evidence",
+        "eq": true
+      }
+    }
+  },
+  "baseEvidenceTiers": [
+    "E0"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "REQUIRED",
+  "releaseFamily": "AGCF_PHASE_1",
+  "wave": "PHASE_1",
+  "workflowClass": "POSTURE_FINDING",
+  "artifactTypes": [
+    "AI_ARTIFACT"
+  ],
+  "nativeKinds": [],
+  "requiredCapabilities": [
+    "BEDROCK_KNOWLEDGE_BASES"
+  ],
+  "requiredRelationships": [],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [
+    {
+      "factKey": "agcf.agcf-aws-017.evidence",
+      "valueType": "BOOLEAN",
+      "evidenceClasses": [
+        "E0"
+      ],
+      "maxAgeSeconds": 86400
+    }
+  ],
+  "frameworkMappings": [
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM02",
+      "mappingType": "DIRECT",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM09",
+      "mappingType": "DIRECT",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "DSP-17",
+      "mappingType": "DIRECT",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "I&S-03",
+      "mappingType": "DIRECT",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "IAM-16",
+      "mappingType": "PARTIAL",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    }
+  ],
+  "packageSourceRef": "policy-packages/agcf/AGCF-AWS-017/1.0.0.json"
+}

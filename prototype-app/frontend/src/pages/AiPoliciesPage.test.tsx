@@ -2,7 +2,7 @@ import { screen, fireEvent } from '@testing-library/react';
 import { Route, Routes, useParams } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../api/client';
-import type { AiSecurityPolicy } from '../features/ai-security/types';
+import type { AiGridPolicy } from '../features/ai-security/types';
 import { renderWithProviders } from '../test/test-utils';
 import { AiPoliciesPage } from './AiPoliciesPage';
 import { AiPolicyDetailPage } from './AiPolicyDetailPage';
@@ -22,27 +22,23 @@ function renderPoliciesPage() {
   );
 }
 
-function buildPolicy(overrides: Partial<AiSecurityPolicy> = {}): AiSecurityPolicy {
+function buildPolicy(overrides: Partial<AiGridPolicy> = {}): AiGridPolicy {
   return {
-    id: 'AWS_BEDROCK_PUBLIC_KB_S3',
+    policyId: 'AGCF-AWS-001',
     version: '1.0.0',
     name: 'Public knowledge-base S3 source',
     severity: 'CRITICAL',
-    artifactTypes: ['AI_MODEL'],
-    requiredResourceFamilies: ['BEDROCK_KNOWLEDGE_BASES', 'S3_EXPOSURE'],
-    description: 'A Bedrock knowledge base uses an S3 data source that is publicly accessible.',
-    remediation: 'Block public access and restrict the bucket policy to the knowledge-base execution role.',
-    controlMappings: {},
-    available: true,
-    enabled: true,
-    openFindings: 2,
-    lifetimeFindings: 5,
-    lastEvaluatedAt: null,
-    decisionCoverage: 0,
-    decisionCoverageThreshold: 1,
-    decisionCoverageStatus: 'NO_DATA',
-    evaluatedArtifacts: 0,
-    noDecisionCount: 0,
+    lifecycle: 'PUBLISHED',
+    workflowClass: 'POSTURE_FINDING',
+    selection: 'ENABLED',
+    controlObjectiveId: 'AGCF-OBJ-AWS-001',
+    provider: 'AWS',
+    evaluationMode: 'ARTIFACT_FACTS',
+    baseEvidenceTiersJson: '["E0"]',
+    conditionalCapabilitiesJson: '[]',
+    requiredCapabilitiesJson: '["BEDROCK_KNOWLEDGE_BASES"]',
+    frameworkMappingsJson: '[]',
+    readiness: 'READY',
     ...overrides,
   };
 }
@@ -52,32 +48,65 @@ describe('AiPoliciesPage', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders one row per policy with severity, evidence, coverage and findings columns', async () => {
-    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([buildPolicy()]);
+  it('renders one row per policy with governed metadata and readiness', async () => {
+    vi.spyOn(api, 'listAiGridPolicies').mockResolvedValue([buildPolicy()]);
     renderPoliciesPage();
 
     expect(await screen.findByText('Public knowledge-base S3 source')).toBeInTheDocument();
     expect(screen.getByText('CRITICAL')).toBeInTheDocument();
-    expect(screen.getByText('BEDROCK_KNOWLEDGE_BASES · S3_EXPOSURE')).toBeInTheDocument();
-    expect(screen.getByText('2')).toBeInTheDocument();
+    expect(screen.getByText('AGCF-OBJ-AWS-001')).toBeInTheDocument();
+    expect(screen.getByText('Artifact Facts')).toBeInTheDocument();
+    expect(screen.getByText('Ready')).toBeInTheDocument();
   });
 
   it('navigates to the policy detail page when a row is clicked', async () => {
-    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([buildPolicy()]);
+    vi.spyOn(api, 'listAiGridPolicies').mockResolvedValue([buildPolicy()]);
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([{
+      id: 'AGCF-AWS-001', version: '1.0.0', name: 'Public knowledge-base S3 source', severity: 'CRITICAL',
+      artifactTypes: [], requiredResourceFamilies: [], description: 'Block public access and restrict the bucket policy.',
+      remediation: 'Block public access and restrict the bucket policy.', controlMappings: {}, available: true, enabled: true,
+      openFindings: 0, lifetimeFindings: 0, lastEvaluatedAt: null, decisionCoverage: 1, decisionCoverageThreshold: 1,
+      decisionCoverageStatus: 'PASS', evaluatedArtifacts: 1, noDecisionCount: 0,
+    }]);
     vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({ items: [], page: 0, size: 200, total: 0 });
     renderPoliciesPage();
 
     const nameCell = await screen.findByText('Public knowledge-base S3 source');
     fireEvent.click(nameCell.closest('tr')!);
 
-    expect(await screen.findByText(/Block public access/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/Block public access/)).length).toBeGreaterThan(0);
     expect(screen.getByRole('heading', { name: 'Public knowledge-base S3 source' })).toBeInTheDocument();
   });
 
+  it('groups by provider and reveals capability setup items and framework mappings on expand', async () => {
+    vi.spyOn(api, 'listAiGridPolicies').mockResolvedValue([
+      buildPolicy({
+        policyId: 'AGCF-AWS-013', name: 'Sensitive-data agent lacks PII guardrail',
+        conditionalCapabilitiesJson: '["MACIE_CLASSIFICATION"]',
+        frameworkMappingsJson: JSON.stringify([{ framework: 'OWASP_GENAI_LLM_TOP_10', frameworkVersion: '2026', controlId: 'LLM02', mappingType: 'DIRECT', rationale: 'PII guardrail reduces sensitive disclosure.' }]),
+      }),
+      buildPolicy({ policyId: 'AGCF-AZR-001', name: 'Azure public network access', provider: 'AZURE' }),
+    ]);
+    renderPoliciesPage();
+
+    await screen.findByText('Sensitive-data agent lacks PII guardrail');
+    // Two provider groups render as separate section headings.
+    expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(2);
+    // A conditional-capability policy is flagged, and detail is hidden until expanded.
+    expect(screen.getByText(/needs capability/)).toBeInTheDocument();
+    expect(screen.queryByText('Required connector capabilities')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Expand Sensitive-data agent lacks PII guardrail/ }));
+
+    expect(screen.getByText('Required connector capabilities')).toBeInTheDocument();
+    expect(screen.getByText('DIRECT')).toBeInTheDocument();
+    expect(screen.getByText('PII guardrail reduces sensitive disclosure.')).toBeInTheDocument();
+  });
+
   it('filters rows by severity pill and by search text', async () => {
-    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([
+    vi.spyOn(api, 'listAiGridPolicies').mockResolvedValue([
       buildPolicy(),
-      buildPolicy({ id: 'AZURE_UNAUTH_LAMBDA', name: 'Unauthenticated action-group Lambda URL', severity: 'HIGH' }),
+      buildPolicy({ policyId: 'AGCF-AZR-001', name: 'Unauthenticated action-group Lambda URL', severity: 'HIGH', provider: 'AZURE' }),
     ]);
     renderPoliciesPage();
 

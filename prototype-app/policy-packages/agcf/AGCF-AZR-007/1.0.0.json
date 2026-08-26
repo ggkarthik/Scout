@@ -1,0 +1,80 @@
+{
+  "policyId": "AGCF-AZR-007",
+  "version": "1.0.0",
+  "name": "Managed AI resource provisioning state is failed or non-succeeded",
+  "description": "Detects when managed AI resource provisioning state is failed or non-succeeded using only declared evidence.",
+  "securityIntent": "Prevent the risk condition described by AGCF-AZR-007.",
+  "remediationIntent": "Correct the provider configuration or relationship and reassess with complete, fresh evidence.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-AZR-007",
+  "provider": "AZURE",
+  "evaluationMode": "ARTIFACT_FACTS",
+  "evaluationDefinition": {
+    "mode": "ARTIFACT_FACTS",
+    "artifactFacts": {
+      "predicate": {
+        "fact": "resource.provisioning_state_observed",
+        "in": [
+          "FAILED",
+          "CANCELED",
+          "DELETING"
+        ]
+      }
+    }
+  },
+  "baseEvidenceTiers": [
+    "E1"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "ENABLED",
+  "releaseFamily": "AGCF_PHASE_1",
+  "wave": "PHASE_1",
+  "workflowClass": "POSTURE_FINDING",
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AZURE_AI_ACCOUNTS",
+    "AZURE_ML_WORKSPACES",
+    "AZURE_SEARCH_SERVICES"
+  ],
+  "requiredCapabilities": [
+    "AI_ACCOUNTS"
+  ],
+  "requiredRelationships": [],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [
+    {
+      "factKey": "resource.provisioning_state_observed",
+      "valueType": "STRING",
+      "evidenceClasses": [
+        "CONFIGURATION"
+      ],
+      "maxAgeSeconds": 86400
+    }
+  ],
+  "frameworkMappings": [
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM04",
+      "mappingType": "INFORMATIVE",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "MDS-11",
+      "mappingType": "PARTIAL",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "LOG-14",
+      "mappingType": "PARTIAL",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    }
+  ],
+  "packageSourceRef": "policy-packages/agcf/AGCF-AZR-007/1.0.0.json"
+}

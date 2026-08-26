@@ -205,23 +205,42 @@ public class AiGridApiService {
         return tenantExecution.run(tenant, () -> jdbc.query("""
                 select distinct on (p.policy_id)
                        p.policy_id, p.version, p.name, p.severity, p.lifecycle, p.workflow_class,
-                       coalesce(s.selection, d.default_selection, p.default_selection) selection
+                       coalesce(s.selection, d.default_selection, p.default_selection) selection,
+                       p.control_objective_id, p.provider, p.evaluation_mode,
+                       p.base_evidence_tiers_json::text base_evidence_tiers_json,
+                       p.conditional_capabilities_json::text conditional_capabilities_json,
+                       p.required_capabilities_json::text required_capabilities_json,
+                       p.framework_mappings_json::text framework_mappings_json,
+                       coalesce(readiness.readiness, 'NOT_EVALUATED') readiness
                   from platform.ai_grid_policy_versions p
                   join platform.ai_grid_policy_distribution d on d.policy_id = p.policy_id
                   left join ai_grid_policy_selections s on s.policy_id = p.policy_id
+                  left join lateral (
+                      select r.readiness from ai_grid_policy_readiness r
+                       where r.policy_id = p.policy_id and r.policy_version = p.version
+                       order by r.computed_at desc, r.run_id desc limit 1
+                  ) readiness on true
                  where p.lifecycle = 'PUBLISHED' and d.available = true
                    and (d.rollout_stage = 'GENERAL_AVAILABILITY'
                         or (d.rollout_stage = 'CANARY' and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
                  order by p.policy_id, p.published_at desc, p.version desc
                 """, Map.of("tenantId", tenant.getId().toString()), (rs, n) -> new PolicyView(rs.getString("policy_id"), rs.getString("version"),
                 rs.getString("name"), rs.getString("severity"), rs.getString("lifecycle"),
-                rs.getString("workflow_class"), rs.getString("selection"))));
+                rs.getString("workflow_class"), rs.getString("selection"), rs.getString("control_objective_id"),
+                rs.getString("provider"), rs.getString("evaluation_mode"), rs.getString("base_evidence_tiers_json"),
+                rs.getString("conditional_capabilities_json"), rs.getString("required_capabilities_json"),
+                rs.getString("framework_mappings_json"), rs.getString("readiness"))));
     }
 
     public List<PolicyView> policyVersions(Tenant tenant, String policyId) {
         return tenantExecution.run(tenant, () -> jdbc.query("""
                 select p.policy_id, p.version, p.name, p.severity, p.lifecycle, p.workflow_class,
-                       coalesce(s.selection, p.default_selection) selection
+                       coalesce(s.selection, p.default_selection) selection,
+                       p.control_objective_id, p.provider, p.evaluation_mode,
+                       p.base_evidence_tiers_json::text base_evidence_tiers_json,
+                       p.conditional_capabilities_json::text conditional_capabilities_json,
+                       p.required_capabilities_json::text required_capabilities_json,
+                       p.framework_mappings_json::text framework_mappings_json
                   from platform.ai_grid_policy_versions p
                   left join ai_grid_policy_selections s on s.policy_id = p.policy_id
                  where p.policy_id = :policyId
@@ -229,7 +248,11 @@ public class AiGridApiService {
                  order by p.published_at desc nulls last, p.version desc
                 """, Map.of("policyId", policyId), (rs, n) -> new PolicyView(rs.getString("policy_id"),
                 rs.getString("version"), rs.getString("name"), rs.getString("severity"),
-                rs.getString("lifecycle"), rs.getString("workflow_class"), rs.getString("selection"))));
+                rs.getString("lifecycle"), rs.getString("workflow_class"), rs.getString("selection"),
+                rs.getString("control_objective_id"), rs.getString("provider"), rs.getString("evaluation_mode"),
+                rs.getString("base_evidence_tiers_json"), rs.getString("conditional_capabilities_json"),
+                rs.getString("required_capabilities_json"), rs.getString("framework_mappings_json"),
+                "NOT_EVALUATED")));
     }
 
     public void updateSelection(Tenant tenant, String policyId, String selection, String actor, String reason) {
@@ -489,7 +512,11 @@ public class AiGridApiService {
     public record AssessmentRun(UUID runId, Instant startedAt, Instant completedAt,
                                 long assessments, long noDecision) {}
     public record PolicyView(String policyId, String version, String name, String severity,
-                             String lifecycle, String workflowClass, String selection) {}
+                             String lifecycle, String workflowClass, String selection,
+                             String controlObjectiveId, String provider, String evaluationMode,
+                             String baseEvidenceTiersJson, String conditionalCapabilitiesJson,
+                             String requiredCapabilitiesJson, String frameworkMappingsJson,
+                             String readiness) {}
     public record SystemLineage(UUID eventId, String eventType, UUID runId, String rationale,
                                 String actor, Instant createdAt, String participantRole) {}
     public record GraphEdge(UUID id, UUID sourceArtifactId, UUID targetArtifactId, String relationshipType,

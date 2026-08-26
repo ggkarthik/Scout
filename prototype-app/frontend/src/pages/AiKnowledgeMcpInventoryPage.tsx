@@ -1,20 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
 import React from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
-import { pathForAiKnowledgeData, pathForAiMcpInventory, pathForInventoryAiAsset, pathForInventoryAiAssets, pathForInventoryView } from '../app/routes';
+import { pathForInventoryAiAsset } from '../app/routes';
 import { PageFreshnessStatus } from '../components/PageFreshnessStatus';
 import type { AiSecurityArtifact } from '../features/ai-security/types';
 import { InventoryShell } from '../features/inventory/InventoryShell';
 
 type InventoryKind = 'knowledge-data' | 'mcp';
-
-const TABS: Array<{ key: InventoryKind | 'overview' | 'assets'; label: string }> = [
-  { key: 'overview', label: 'Overview' },
-  { key: 'assets', label: 'Assets' },
-  { key: 'knowledge-data', label: 'Knowledge & Data' },
-  { key: 'mcp', label: 'MCP' },
-];
 
 function attribute(item: AiSecurityArtifact, key: string): string {
   const value = item.attributes[key];
@@ -32,9 +25,10 @@ function sensitivityLabel(value: string): string {
 export function AiKnowledgeMcpInventoryPage({ kind }: { kind: InventoryKind }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const [provider, setProvider] = React.useState<'' | 'AWS' | 'AZURE'>('');
   const [active, setActive] = React.useState<'ALL' | 'true' | 'false'>('ALL');
-  const [artifactRole, setArtifactRole] = React.useState('');
+  const [artifactRole, setArtifactRole] = React.useState(searchParams.get('artifactRole') ?? '');
   const [postureFilter, setPostureFilter] = React.useState('');
   const [secondaryFilter, setSecondaryFilter] = React.useState('');
   const [tertiaryFilter, setTertiaryFilter] = React.useState('');
@@ -53,11 +47,10 @@ export function AiKnowledgeMcpInventoryPage({ kind }: { kind: InventoryKind }) {
   const total = query.data?.total ?? 0;
   const isKnowledge = kind === 'knowledge-data';
 
-  const targetPath = (key: typeof TABS[number]['key']) => {
-    if (key === 'overview') return pathForInventoryView('ai');
-    if (key === 'assets') return pathForInventoryAiAssets();
-    return key === 'knowledge-data' ? pathForAiKnowledgeData() : pathForAiMcpInventory();
-  };
+  React.useEffect(() => {
+    setArtifactRole(searchParams.get('artifactRole') ?? '');
+    setPage(0);
+  }, [kind, searchParams]);
 
   return (
     <InventoryShell
@@ -68,12 +61,6 @@ export function AiKnowledgeMcpInventoryPage({ kind }: { kind: InventoryKind }) {
         : 'Provider-configured MCP gateways, targets, and servers. Endpoints are never invoked.'}
       legacyClassName="ai-security-page"
     >
-      <nav className="inventory-fpl-toolbar" aria-label="AI inventory views">
-        {TABS.map((tab) => (
-          <button key={tab.key} type="button" className={`btn ${tab.key === kind ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => navigate(targetPath(tab.key))}>{tab.label}</button>
-        ))}
-      </nav>
       <PageFreshnessStatus updatedAt={summaryQuery.data?.lastCompleteSnapshotAt} />
       <div className="inventory-fpl-toolbar">
         <label className="findings-filter-chip"><span className="panel-caption">Provider</span>
@@ -128,7 +115,7 @@ export function AiKnowledgeMcpInventoryPage({ kind }: { kind: InventoryKind }) {
               <td>{isKnowledge ? `${attribute(item, 'sourceType')} · ${sensitivityLabel(item.piiScanStatus)}`
                 : `${attribute(item, 'endpointHost')} · ${attribute(item, 'configuredAuthType') !== 'Unknown' ? attribute(item, 'configuredAuthType') : attribute(item, 'inboundAuthType')}`}</td>
               <td>{new Date(item.lastObservedAt).toLocaleString()}</td>
-            </tr>)}</tbody></table><div className="button-row"><button type="button" className="btn btn-secondary" disabled={page === 0} onClick={() => setPage((value) => value - 1)}>Previous</button><button type="button" className="btn btn-secondary" disabled={(page + 1) * pageSize >= total} onClick={() => setPage((value) => value + 1)}>Next</button></div></section>}
+            </tr>)}</tbody></table><div className="pagination-row"><button type="button" className="btn btn-secondary" disabled={page === 0 || query.isFetching} onClick={() => setPage((value) => value - 1)}>Previous</button><span className="panel-caption pagination-caption">Page {page + 1} of {Math.max(1, Math.ceil(total / pageSize))}</span><button type="button" className="btn btn-secondary" disabled={query.isFetching || (page + 1) * pageSize >= total} onClick={() => setPage((value) => value + 1)}>Next</button></div></section>}
     </InventoryShell>
   );
 }

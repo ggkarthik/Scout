@@ -1,0 +1,91 @@
+{
+  "policyId": "AGCF-AWS-028",
+  "version": "1.0.0",
+  "name": "Model provider or model identifier is outside the approved allowlist",
+  "description": "Detects when model provider or model identifier is outside the approved allowlist using only declared evidence.",
+  "securityIntent": "Prevent the risk condition described by AGCF-AWS-028.",
+  "remediationIntent": "Correct the provider configuration or relationship and reassess with complete, fresh evidence.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-AWS-028",
+  "provider": "AWS",
+  "evaluationMode": "ARTIFACT_FACTS",
+  "evaluationDefinition": {
+    "mode": "ARTIFACT_FACTS",
+    "artifactFacts": {
+      "predicate": {
+        "fact": "agcf.agcf-aws-028.evidence",
+        "eq": true
+      }
+    }
+  },
+  "baseEvidenceTiers": [
+    "E1"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "DISABLED",
+  "releaseFamily": "AGCF_PHASE_1",
+  "wave": "PHASE_1",
+  "workflowClass": "POSTURE_FINDING",
+  "artifactTypes": [
+    "AI_ARTIFACT"
+  ],
+  "nativeKinds": [],
+  "requiredCapabilities": [
+    "BEDROCK_MODELS_JOBS"
+  ],
+  "requiredRelationships": [],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [
+    {
+      "factKey": "agcf.agcf-aws-028.evidence",
+      "valueType": "BOOLEAN",
+      "evidenceClasses": [
+        "E1"
+      ],
+      "maxAgeSeconds": 86400
+    }
+  ],
+  "frameworkMappings": [
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM04",
+      "mappingType": "DIRECT",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "STA-08",
+      "mappingType": "DIRECT",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "STA-10",
+      "mappingType": "DIRECT",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    }
+  ],
+  "parameterDefinitions": [
+    {
+      "key": "approvedBaseline",
+      "type": "STRING",
+      "defaultValue": "DEFAULT"
+    }
+  ],
+  "certificationParameterProfile": {
+    "immutable": true,
+    "pass": {
+      "approvedBaseline": "DEFAULT"
+    },
+    "fail": {
+      "approvedBaseline": "STRICT"
+    },
+    "invalid": {}
+  },
+  "packageSourceRef": "policy-packages/agcf/AGCF-AWS-028/1.0.0.json"
+}

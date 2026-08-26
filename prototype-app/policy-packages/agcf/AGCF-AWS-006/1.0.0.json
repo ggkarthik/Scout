@@ -1,0 +1,81 @@
+{
+  "policyId": "AGCF-AWS-006",
+  "version": "1.0.0",
+  "name": "Action-group Lambda URL permits unauthenticated invocation",
+  "description": "Detects when action-group Lambda URL permits unauthenticated invocation using only declared evidence.",
+  "securityIntent": "Prevent the risk condition described by AGCF-AWS-006.",
+  "remediationIntent": "Correct the provider configuration or relationship and reassess with complete, fresh evidence.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-AWS-006",
+  "provider": "AWS",
+  "evaluationMode": "ARTIFACT_FACTS",
+  "evaluationDefinition": {
+    "mode": "ARTIFACT_FACTS",
+    "artifactFacts": {
+      "predicate": {
+        "fact": "compute.lambda_url_auth_type_configured",
+        "eq": "NONE"
+      }
+    }
+  },
+  "baseEvidenceTiers": [
+    "E0"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "REQUIRED",
+  "releaseFamily": "AGCF_PHASE_1",
+  "wave": "PHASE_1",
+  "workflowClass": "POSTURE_FINDING",
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AWS_LAMBDA_FUNCTION"
+  ],
+  "requiredCapabilities": [
+    "LAMBDA_URLS"
+  ],
+  "requiredRelationships": [],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [
+    {
+      "factKey": "compute.lambda_url_auth_type_configured",
+      "valueType": "STRING",
+      "evidenceClasses": [
+        "CONFIGURATION"
+      ],
+      "maxAgeSeconds": 86400
+    }
+  ],
+  "frameworkMappings": [
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM03",
+      "mappingType": "DIRECT",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "IAM-13",
+      "mappingType": "DIRECT",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "IAM-15",
+      "mappingType": "DIRECT",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "AIS-08",
+      "mappingType": "PARTIAL",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    }
+  ],
+  "packageSourceRef": "policy-packages/agcf/AGCF-AWS-006/1.0.0.json"
+}

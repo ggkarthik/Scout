@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.aisecurity.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.service.TenantContext;
@@ -17,6 +18,7 @@ import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
@@ -120,29 +122,8 @@ public class AiGridValidationGovernanceService {
         return TenantContext.runAsPlatform(() -> transactions.execute(status -> {
             AnswerKeyEnvironment environment = environment(environmentId);
             if (!"DRAFT".equals(environment.lifecycle())) throw conflict("Only a draft answer key can be certified");
-            Map<String, Integer> scenarioCounts = jdbc.query("""
-                    select scenario, count(*) count from platform.ai_grid_answer_key_cases
-                     where environment_id = :id group by scenario
-                    """, Map.of("id", environmentId), rs -> {
-                Map<String, Integer> counts = new HashMap<>();
-                while (rs.next()) counts.put(rs.getString("scenario"), rs.getInt("count"));
-                return counts;
-            });
-            if (scenarioCounts.getOrDefault("SECURE", 0) == 0 || scenarioCounts.getOrDefault("INSECURE", 0) == 0) {
-                throw conflict("Certification requires at least one SECURE and one INSECURE case");
-            }
-            if (scenarioCounts.getOrDefault("PROXY_VS_VERIFIED", 0) == 0) {
-                throw conflict("Certification requires an explicit PROXY_VS_VERIFIED case");
-            }
-            java.util.Set<String> declaredOutputs = new java.util.HashSet<>();
-            for (AnswerKeyCase answerCase : cases(environmentId)) {
-                parse(answerCase.expectedJson()).fieldNames().forEachRemaining(declaredOutputs::add);
-            }
-            List<String> missingOutputs = ANSWER_KEY_OUTPUTS.stream()
-                    .filter(output -> !declaredOutputs.contains(output)).toList();
-            if (!missingOutputs.isEmpty()) {
-                throw conflict("Answer key is missing expected output categories: " + String.join(", ", missingOutputs));
-            }
+            List<String> blockers = certificationBlockers(environmentId);
+            if (!blockers.isEmpty()) throw conflict("Answer key certification is blocked: " + String.join("; ", blockers));
             jdbc.update("""
                     update platform.ai_grid_answer_key_environments set lifecycle = 'RETIRED'
                      where environment_key = :key and lifecycle = 'CERTIFIED' and id <> :id
@@ -318,23 +299,68 @@ public class AiGridValidationGovernanceService {
         requireText(command.severity(), "severity");
         requireText(command.observedOutcome(), "observedOutcome");
         requireText(command.evidenceReference(), "evidenceReference");
+        if (command.sourceTenantId() == null || command.sourceRunId() == null || command.sourceAssessmentId() == null) {
+            throw badRequest("Precision samples require sourceTenantId, sourceRunId, and sourceAssessmentId");
+        }
+        PrecisionReview review = precisionReview(reviewId);
+        PrecisionSampleProvenance provenance = validatePrecisionSampleProvenance(review, command);
         return TenantContext.runAsPlatform(() -> transactions.execute(status -> {
             assertReviewOpen(reviewId);
             UUID id = UUID.randomUUID();
             jdbc.update("""
                     insert into platform.ai_grid_precision_samples
                         (id, review_id, sample_key, provider, resource_family, severity,
-                         observed_outcome, predicted_finding, evidence_reference)
-                    values (:id, :reviewId, :key, :provider, :family, :severity, :outcome, :predicted, :evidence)
+                         observed_outcome, predicted_finding, evidence_reference, source_tenant_id, source_run_id,
+                         source_assessment_id, source_decision_fingerprint, provenance_state)
+                    values (:id, :reviewId, :key, :provider, :family, :severity, :outcome, :predicted, :evidence,
+                            :tenantId, :runId, :assessmentId, :fingerprint, 'PLATFORM_RUN_BOUND')
                     """, new MapSqlParameterSource().addValue("id", id).addValue("reviewId", reviewId)
                     .addValue("key", command.sampleKey()).addValue("provider", command.provider())
                     .addValue("family", command.resourceFamily()).addValue("severity", command.severity())
                     .addValue("outcome", command.observedOutcome()).addValue("predicted", command.predictedFinding())
-                    .addValue("evidence", command.evidenceReference()));
+                    .addValue("evidence", command.evidenceReference()).addValue("tenantId", command.sourceTenantId())
+                    .addValue("runId", command.sourceRunId()).addValue("assessmentId", command.sourceAssessmentId())
+                    .addValue("fingerprint", provenance.decisionFingerprint()));
             jdbc.update("update platform.ai_grid_precision_reviews set status = 'IN_REVIEW' where id = :id",
                     Map.of("id", reviewId));
             return precisionSample(id);
         }));
+    }
+
+    private PrecisionSampleProvenance validatePrecisionSampleProvenance(PrecisionReview review, PrecisionSampleCommand command) {
+        PolicyCandidate candidate = policyCandidate(review.policyId(), review.policyVersion());
+        boolean providerMatches = candidate.provider() == null || candidate.provider().isBlank()
+                || candidate.provider().equals(command.provider());
+        if (!providerMatches || !candidate.severity().equals(command.severity())) {
+            throw conflict("Precision sample provider and severity must match the reviewed policy");
+        }
+        return tenantExecution.run(command.sourceTenantId(), () -> {
+            Integer manifests = jdbc.queryForObject("select count(*) from ai_grid_snapshot_manifests where run_id = :runId",
+                    Map.of("runId", command.sourceRunId()), Integer.class);
+            if (manifests == null || manifests == 0) {
+                throw conflict("sourceRunId does not identify an immutable AI Grid snapshot for sourceTenantId");
+            }
+            PrecisionSampleProvenance source = jdbc.query("""
+                    select a.id, a.policy_id, a.policy_version, a.decision, a.decision_fingerprint,
+                           exists (select 1 from findings f where f.assessment_id = a.id) finding_present
+                      from ai_grid_assessments a
+                     where a.id = :assessmentId and a.run_id = :runId
+                    """, Map.of("assessmentId", command.sourceAssessmentId(), "runId", command.sourceRunId()), rs -> rs.next()
+                    ? new PrecisionSampleProvenance(rs.getObject("id", UUID.class), rs.getString("policy_id"),
+                    rs.getString("policy_version"), rs.getString("decision"), rs.getString("decision_fingerprint"),
+                    rs.getBoolean("finding_present")) : null);
+            if (source == null || !review.policyId().equals(source.policyId())
+                    || !review.policyVersion().equals(source.policyVersion())) {
+                throw conflict("sourceAssessmentId is not from the declared run and reviewed policy");
+            }
+            if (source.decisionFingerprint() == null || source.decisionFingerprint().isBlank()) {
+                throw conflict("Source assessment has no deterministic decision fingerprint");
+            }
+            if (!command.observedOutcome().equals(source.decision()) || command.predictedFinding() != source.findingPresent()) {
+                throw conflict("Precision sample outcome or predicted finding does not match source assessment");
+            }
+            return source;
+        });
     }
 
     public void submitLabel(UUID reviewId, UUID sampleId, LabelCommand command, String actor) {
@@ -468,15 +494,15 @@ public class AiGridValidationGovernanceService {
             PolicyCandidate candidate = policyCandidate(policyId, version);
             String digest = digest(candidate.digestMaterial());
             AnswerKeyGate answerKey = answerKeyGate(policyId, version, digest);
-            PrecisionReview precision = List.of("HIGH", "CRITICAL").contains(candidate.severity())
+            PrecisionReview precision = candidate.requiresPrecisionReview()
                     ? passingPrecisionReview(policyId, version, digest) : null;
             List<String> blockers = new ArrayList<>();
             if (actor.equals(candidate.authoredBy())) {
                 blockers.add("Independent author and approver are required");
             }
             if (answerKey == null) blockers.add("No fresh, certified, passing answer-key run for this policy digest");
-            if (List.of("HIGH", "CRITICAL").contains(candidate.severity()) && precision == null) {
-                blockers.add("No passing dual-reviewed precision review for this policy digest");
+            if (candidate.requiresPrecisionReview() && precision == null) {
+                blockers.add("No passing precision review for this policy digest");
             }
             UUID decisionId = UUID.randomUUID();
             if (!blockers.isEmpty()) {
@@ -517,7 +543,7 @@ public class AiGridValidationGovernanceService {
             PolicyCandidate candidate = policyCandidate(policyId, version);
             String digest = digest(candidate.digestMaterial());
             AnswerKeyGate answerKey = answerKeyGate(policyId, version, digest);
-            PrecisionReview precision = List.of("HIGH", "CRITICAL").contains(candidate.severity())
+            PrecisionReview precision = candidate.requiresPrecisionReview()
                     ? passingPrecisionReview(policyId, version, digest) : null;
             LatestDecision latest = jdbc.query("""
                     select decision, reason, decided_at from platform.ai_grid_policy_release_decisions
@@ -528,7 +554,7 @@ public class AiGridValidationGovernanceService {
                     rs.getTimestamp("decided_at").toInstant()) : null);
             List<String> blockers = new ArrayList<>();
             if (answerKey == null) blockers.add("FRESH_PASSING_ANSWER_KEY_REQUIRED");
-            if (List.of("HIGH", "CRITICAL").contains(candidate.severity()) && precision == null) {
+            if (candidate.requiresPrecisionReview() && precision == null) {
                 blockers.add("PASSING_PRECISION_REVIEW_REQUIRED");
             }
             if (!List.of("VALIDATED", "APPROVED", "CANARY", "PUBLISHED").contains(candidate.lifecycle())) {
@@ -538,6 +564,144 @@ public class AiGridValidationGovernanceService {
                     blockers.isEmpty(), blockers, answerKey == null ? null : answerKey.runId(),
                     precision == null ? null : precision.id(), latest == null ? null : latest.decision(),
                     latest == null ? null : latest.reason(), latest == null ? null : latest.decidedAt());
+        });
+    }
+
+    /** Platform-wide, read-only evidence ledger for the complete AGCF Phase 1 release family. */
+    public Phase1CertificationReadiness phase1CertificationReadiness() {
+        return TenantContext.runAsPlatform(() -> {
+            List<PolicyRef> policies = jdbc.query("""
+                    select policy_id, version from platform.ai_grid_policy_versions
+                     where release_family = 'AGCF_PHASE_1'
+                     order by policy_id, version
+                    """, (rs, n) -> new PolicyRef(rs.getString("policy_id"), rs.getString("version")));
+            List<Phase1PolicyCertification> policyReadiness = policies.stream().map(policy -> {
+                ReleaseReadiness readiness = releaseReadiness(policy.policyId(), policy.version());
+                return new Phase1PolicyCertification(policy.policyId(), policy.version(), readiness.catalogDigest(),
+                        readiness.answerKeyRunId() != null, readiness.precisionReviewId() != null,
+                        readiness.ready(), readiness.blockers());
+            }).toList();
+            long answerKeyReady = policyReadiness.stream().filter(Phase1PolicyCertification::answerKeyReady).count();
+            long precisionReady = policyReadiness.stream().filter(Phase1PolicyCertification::precisionReady).count();
+            long releaseReady = policyReadiness.stream().filter(Phase1PolicyCertification::releaseReady).count();
+            return new Phase1CertificationReadiness(policyReadiness.size(), answerKeyReady, precisionReady,
+                    releaseReady, policyReadiness.size() - releaseReady, policyReadiness);
+        });
+    }
+
+    /**
+     * Materializes the repository-owned Phase 1 certification corpus as immutable draft answer
+     * keys. This creates no run result, reviewer label, precision review, or release decision.
+     */
+    public Phase1CorpusBootstrap bootstrapPhase1Corpus(Phase1CorpusBootstrapCommand command, String actor) {
+        requireText(command.engineeringOwner(), "engineeringOwner");
+        requireText(command.securityReviewer(), "securityReviewer");
+        if (command.engineeringOwner().equalsIgnoreCase(command.securityReviewer())) {
+            throw badRequest("engineeringOwner and securityReviewer must be independent");
+        }
+        if (command.reviewDueAt() == null || !command.reviewDueAt().isAfter(Instant.now())) {
+            throw badRequest("reviewDueAt must be in the future");
+        }
+        return TenantContext.runAsPlatform(() -> {
+            JsonNode corpus = phase1Corpus();
+            String environmentVersion = "AGCF_PHASE_1_" + corpus.path("sourceManifestDigest").asText().substring(0, 12);
+            Map<String, JsonNode> policies = new HashMap<>();
+            corpus.path("policies").forEach(policy -> policies.put(policy.path("policyId").asText(), policy));
+            Map<String, List<JsonNode>> casesByPolicy = new HashMap<>();
+            corpus.path("cases").forEach(certificationCase -> casesByPolicy
+                    .computeIfAbsent(certificationCase.path("policyId").asText(), ignored -> new ArrayList<>())
+                    .add(certificationCase));
+            int environmentsCreated = 0;
+            int casesCreated = 0;
+            for (Map.Entry<String, JsonNode> entry : policies.entrySet()) {
+                String policyId = entry.getKey();
+                JsonNode policy = entry.getValue();
+                List<JsonNode> cases = casesByPolicy.getOrDefault(policyId, List.of());
+                if (cases.isEmpty()) throw new IllegalStateException("Certification corpus has no cases for " + policyId);
+                String environmentKey = "AGCF_PHASE_1_" + policyId;
+                AnswerKeyEnvironment environment = environmentByKeyAndVersion(environmentKey, environmentVersion);
+                if (environment == null) {
+                    environment = createEnvironment(new EnvironmentCommand(environmentKey, environmentVersion,
+                            policy.path("provider").asText(), "AGCF_" + policy.path("provider").asText(),
+                            command.engineeringOwner(), command.securityReviewer(),
+                            Map.of("catalog", "AGCF_PHASE_1", "packageDigest", policy.path("packageDigest").asText()),
+                            Map.of("caseCount", cases.size(), "contentRead", false, "writePermissions", false),
+                            "Generated from digest-bound Phase 1 certification corpus", command.reviewDueAt()), actor);
+                    environmentsCreated++;
+                }
+                if (!"DRAFT".equals(environment.lifecycle())) continue;
+                java.util.Set<String> existingCases = cases(environment.id()).stream()
+                        .map(AnswerKeyCase::caseKey).collect(java.util.stream.Collectors.toSet());
+                for (JsonNode certificationCase : cases) {
+                    if (!existingCases.add(certificationCase.path("caseKey").asText())) continue;
+                    addCase(environment.id(), new CaseCommand(
+                            certificationCase.path("caseKey").asText(), certificationCase.path("scenario").asText(),
+                            policyId, certificationCase.path("policyVersion").asText(),
+                            certificationCase.path("expectedApplicability").asText(),
+                            certificationCase.path("expectedDecision").asText(), certificationCase.path("expectedFinding").asBoolean(),
+                            objectMapper.convertValue(certificationCase.path("expected"), new TypeReference<Map<String, Object>>() {}),
+                            certificationCase.path("labelVersion").asText(), certificationCase.path("rationale").asText(),
+                            certificationCase.path("evidenceReference").asText()), actor);
+                    casesCreated++;
+                }
+            }
+            return new Phase1CorpusBootstrap(corpus.path("sourceManifestDigest").asText(), policies.size(),
+                    environmentsCreated, casesCreated);
+        });
+    }
+
+    /**
+     * Certifies only complete, digest-bound corpus drafts. It deliberately records no run,
+     * reviewer label, precision review, or release approval.
+     */
+    public Phase1CorpusCertification certifyPhase1Corpus(String actor) {
+        return TenantContext.runAsPlatform(() -> {
+            Phase1CorpusReadiness readiness = phase1CorpusReadiness();
+            int certified = 0;
+            int alreadyCertified = 0;
+            List<String> blocked = new ArrayList<>();
+            for (Phase1CorpusEnvironment environment : readiness.environments()) {
+                if (environment.environmentId() == null) {
+                    blocked.add(environment.policyId() + ": environment has not been bootstrapped");
+                } else if ("CERTIFIED".equals(environment.lifecycle())) {
+                    alreadyCertified++;
+                } else if (!"DRAFT".equals(environment.lifecycle())) {
+                    blocked.add(environment.policyId() + ": environment lifecycle is " + environment.lifecycle());
+                } else if (!environment.certificationBlockers().isEmpty()) {
+                    blocked.add(environment.policyId() + ": " + String.join(", ", environment.certificationBlockers()));
+                } else {
+                    certifyEnvironment(environment.environmentId(), actor);
+                    certified++;
+                }
+            }
+            return new Phase1CorpusCertification(readiness.sourceManifestDigest(), readiness.totalPolicies(),
+                    certified, alreadyCertified, List.copyOf(blocked));
+        });
+    }
+
+    /** Read-only operational view of all repository-owned Phase 1 corpus environments. */
+    public Phase1CorpusReadiness phase1CorpusReadiness() {
+        return TenantContext.runAsPlatform(() -> {
+            JsonNode corpus = phase1Corpus();
+            String version = "AGCF_PHASE_1_" + corpus.path("sourceManifestDigest").asText().substring(0, 12);
+            List<Phase1CorpusEnvironment> rows = new ArrayList<>();
+            for (JsonNode policy : corpus.path("policies")) {
+                String policyId = policy.path("policyId").asText();
+                AnswerKeyEnvironment environment = environmentByKeyAndVersion("AGCF_PHASE_1_" + policyId, version);
+                if (environment == null) {
+                    rows.add(new Phase1CorpusEnvironment(policyId, policy.path("policyVersion").asText(), null, null,
+                            0, List.of("ENVIRONMENT_NOT_BOOTSTRAPPED")));
+                } else {
+                    rows.add(new Phase1CorpusEnvironment(policyId, policy.path("policyVersion").asText(), environment.id(),
+                            environment.lifecycle(), cases(environment.id()).size(), certificationBlockers(environment.id())));
+                }
+            }
+            long certified = rows.stream().filter(row -> "CERTIFIED".equals(row.lifecycle())).count();
+            long drafts = rows.stream().filter(row -> "DRAFT".equals(row.lifecycle())).count();
+            long missing = rows.stream().filter(row -> row.environmentId() == null).count();
+            long blocked = rows.stream().filter(row -> row.environmentId() != null && !row.certificationBlockers().isEmpty()).count();
+            return new Phase1CorpusReadiness(corpus.path("sourceManifestDigest").asText(), rows.size(), certified,
+                    drafts, missing, blocked, List.copyOf(rows));
         });
     }
 
@@ -579,6 +743,55 @@ public class AiGridValidationGovernanceService {
         return result;
     }
 
+    private List<String> certificationBlockers(UUID environmentId) {
+        Map<String, Integer> scenarioCounts = jdbc.query("""
+                select scenario, count(*) count from platform.ai_grid_answer_key_cases
+                 where environment_id = :id group by scenario
+                """, Map.of("id", environmentId), rs -> {
+            Map<String, Integer> counts = new HashMap<>();
+            while (rs.next()) counts.put(rs.getString("scenario"), rs.getInt("count"));
+            return counts;
+        });
+        List<String> blockers = new ArrayList<>();
+        if (scenarioCounts.getOrDefault("SECURE", 0) == 0 || scenarioCounts.getOrDefault("INSECURE", 0) == 0) {
+            blockers.add("SECURE_AND_INSECURE_CASE_REQUIRED");
+        }
+        if (scenarioCounts.getOrDefault("PROXY_VS_VERIFIED", 0) == 0) {
+            blockers.add("PROXY_VS_VERIFIED_CASE_REQUIRED");
+        }
+        java.util.Set<String> declaredOutputs = new java.util.HashSet<>();
+        for (AnswerKeyCase answerKeyCase : cases(environmentId)) {
+            parse(answerKeyCase.expectedJson()).fieldNames().forEachRemaining(declaredOutputs::add);
+        }
+        List<String> missingOutputs = ANSWER_KEY_OUTPUTS.stream()
+                .filter(output -> !declaredOutputs.contains(output)).toList();
+        if (!missingOutputs.isEmpty()) blockers.add("EXPECTED_OUTPUTS_MISSING:" + String.join(",", missingOutputs));
+        return List.copyOf(blockers);
+    }
+
+    private AnswerKeyEnvironment environmentByKeyAndVersion(String environmentKey, String version) {
+        return jdbc.query("""
+                select * from platform.ai_grid_answer_key_environments
+                 where environment_key = :key and version = :version
+                 order by case lifecycle when 'DRAFT' then 1 when 'CERTIFIED' then 2 else 3 end, created_at desc
+                 limit 1
+                """, Map.of("key", environmentKey, "version", version), rs -> rs.next() ? mapEnvironment(rs) : null);
+    }
+
+    private JsonNode phase1Corpus() {
+        try (java.io.InputStream input = new ClassPathResource(
+                "ai-grid/certification/agcf-phase-1-answer-key-corpus.json").getInputStream()) {
+            JsonNode corpus = objectMapper.readTree(input);
+            if (!"AGCF_PHASE_1".equals(corpus.path("releaseFamily").asText())
+                    || corpus.path("sourceManifestDigest").asText().length() != 64) {
+                throw new IllegalStateException("Invalid bundled AGCF Phase 1 certification corpus");
+            }
+            return corpus;
+        } catch (java.io.IOException exception) {
+            throw new IllegalStateException("Unable to load bundled AGCF Phase 1 certification corpus", exception);
+        }
+    }
+
     private AnswerKeyCase answerKeyCase(UUID id) {
         return jdbc.queryForObject("""
                 select id, environment_id, case_key, scenario, policy_id, policy_version,
@@ -609,12 +822,16 @@ public class AiGridValidationGovernanceService {
     private PrecisionSample precisionSample(UUID id) {
         return jdbc.queryForObject("""
                 select id, review_id, sample_key, provider, resource_family, severity,
-                       observed_outcome, predicted_finding, evidence_reference
+                       observed_outcome, predicted_finding, evidence_reference, source_tenant_id, source_run_id,
+                       source_assessment_id, source_decision_fingerprint, provenance_state
                   from platform.ai_grid_precision_samples where id = :id
                 """, Map.of("id", id), (rs, n) -> new PrecisionSample(rs.getObject("id", UUID.class),
                 rs.getObject("review_id", UUID.class), rs.getString("sample_key"), rs.getString("provider"),
                 rs.getString("resource_family"), rs.getString("severity"), rs.getString("observed_outcome"),
-                rs.getBoolean("predicted_finding"), rs.getString("evidence_reference")));
+                rs.getBoolean("predicted_finding"), rs.getString("evidence_reference"),
+                rs.getObject("source_tenant_id", UUID.class), rs.getObject("source_run_id", UUID.class),
+                rs.getObject("source_assessment_id", UUID.class), rs.getString("source_decision_fingerprint"),
+                rs.getString("provenance_state")));
     }
 
     private void assertEnvironmentLifecycle(UUID id, String lifecycle) {
@@ -655,6 +872,9 @@ public class AiGridValidationGovernanceService {
                 select * from platform.ai_grid_precision_reviews
                  where policy_id = :policyId and policy_version = :version
                    and material_change_digest = :digest and status = 'PASSED'
+                   and not exists (select 1 from platform.ai_grid_precision_samples sample
+                                    where sample.review_id = ai_grid_precision_reviews.id
+                                      and sample.provenance_state <> 'PLATFORM_RUN_BOUND')
                  order by finalized_at desc limit 1
                 """, Map.of("policyId", policyId, "version", version, "digest", digest),
                 rs -> rs.next() ? mapPrecisionReview(rs) : null);
@@ -662,16 +882,17 @@ public class AiGridValidationGovernanceService {
 
     private PolicyCandidate policyCandidate(String policyId, String version) {
         PolicyCandidate candidate = jdbc.query("""
-                select severity, lifecycle, authored_by, concat_ws('|', policy_id, version, name, description, severity,
+                select provider, severity, lifecycle, authored_by, package_digest, release_family, concat_ws('|', policy_id, version, name, description, severity,
                        workflow_class, default_selection, artifact_types_json::text, native_kinds_json::text,
                        required_capabilities_json::text, required_relationships_json::text,
                        required_resource_families_json::text, required_facts_json::text,
                        predicate_json::text, reason_code, remediation, framework_mappings_json::text,
                        scope_resolution, parameter_definitions_json::text, package_digest, package_source_ref, release_notes,
-                       replaces_policy_id, replaces_version) digest_material
+                       replaces_policy_id, replaces_version) legacy_digest_material
                   from platform.ai_grid_policy_versions where policy_id = :policyId and version = :version
                 """, Map.of("policyId", policyId, "version", version), rs -> rs.next()
-                ? new PolicyCandidate(rs.getString("severity"), rs.getString("lifecycle"), rs.getString("authored_by"), rs.getString("digest_material"))
+                ? new PolicyCandidate(rs.getString("provider"), rs.getString("severity"), rs.getString("lifecycle"), rs.getString("authored_by"),
+                rs.getString("package_digest"), rs.getString("release_family"), rs.getString("legacy_digest_material"))
                 : null);
         if (candidate == null) throw notFound("AI Grid policy version not found");
         return candidate;
@@ -781,10 +1002,22 @@ public class AiGridValidationGovernanceService {
     private record RunProvenance(Map<String, AssessmentProvenance> assessments) {}
     private record AssessmentProvenance(UUID id, String policyId, String policyVersion, String applicability,
                                         String decision, String decisionFingerprint, boolean findingPresent) {}
+    private record PrecisionSampleProvenance(UUID id, String policyId, String policyVersion, String decision,
+                                             String decisionFingerprint, boolean findingPresent) {}
     private record ResolvedSample(boolean predictedFinding, List<String> labels, int reviewerCount, String finalLabel) {}
-    private record PolicyCandidate(String severity, String lifecycle, String authoredBy, String digestMaterial) {}
+    private record PolicyCandidate(String provider, String severity, String lifecycle, String authoredBy, String packageDigest,
+                                   String releaseFamily, String legacyDigestMaterial) {
+        String digestMaterial() {
+            return packageDigest == null || packageDigest.isBlank() ? legacyDigestMaterial : "package:" + packageDigest;
+        }
+
+        boolean requiresPrecisionReview() {
+            return "AGCF_PHASE_1".equals(releaseFamily) || List.of("HIGH", "CRITICAL").contains(severity);
+        }
+    }
     private record AnswerKeyGate(UUID runId, UUID environmentId) {}
     private record LatestDecision(String decision, String reason, Instant decidedAt) {}
+    private record PolicyRef(String policyId, String version) {}
 
     public record EnvironmentCommand(String environmentKey, String version, String provider, String resourceFamily,
                                      String engineeringOwner, String securityReviewer,
@@ -802,7 +1035,15 @@ public class AiGridValidationGovernanceService {
                                          String samplingMethod, int minimumSampleSize, Double confidenceLevel,
                                          Double precisionThreshold) {}
     public record PrecisionSampleCommand(String sampleKey, String provider, String resourceFamily, String severity,
-                                         String observedOutcome, boolean predictedFinding, String evidenceReference) {}
+                                         String observedOutcome, boolean predictedFinding, String evidenceReference,
+                                         UUID sourceTenantId, UUID sourceRunId, UUID sourceAssessmentId) {
+        /** Kept only for source compatibility; source-unbound payloads are rejected before persistence. */
+        public PrecisionSampleCommand(String sampleKey, String provider, String resourceFamily, String severity,
+                                      String observedOutcome, boolean predictedFinding, String evidenceReference) {
+            this(sampleKey, provider, resourceFamily, severity, observedOutcome, predictedFinding, evidenceReference,
+                    null, null, null);
+        }
+    }
     public record LabelCommand(String label, String labelVersion, String rationale, String evidenceReference) {}
     public record AdjudicationCommand(String finalLabel, String rationale) {}
     public record AnswerKeyEnvironment(UUID id, String environmentKey, String version, String provider,
@@ -826,11 +1067,29 @@ public class AiGridValidationGovernanceService {
                                   Instant finalizedAt, String createdBy, Instant createdAt) {}
     public record PrecisionSample(UUID id, UUID reviewId, String sampleKey, String provider, String resourceFamily,
                                   String severity, String observedOutcome, boolean predictedFinding,
-                                  String evidenceReference) {}
+                                  String evidenceReference, UUID sourceTenantId, UUID sourceRunId,
+                                  UUID sourceAssessmentId, String sourceDecisionFingerprint, String provenanceState) {}
     public record ReleaseDecision(UUID id, String policyId, String policyVersion, boolean published, String reason,
                                   UUID answerKeyRunId, UUID precisionReviewId) {}
     public record ReleaseReadiness(String policyId, String policyVersion, String lifecycle, String severity,
                                    String catalogDigest, boolean ready, List<String> blockers,
                                    UUID answerKeyRunId, UUID precisionReviewId, String latestDecision,
                                    String latestDecisionReason, Instant latestDecisionAt) {}
+    public record Phase1PolicyCertification(String policyId, String version, String catalogDigest,
+                                            boolean answerKeyReady, boolean precisionReady, boolean releaseReady,
+                                            List<String> blockers) {}
+    public record Phase1CertificationReadiness(int totalPolicies, long answerKeyReadyPolicies,
+                                               long precisionReadyPolicies, long releaseReadyPolicies,
+                                               long pendingPolicies,
+                                               List<Phase1PolicyCertification> policies) {}
+    public record Phase1CorpusBootstrapCommand(String engineeringOwner, String securityReviewer, Instant reviewDueAt) {}
+    public record Phase1CorpusBootstrap(String sourceManifestDigest, int policyCount,
+                                        int environmentsCreated, int casesCreated) {}
+    public record Phase1CorpusEnvironment(String policyId, String policyVersion, UUID environmentId, String lifecycle,
+                                          int caseCount, List<String> certificationBlockers) {}
+    public record Phase1CorpusReadiness(String sourceManifestDigest, int totalPolicies, long certifiedEnvironments,
+                                        long draftEnvironments, long missingEnvironments, long blockedEnvironments,
+                                        List<Phase1CorpusEnvironment> environments) {}
+    public record Phase1CorpusCertification(String sourceManifestDigest, int totalPolicies, int environmentsCertified,
+                                            int environmentsAlreadyCertified, List<String> blockedEnvironments) {}
 }

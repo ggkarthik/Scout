@@ -28,16 +28,6 @@ describe('AiInventoryPage', () => {
     navigateMock.mockReset();
   });
 
-  it('links to the AI asset inventory list page', async () => {
-    mockBaseline();
-
-    renderWithProviders(<AiInventoryPage />);
-
-    fireEvent.click(await screen.findByRole('button', { name: 'View AI asset inventory' }));
-
-    expect(navigateMock).toHaveBeenCalledWith('/inventory/ai/assets');
-  });
-
   it('grid cells count distinct artifacts, roll cross-provider kinds into one category row, and open the filtered asset list', async () => {
     mockBaseline();
     vi.spyOn(api, 'getAiSeverityGrid').mockResolvedValue({

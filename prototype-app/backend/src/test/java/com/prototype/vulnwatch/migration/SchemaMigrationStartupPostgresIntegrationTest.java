@@ -33,7 +33,7 @@ class SchemaMigrationStartupPostgresIntegrationTest {
     @Test
     void contextStartupAppliesAllMigrationsOnFreshDatabase() {
         assertNotNull(flyway.info().current());
-        assertEquals("74", flyway.info().current().getVersion().getVersion());
+        assertEquals("87", flyway.info().current().getVersion().getVersion());
         assertEquals(0, flyway.info().pending().length);
 
         Integer failed = jdbcTemplate.queryForObject(
@@ -41,11 +41,21 @@ class SchemaMigrationStartupPostgresIntegrationTest {
                 Integer.class
         );
         Integer latest = jdbcTemplate.queryForObject(
-                "select count(*) from public.flyway_schema_history where version = '74' and success = true",
+                "select count(*) from public.flyway_schema_history where version = '87' and success = true",
                 Integer.class
         );
 
         assertEquals(0, failed);
         assertEquals(1, latest);
+        assertEquals(54, jdbcTemplate.queryForObject(
+                "select count(*) from platform.ai_grid_resource_family_definitions where lifecycle = 'ACTIVE'", Integer.class));
+        assertEquals(34, jdbcTemplate.queryForObject(
+                "select count(*) from platform.ai_grid_relationship_definitions where lifecycle = 'ACTIVE'", Integer.class));
+        assertEquals(6, jdbcTemplate.queryForObject(
+                "select count(*) from platform.ai_grid_correlation_versions where lifecycle = 'PUBLISHED'", Integer.class));
+        assertEquals(76, jdbcTemplate.queryForObject(
+                "select count(*) from platform.ai_grid_policy_versions where policy_id like 'AGCF-%' and release_family = 'AGCF_PHASE_1' and release_wave = 'PHASE_1'", Integer.class));
+        assertEquals(24, jdbcTemplate.queryForObject(
+                "select count(*) from platform.ai_grid_policy_migration_ledger", Integer.class));
     }
 }

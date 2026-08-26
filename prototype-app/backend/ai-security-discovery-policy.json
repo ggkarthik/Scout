@@ -1,48 +1,6 @@
 {
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "AiSecurityBedrockDiscovery",
-      "Effect": "Allow",
-      "Action": [
-        "bedrock:ListKnowledgeBases",
-        "bedrock:ListDataSources",
-        "bedrock:GetDataSource",
-        "bedrock:GetFoundationModel",
-        "bedrock:GetCustomModel",
-        "bedrock:GetImportedModel"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "AiSecurityAgentCoreGatewayReadOnly",
-      "Effect": "Allow",
-      "Action": [
-        "bedrock-agentcore:ListGateways",
-        "bedrock-agentcore:GetGateway",
-        "bedrock-agentcore:ListGatewayTargets",
-        "bedrock-agentcore:GetGatewayTarget"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "AiSecurityS3ExposureCheck",
-      "Effect": "Allow",
-      "Action": [
-        "s3:GetBucketPolicyStatus"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Sid": "AiSecurityMaciePiiClassification",
-      "Effect": "Allow",
-      "Action": [
-        "macie2:GetMacieSession",
-        "macie2:ListFindings",
-        "macie2:GetFindings",
-        "macie2:DescribeBuckets"
-      ],
-      "Resource": "*"
-    }
-  ]
+  "_deprecated": true,
+  "_status": "RETIRED",
+  "_replacedBy": "src/main/resources/ai-security/permissions/scout-ai-inventory-readonly-v2.json",
+  "_notice": "This sample AI Security discovery IAM policy is INCOMPLETE and RETIRED. Do NOT attach it to any role. The authoritative, maintained read-only permission set is referenced in _replacedBy and is validated in CI by scripts/validate-ai-grid-phase1-permissions.mjs. This file intentionally omits Version/Statement so it cannot be applied as an IAM policy."
 }

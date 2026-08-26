@@ -1015,7 +1015,7 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
                 code,
                 message,
                 retryable,
-                permissionMatrix.requiredPermissions(family),
+                "ACCESS_DENIED".equals(code) ? permissionMatrix.requiredPermissions(family) : List.of(),
                 UUID.randomUUID().toString());
     }
 

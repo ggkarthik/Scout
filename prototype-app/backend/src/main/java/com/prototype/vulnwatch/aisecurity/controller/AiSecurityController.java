@@ -75,11 +75,14 @@ public class AiSecurityController {
             @RequestParam(required = false) String provider,
             @RequestParam(required = false) String subscription,
             @RequestParam(required = false) String severity,
+            @RequestParam(required = false) String excludeNativeKinds,
+            @RequestParam(required = false) String excludeArtifactTypes,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size
     ) {
         Tenant tenant = tenant();
-        return apiService.artifactSummaries(tenant, artifactType, nativeKind, provider, subscription, severity, page, size);
+        return apiService.artifactSummaries(tenant, artifactType, nativeKind, provider, subscription, severity,
+                excludeNativeKinds, excludeArtifactTypes, page, size);
     }
 
     /** Purpose-built inventory views deliberately return the same redacted artifact contract as detail/graph. */

@@ -1,0 +1,79 @@
+{
+  "policyId": "AGCF-AWS-036",
+  "version": "1.0.0",
+  "name": "SageMaker endpoint, model package, or execution space is in a failed terminal state",
+  "description": "Detects when sageMaker endpoint, model package, or execution space is in a failed terminal state using only declared evidence.",
+  "securityIntent": "Prevent the risk condition described by AGCF-AWS-036.",
+  "remediationIntent": "Correct the provider configuration or relationship and reassess with complete, fresh evidence.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-AWS-036",
+  "provider": "AWS",
+  "evaluationMode": "ARTIFACT_FACTS",
+  "evaluationDefinition": {
+    "mode": "ARTIFACT_FACTS",
+    "artifactFacts": {
+      "predicate": {
+        "fact": "resource.status_observed",
+        "in": [
+          "FAILED",
+          "STOPPED"
+        ]
+      }
+    }
+  },
+  "baseEvidenceTiers": [
+    "E1"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "ENABLED",
+  "releaseFamily": "AGCF_PHASE_1",
+  "wave": "PHASE_1",
+  "workflowClass": "POSTURE_FINDING",
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AWS_SAGEMAKER_ENDPOINT",
+    "AWS_SAGEMAKER_MODEL_PACKAGE",
+    "AWS_SAGEMAKER_SPACE"
+  ],
+  "requiredCapabilities": [
+    "SAGEMAKER_DOMAINS_MODELS_ENDPOINTS"
+  ],
+  "requiredRelationships": [],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [
+    {
+      "factKey": "resource.status_observed",
+      "valueType": "STRING",
+      "evidenceClasses": [
+        "CONFIGURATION"
+      ],
+      "maxAgeSeconds": 86400
+    }
+  ],
+  "frameworkMappings": [
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM04",
+      "mappingType": "PARTIAL",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "MDS-11",
+      "mappingType": "DIRECT",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "BCR-03",
+      "mappingType": "PARTIAL",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    }
+  ],
+  "packageSourceRef": "policy-packages/agcf/AGCF-AWS-036/1.0.0.json"
+}

@@ -1,0 +1,81 @@
+{
+  "policyId": "AGCF-AZR-012",
+  "version": "1.0.0",
+  "name": "Foundry deployment has no RAI policy reference",
+  "description": "Detects when foundry deployment has no RAI policy reference using only declared evidence.",
+  "securityIntent": "Prevent the risk condition described by AGCF-AZR-012.",
+  "remediationIntent": "Correct the provider configuration or relationship and reassess with complete, fresh evidence.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-AZR-012",
+  "provider": "AZURE",
+  "evaluationMode": "ARTIFACT_FACTS",
+  "evaluationDefinition": {
+    "mode": "ARTIFACT_FACTS",
+    "artifactFacts": {
+      "predicate": {
+        "fact": "guardrail.rai_policy_reference_configured",
+        "empty": true
+      }
+    }
+  },
+  "baseEvidenceTiers": [
+    "E0"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "REQUIRED",
+  "releaseFamily": "AGCF_PHASE_1",
+  "wave": "PHASE_1",
+  "workflowClass": "POSTURE_FINDING",
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AZURE_FOUNDRY_DEPLOYMENTS"
+  ],
+  "requiredCapabilities": [
+    "FOUNDRY_DEPLOYMENTS_RAI"
+  ],
+  "requiredRelationships": [],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [
+    {
+      "factKey": "guardrail.rai_policy_reference_configured",
+      "valueType": "STRING",
+      "evidenceClasses": [
+        "CONFIGURATION"
+      ],
+      "maxAgeSeconds": 86400
+    }
+  ],
+  "frameworkMappings": [
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM01",
+      "mappingType": "PARTIAL",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM10",
+      "mappingType": "PARTIAL",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "TVM-13",
+      "mappingType": "DIRECT",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "CCC-06",
+      "mappingType": "PARTIAL",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    }
+  ],
+  "packageSourceRef": "policy-packages/agcf/AGCF-AZR-012/1.0.0.json"
+}

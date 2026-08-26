@@ -1,0 +1,72 @@
+{
+  "policyId": "AGCF-XSP-003",
+  "version": "1.0.0",
+  "name": "Wildcard or broad identity permissions reach a high-impact agent tool",
+  "description": "Detects when wildcard or broad identity permissions reach a high-impact agent tool using only declared evidence.",
+  "securityIntent": "Prevent the risk condition described by AGCF-XSP-003.",
+  "remediationIntent": "Correct the provider configuration or relationship and reassess with complete, fresh evidence.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-XSP-003",
+  "provider": "MULTI_CLOUD",
+  "evaluationMode": "CORRELATION_PATH",
+  "evaluationDefinition": {
+    "mode": "CORRELATION_PATH",
+    "correlationPath": {
+      "correlationId": "R2_EXCESSIVE_TOOL_PRIVILEGE",
+      "correlationVersion": "1.0.0"
+    }
+  },
+  "baseEvidenceTiers": [
+    "E2"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "REQUIRED",
+  "releaseFamily": "AGCF_PHASE_1",
+  "wave": "PHASE_1",
+  "workflowClass": "VALIDATED_EXPOSURE",
+  "artifactTypes": [
+    "SYSTEM"
+  ],
+  "nativeKinds": [],
+  "requiredCapabilities": [
+    "MULTI_CLOUD_GRAPH"
+  ],
+  "requiredRelationships": [],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [
+    {
+      "factKey": "agcf.agcf-xsp-003.evidence",
+      "valueType": "BOOLEAN",
+      "evidenceClasses": [
+        "E2"
+      ],
+      "maxAgeSeconds": 86400
+    }
+  ],
+  "frameworkMappings": [
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM03",
+      "mappingType": "DIRECT",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "IAM-05",
+      "mappingType": "DIRECT",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "IAM-18",
+      "mappingType": "DIRECT",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    }
+  ],
+  "packageSourceRef": "policy-packages/agcf/AGCF-XSP-003/1.0.0.json"
+}

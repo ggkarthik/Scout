@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.time.Instant;
 import org.junit.jupiter.api.Test;
 
 class AiGridPredicateEngineTest {
@@ -45,5 +46,16 @@ class AiGridPredicateEngineTest {
                 () -> engine.validate(mapper.readTree("{\"script\":\"Runtime.exec()\"}")));
         JsonNode nested = mapper.readTree("{\"not\":{\"not\":{\"not\":{\"not\":{\"not\":{\"not\":{\"not\":{\"not\":{\"fact\":\"x\",\"eq\":true}}}}}}}}}");
         assertThrows(IllegalArgumentException.class, () -> engine.validate(nested));
+    }
+
+    @Test
+    void supportsParameterizedAllowlistsAndCollectionAndAgePredicates() throws Exception {
+        JsonNode allowlist = mapper.readTree("{\"not\":{\"fact\":\"model\",\"in\":{\"parameter\":\"approved\"}}}");
+        assertTrue(engine.evaluate(allowlist, Map.of("model", mapper.valueToTree("unapproved")), Map.of("approved", java.util.List.of("approved"))));
+        assertFalse(engine.evaluate(allowlist, Map.of("model", mapper.valueToTree("approved")), Map.of("approved", java.util.List.of("approved"))));
+        assertTrue(engine.evaluate(mapper.readTree("{\"fact\":\"tools\",\"non_empty\":true}"), Map.of("tools", mapper.readTree("[\"code\"]"))));
+        assertTrue(engine.evaluate(mapper.readTree("{\"fact\":\"tools\",\"count_gte\":2}"), Map.of("tools", mapper.readTree("[\"code\",\"search\"]"))));
+        assertTrue(engine.evaluate(mapper.readTree("{\"fact\":\"privateEndpointCount\",\"count_eq\":0}"), Map.of("privateEndpointCount", mapper.valueToTree(0))));
+        assertTrue(engine.evaluate(mapper.readTree("{\"fact\":\"observed\",\"age_gt_seconds\":1}"), Map.of("observed", mapper.valueToTree(Instant.now().minusSeconds(5).toString()))));
     }
 }

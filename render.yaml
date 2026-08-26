@@ -31,7 +31,10 @@ services:
       - key: APP_ALLOW_HMAC_IN_PRODUCTION
         value: "true"
       - key: APP_CREDENTIAL_ENCRYPTION_KEY
-        generateValue: true
+        # This key encrypts persisted connector credentials. Configure one durable,
+        # base64-encoded 32-byte value in Render and reuse it for every one-off
+        # migration service; regenerating it makes existing credentials unreadable.
+        sync: false
       - key: APP_JWT_ISSUER_URI
         sync: false
       - key: APP_CORS_ALLOWED_ORIGINS

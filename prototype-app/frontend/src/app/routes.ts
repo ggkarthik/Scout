@@ -11,6 +11,7 @@ export type AppTab =
   | 'vuln-repo'
   | 'campaigns'
   | 'inventory'
+  | 'ai'
   | 'end-of-life'
   | 'connect'
   | 'admin'
@@ -194,6 +195,8 @@ export function pathForTab(tab: AppTab): string {
       return '/vuln-repo/campaigns';
     case 'inventory':
       return pathForInventoryView(INVENTORY_DEFAULT_VIEW);
+    case 'ai':
+      return pathForAiInventoryOverview();
     case 'end-of-life':
       return pathForPlatformView('eol');
     case 'connect':
@@ -216,6 +219,10 @@ export function pathForInventoryView(view: InventoryViewKey): string {
 
 export function pathForAiKnowledgeData(): string {
   return '/inventory/ai/knowledge-data';
+}
+
+export function pathForAiInventoryOverview(): string {
+  return '/inventory/ai/overview';
 }
 
 export function pathForAiMcpInventory(): string {
@@ -396,6 +403,7 @@ export function activeTabForPath(pathname: string): AppTab {
   if (pathname.startsWith('/vulnerability-intelligence')) return 'vuln-repo';
   if (pathname.startsWith('/vuln-repo/campaigns')) return 'campaigns';
   if (pathname.startsWith('/vuln-repo')) return 'vuln-repo';
+  if (pathname.startsWith('/inventory/ai')) return 'ai';
   if (pathname.startsWith('/inventory')) return 'inventory';
   if (pathname.startsWith('/end-of-life')) return 'end-of-life';
   if (pathname.startsWith('/connect')) return 'connect';
@@ -424,6 +432,8 @@ export function titleForTab(tab: AppTab): string {
       return 'Campaigns';
     case 'inventory':
       return 'Inventory';
+    case 'ai':
+      return 'AI Inventory';
     case 'end-of-life':
       return 'End-of-Life';
     case 'connect':

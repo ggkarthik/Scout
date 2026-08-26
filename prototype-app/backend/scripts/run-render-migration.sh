@@ -8,6 +8,10 @@ set -eu
 : "${MIGRATION_DB_PASSWORD:?MIGRATION_DB_PASSWORD is required}"
 : "${RUNTIME_DB_USERNAME:=scout_runtime}"
 : "${RUNTIME_DB_PASSWORD:?RUNTIME_DB_PASSWORD is required}"
+# Credential ciphertext is shared with the permanent runtime service. This must
+# be the same stable secret configured there; generating a temporary key would
+# leave any credentials written by this process unreadable by the runtime.
+: "${APP_CREDENTIAL_ENCRYPTION_KEY:?APP_CREDENTIAL_ENCRYPTION_KEY is required and must match the permanent runtime service}"
 
 if [ "${PLATFORM_OWNER_SETUP_LINK_ENABLED:-false}" = "true" ]; then
   : "${PLATFORM_OWNER_SETUP_EMAIL:=${APP_SECURITY_BOOTSTRAP_PLATFORM_OWNERS_USERS_0_EMAIL:-}}"
@@ -23,11 +27,6 @@ export DB_USERNAME="$MIGRATION_DB_USERNAME"
 export DB_PASSWORD="$MIGRATION_DB_PASSWORD"
 export RUNTIME_DB_USERNAME
 export RUNTIME_DB_PASSWORD
-
-if [ -z "${APP_CREDENTIAL_ENCRYPTION_KEY:-}" ]; then
-  APP_CREDENTIAL_ENCRYPTION_KEY="$(head -c 32 /dev/urandom | base64)"
-  export APP_CREDENTIAL_ENCRYPTION_KEY
-fi
 
 mkdir -p /tmp/scout-maintenance
 printf 'schema bootstrap running\n' > /tmp/scout-maintenance/index.txt

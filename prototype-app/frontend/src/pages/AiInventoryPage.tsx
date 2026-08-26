@@ -6,7 +6,7 @@ import { PageFreshnessStatus } from '../components/PageFreshnessStatus';
 import { AI_ARTIFACT_CATEGORIES, combinedNativeKindFilterValue, stripProviderPrefix } from '../features/ai-security/categories';
 import type { AiSeverityGridRow } from '../features/ai-security/types';
 import { InventoryShell } from '../features/inventory/InventoryShell';
-import { pathForAiKnowledgeData, pathForAiMcpInventory, pathForConnectView, pathForInventoryAiAsset, pathForInventoryAiAssets } from '../app/routes';
+import { pathForConnectView, pathForInventoryAiAsset, pathForInventoryAiAssets } from '../app/routes';
 import { RUN_QUEUE_REFRESH_INTERVAL_MS } from '../lib/polling';
 
 const MAX_GRID_ROWS = 10;
@@ -170,13 +170,6 @@ export function AiInventoryPage() {
       title="AI Inventory"
       description="Tenant-scoped cloud AI resources with explicit evidence coverage and discovery limits."
       legacyClassName="ai-security-page"
-      actions={(
-        <div className="inventory-fpl-toolbar">
-          <button type="button" className="btn btn-secondary" onClick={() => navigate(pathForInventoryAiAssets())}>View AI asset inventory</button>
-          <button type="button" className="btn btn-secondary" onClick={() => navigate(pathForAiKnowledgeData())}>Knowledge &amp; Data</button>
-          <button type="button" className="btn btn-secondary" onClick={() => navigate(pathForAiMcpInventory())}>MCP</button>
-        </div>
-      )}
     >
       <PageFreshnessStatus updatedAt={summary?.lastCompleteSnapshotAt} />
 

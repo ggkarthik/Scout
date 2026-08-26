@@ -1004,3 +1004,24 @@
   background: #fed7aa;
   color: #7c2d12;
 }
+
+/* AI Grid Phase 1 — grouped policy list, capability setup items, framework coverage */
+.ai-policy-group { margin-bottom: 1.5rem; }
+.ai-policy-group-heading { margin: 0 0 0.5rem; font-size: 0.95rem; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.85; }
+.ai-policy-group-heading small { opacity: 0.6; font-weight: 400; }
+.ai-policy-expand { background: none; border: none; cursor: pointer; font-size: 0.8rem; line-height: 1; padding: 0.25rem 0.4rem; color: inherit; }
+.ai-policy-capability-flag { color: #b45309; font-size: 0.8rem; }
+.ai-policy-detail-row > td { background: rgba(148, 163, 184, 0.08); }
+.ai-policy-detail { display: flex; flex-direction: column; gap: 0.75rem; padding: 0.5rem 0.25rem; }
+.ai-policy-detail-block > strong { display: block; margin-bottom: 0.25rem; }
+.ai-policy-setup-list, .ai-policy-mapping-list { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.35rem; }
+.ai-policy-mapping-type { font-size: 0.75rem; font-weight: 600; padding: 0.05rem 0.4rem; border-radius: 0.5rem; background: rgba(59, 130, 246, 0.15); }
+.ai-policy-deprecation-banner ul { margin: 0.5rem 0 0; padding-left: 1.1rem; }
+.coverage-status { font-size: 0.78rem; font-weight: 600; padding: 0.1rem 0.5rem; border-radius: 0.6rem; white-space: nowrap; }
+.coverage-status--automated { background: rgba(22, 163, 74, 0.16); color: #15803d; }
+.coverage-status--conditional_automated { background: rgba(217, 119, 6, 0.16); color: #b45309; }
+.coverage-status--preventive_only, .coverage-status--requires_runtime_or_test { background: rgba(59, 130, 246, 0.15); color: #1d4ed8; }
+.coverage-status--not_covered { background: rgba(148, 163, 184, 0.2); color: #475569; }
+.coverage-mapping-list { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.35rem; }
+.coverage-mapping-type { font-size: 0.75rem; font-weight: 600; }
+.coverage-conditional { color: #b45309; font-size: 0.78rem; }

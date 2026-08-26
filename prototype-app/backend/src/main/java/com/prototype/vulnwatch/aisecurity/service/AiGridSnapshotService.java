@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -34,10 +35,19 @@ public class AiGridSnapshotService {
             "prompt", "rawprompt", "inputtext", "outputtext", "completion");
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper canonicalMapper;
+    private final List<AiGridFactProducer> factProducers;
 
     public AiGridSnapshotService(NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper) {
+        this(jdbc, objectMapper, List.of(new AwsAiGridFactProducer(), new AzureAiGridFactProducer(),
+                new CommonAiGridFactProducer(objectMapper)));
+    }
+
+    @Autowired
+    public AiGridSnapshotService(NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper,
+                                 List<AiGridFactProducer> factProducers) {
         this.jdbc = jdbc;
         this.canonicalMapper = objectMapper.copy().configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
+        this.factProducers = List.copyOf(factProducers);
     }
 
     public List<SnapshotArtifact> commitScope(Tenant tenant, ObservationEnvelopeV1 envelope) {
@@ -95,9 +105,11 @@ public class AiGridSnapshotService {
                     .addValue("bodyId", bodyId).addValue("version", SNAPSHOT_SCHEMA_VERSION)
                     .addValue("connectorId", envelope.connectorId())
                     .addValue("observedAt", Timestamp.from(envelope.observedAt() == null ? Instant.now() : envelope.observedAt())), UUID.class);
-            Map<String, JsonNode> facts = normalize(safeAttributes, row.artifactType(), row.piiScanStatus(), row.piiSource());
-            for (Map.Entry<String, JsonNode> fact : facts.entrySet()) {
-                persistFact(tenant, envelope, row, manifestId, fact.getKey(), fact.getValue());
+            Map<String, AiGridFactProducer.ProducedFact> producedFacts = produceFacts(envelope, row, safeAttributes);
+            Map<String, JsonNode> facts = new LinkedHashMap<>();
+            for (AiGridFactProducer.ProducedFact fact : producedFacts.values()) {
+                if (fact.value() != null) facts.put(fact.factKey(), fact.value());
+                persistFact(tenant, envelope, row, manifestId, fact);
             }
             classify(tenant, row);
             outbox(tenant, "SNAPSHOT_COMMITTED", "ARTIFACT", row.id(), hash,
@@ -177,103 +189,64 @@ public class AiGridSnapshotService {
                 || normalized.endsWith("privatekey");
     }
 
+    /** Compatibility view for callers that only need normalized KNOWN values. */
     Map<String, JsonNode> normalize(JsonNode attributes, String artifactType, String piiScanStatus, String piiSource) {
         Map<String, JsonNode> facts = new LinkedHashMap<>();
-        copy(attributes, "guardrailAttached", "bedrock.agent.guardrail_attached_configured", facts);
-        copy(attributes, "guardrailMinimumStrength", "bedrock.guardrail.minimum_strength_configured", facts);
-        copy(attributes, "publicNetworkUnrestricted", "network.public_access_configured", facts);
-        copy(attributes, "s3Public", "data.s3_public_access_configured", facts);
-        copy(attributes, "lambdaUrlAuthType", "compute.lambda_url_auth_type_configured", facts);
-        copy(attributes, "iamWildcardActions", "identity.wildcard_permission_observed", facts);
-        copy(attributes, "invocationLoggingEnabled", "logging.model_invocation_enabled_configured", facts);
-        copy(attributes, "localAuthEnabled", "identity.local_auth_enabled_configured", facts);
-        copy(attributes, "diagnosticLoggingEnabled", "logging.diagnostic_enabled_configured", facts);
-        copy(attributes, "codeInterpreterEnabled", "agent.code_interpreter_enabled_configured", facts);
-        copy(attributes, "mlLocalAuthEnabled", "identity.ml_endpoint_local_auth_enabled_configured", facts);
-        copy(attributes, "searchLocalAuthEnabled", "identity.search_local_admin_auth_enabled_configured", facts);
-        copy(attributes, "authoritativeNonIdentityAuthentication", "identity.search_data_source_non_identity_auth_observed", facts);
-        copy(attributes, "botPasswordAuthWithoutManagedIdentity", "identity.bot_password_without_managed_identity_observed", facts);
-        copy(attributes, "customerManagedKey", "data.customer_managed_key_configured", facts);
-        copy(attributes, "privateEndpointCount", "network.private_endpoint_count_configured", facts);
-        copy(attributes, "sourceType", "data.source_type", facts);
-        copy(attributes, "aclSupport", "data.source_acl_enforced", facts);
-        copy(attributes, "retrievalMode", "data.retrieval_mode", facts);
-        copy(attributes, "publicContentAccess", "data.source_public_content_access", facts);
-        copy(attributes, "privateEndpoint", "mcp.private_endpoint", facts);
-        copy(attributes, "lastSynchronizedAt", "mcp.last_synchronized_at", facts);
-        // An external configured URL is not proof of public network reachability. Only a
-        // provider-confirmed public exposure value may become a policy fact; all other states
-        // intentionally leave the fact absent so policies yield NO_DECISION.
-        if ("PUBLIC_NETWORK_REACHABLE".equals(attributes.path("endpointExposure").asText())) {
-            copy(attributes, "endpointExposure", "mcp.endpoint_exposure", facts);
-        }
-        copy(attributes, "configuredAuthType", "mcp.configured_auth_type", facts);
-        copy(attributes, "inboundAuthType", "mcp.inbound_auth_type", facts);
-        copy(attributes, "outboundAuthType", "mcp.outbound_auth_type", facts);
-        copy(attributes, "status", "mcp.target_status", facts);
-        copy(attributes, "publicContentAccess", "data.public_content_access_configured", facts);
-        if (piiScanStatus != null && !"NOT_APPLICABLE".equals(piiScanStatus)) {
-            facts.put("data.source_sensitivity", canonicalMapper.valueToTree(sensitivityState(piiScanStatus)));
-        }
-        if ("SCANNED_PII_FOUND".equals(piiScanStatus)) {
-            facts.put("data.sensitivity_confirmed", canonicalMapper.valueToTree(true));
-        }
-        if (piiSource != null && !piiSource.isBlank()) {
-            facts.put("data.sensitivity_source", canonicalMapper.valueToTree(piiSource));
-        }
-        if (attributes.path("raiFilterEvidenceComplete").asBoolean(false)) {
-            copy(attributes, "raiNonBlockingFilterObserved", "guardrail.rai_non_blocking_filter_observed", facts);
-        }
-        copy(attributes, "raiPolicyName", "guardrail.rai_policy_reference_configured", facts);
-        if ("AI_AGENT".equals(artifactType)) {
-            copy(attributes, "status", "agent.status_observed", facts);
-        }
-        if ("AI_AGENT".equals(artifactType) && attributes.has("executionRoleArn")) {
-            JsonNode role = attributes.get("executionRoleArn");
-            boolean present = role != null && !role.isNull() && !role.asText("").isBlank();
-            facts.put("identity.execution_role_present_configured", canonicalMapper.valueToTree(present));
-        }
-        JsonNode tags = attributes.get("tags");
-        if (tags != null && tags.isObject() && !tags.isEmpty()) {
-            facts.put("owner.tag_candidate", tags);
+        for (String provider : List.of("AWS", "AZURE")) {
+            for (AiGridFactProducer producer : factProducers) {
+                producer.produce(new AiGridFactProducer.FactInput(provider, "LEGACY", artifactType, null,
+                        attributes, piiScanStatus, piiSource, Instant.now())).forEach(fact -> {
+                    if (fact.value() != null) facts.putIfAbsent(fact.factKey(), fact.value());
+                });
+            }
         }
         return facts;
     }
 
-    private String sensitivityState(String piiScanStatus) {
-        return switch (piiScanStatus) {
-            case "SCANNED_PII_FOUND" -> "SENSITIVE_CONFIRMED";
-            case "SCANNED_CLEAN" -> "NO_SENSITIVE_SIGNAL";
-            case "NOT_SCANNED" -> "NOT_SCANNED";
-            default -> "UNKNOWN";
-        };
-    }
-
-    private void copy(JsonNode source, String attribute, String factKey, Map<String, JsonNode> target) {
-        JsonNode value = source.get(attribute);
-        if (value != null && !value.isNull()) target.put(factKey, value);
+    private Map<String, AiGridFactProducer.ProducedFact> produceFacts(ObservationEnvelopeV1 envelope,
+                                                                        ArtifactRow row, JsonNode attributes) {
+        Map<String, AiGridFactProducer.ProducedFact> facts = new LinkedHashMap<>();
+        AiGridFactProducer.FactInput input = new AiGridFactProducer.FactInput(envelope.provider(),
+                envelope.resourceFamily(), row.artifactType(), row.nativeKind(), attributes, row.piiScanStatus(),
+                row.piiSource(), envelope.observedAt() == null ? Instant.now() : envelope.observedAt());
+        for (AiGridFactProducer producer : factProducers) {
+            for (AiGridFactProducer.ProducedFact fact : producer.produce(input)) {
+                if (facts.putIfAbsent(fact.factKey(), fact) != null) {
+                    throw new IllegalStateException("More than one AI Grid fact producer emitted " + fact.factKey());
+                }
+            }
+        }
+        return facts;
     }
 
     private void persistFact(Tenant tenant, ObservationEnvelopeV1 envelope, ArtifactRow row,
-                             UUID manifestId, String factKey, JsonNode value) {
-        String valueType = value.isBoolean() ? "BOOLEAN"
-                : value.isNumber() ? "NUMBER"
-                : value.isObject() ? "OBJECT"
+                             UUID manifestId, AiGridFactProducer.ProducedFact fact) {
+        JsonNode value = fact.value();
+        String valueType = value == null ? "UNKNOWN" : value.isBoolean() ? "BOOLEAN"
+                : value.isNumber() ? "NUMBER" : value.isObject() ? "OBJECT"
                 : value.isArray() ? "ARRAY" : "STRING";
         jdbc.update("""
                 insert into ai_grid_facts (id, tenant_id, run_id, artifact_id, snapshot_manifest_id,
                     fact_key, value_type, value_json, state, provenance, evidence_class, source,
-                    observed_at, fact_schema_version)
+                    observed_at, valid_until, confidence, confidence_method, confidence_method_version,
+                    derivation_inputs_json, fact_schema_version)
                 values (:id, :tenantId, :runId, :artifactId, :manifestId, :factKey, :valueType,
-                    cast(:value as jsonb), 'KNOWN', 'PROVIDER_OBSERVED', 'CONFIGURATION', :source,
-                    :observedAt, :schemaVersion)
+                    cast(:value as jsonb), :state, :provenance, :evidenceClass, :source,
+                    :observedAt, :validUntil, :confidence, :confidenceMethod, :confidenceMethodVersion,
+                    cast(:derivationInputs as jsonb), :schemaVersion)
                 on conflict (tenant_id, run_id, artifact_id, fact_key) do nothing
                 """, new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("tenantId", tenant.getId())
                 .addValue("runId", envelope.runId()).addValue("artifactId", row.id()).addValue("manifestId", manifestId)
-                .addValue("factKey", factKey).addValue("valueType", valueType).addValue("value", value.toString())
-                .addValue("source", row.provider() + ":" + envelope.resourceFamily())
+                .addValue("factKey", fact.factKey()).addValue("valueType", valueType)
+                .addValue("value", value == null ? null : value.toString()).addValue("state", fact.state())
+                .addValue("provenance", fact.provenance()).addValue("evidenceClass", fact.evidenceClass())
+                .addValue("source", row.provider() + ":" + envelope.resourceFamily() + ":" + fact.sourceAttribute())
                 .addValue("observedAt", Timestamp.from(envelope.observedAt() == null ? Instant.now() : envelope.observedAt()))
-                .addValue("schemaVersion", FACT_SCHEMA_VERSION));
+                .addValue("validUntil", Timestamp.from((envelope.observedAt() == null ? Instant.now() : envelope.observedAt()).plusSeconds(86400)))
+                .addValue("confidence", fact.confidence()).addValue("confidenceMethod", fact.confidenceMethod())
+                .addValue("confidenceMethodVersion", fact.confidenceMethodVersion())
+                .addValue("derivationInputs", json(fact.derivationInputs()))
+                .addValue("schemaVersion", fact.schemaVersion() == null ? FACT_SCHEMA_VERSION : fact.schemaVersion()));
     }
 
     private void classify(Tenant tenant, ArtifactRow row) {

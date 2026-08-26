@@ -1,0 +1,98 @@
+{
+  "policyId": "AGCF-AZR-004",
+  "version": "1.0.0",
+  "name": "Azure AI account lacks customer-managed-key encryption where required",
+  "description": "Detects when azure AI account lacks customer-managed-key encryption where required using only declared evidence.",
+  "securityIntent": "Prevent the risk condition described by AGCF-AZR-004.",
+  "remediationIntent": "Correct the provider configuration or relationship and reassess with complete, fresh evidence.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-AZR-004",
+  "provider": "AZURE",
+  "evaluationMode": "ARTIFACT_FACTS",
+  "evaluationDefinition": {
+    "mode": "ARTIFACT_FACTS",
+    "artifactFacts": {
+      "predicate": {
+        "fact": "data.customer_managed_key_configured",
+        "eq": false
+      }
+    }
+  },
+  "baseEvidenceTiers": [
+    "E0"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "DISABLED",
+  "releaseFamily": "AGCF_PHASE_1",
+  "wave": "PHASE_1",
+  "workflowClass": "POSTURE_FINDING",
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AZURE_AI_ACCOUNTS"
+  ],
+  "requiredCapabilities": [
+    "AI_ACCOUNTS"
+  ],
+  "requiredRelationships": [],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [
+    {
+      "factKey": "data.customer_managed_key_configured",
+      "valueType": "BOOLEAN",
+      "evidenceClasses": [
+        "CONFIGURATION"
+      ],
+      "maxAgeSeconds": 86400
+    }
+  ],
+  "frameworkMappings": [
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM02",
+      "mappingType": "PARTIAL",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM04",
+      "mappingType": "PARTIAL",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "CEK-03",
+      "mappingType": "PARTIAL",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "CEK-08",
+      "mappingType": "DIRECT",
+      "rationale": "This control is independently mapped to the policy's stated security intent."
+    }
+  ],
+  "parameterDefinitions": [
+    {
+      "key": "approvedBaseline",
+      "type": "STRING",
+      "defaultValue": "DEFAULT"
+    }
+  ],
+  "certificationParameterProfile": {
+    "immutable": true,
+    "pass": {
+      "approvedBaseline": "DEFAULT"
+    },
+    "fail": {
+      "approvedBaseline": "STRICT"
+    },
+    "invalid": {}
+  },
+  "packageSourceRef": "policy-packages/agcf/AGCF-AZR-004/1.0.0.json"
+}

@@ -15,6 +15,7 @@ import com.prototype.vulnwatch.dto.AzureDiscoveryTargetResponse;
 import com.prototype.vulnwatch.dto.IngestionJobAcceptedResponse;
 import com.prototype.vulnwatch.service.AzureDiscoveryConfigService;
 import com.prototype.vulnwatch.service.AzureDiscoveryTargetService;
+import com.prototype.vulnwatch.service.CredentialEncryptionService.CredentialDecryptionException;
 import com.prototype.vulnwatch.service.TenantSchemaExecutionService;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -179,8 +180,18 @@ public class AiSecurityAzureFoundryConfigService {
         } else {
             profileId = existing.id();
             if (secretProvided) {
-                credentialService.rotate(tenant, profileId, new RotateCredentialRequest(
-                        request.clientSecret().trim(), Instant.now().plus(365, ChronoUnit.DAYS), primarySubscriptionId), actor);
+                try {
+                    credentialService.rotate(tenant, profileId, new RotateCredentialRequest(
+                            request.clientSecret().trim(), Instant.now().plus(365, ChronoUnit.DAYS), primarySubscriptionId), actor);
+                } catch (CredentialDecryptionException ignored) {
+                    // The prior key is unavailable. A new supplied secret is the recovery path:
+                    // remove the unreadable profile and its binding, then create a replacement.
+                    deleteProfilesByName(tenant, PROFILE_NAME, null);
+                    CredentialProfileResponse created = credentialService.create(tenant, new CredentialProfileRequest(
+                            PROFILE_NAME, request.azureTenantId(), request.clientId(), request.clientSecret().trim(),
+                            Instant.now().plus(365, ChronoUnit.DAYS)), actor);
+                    profileId = created.id();
+                }
             }
         }
         // Defensive cleanup: remove any stale duplicate/revoked profiles left over from earlier
