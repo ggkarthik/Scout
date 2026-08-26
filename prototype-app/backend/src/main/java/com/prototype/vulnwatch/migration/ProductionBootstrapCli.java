@@ -366,14 +366,20 @@ public final class ProductionBootstrapCli {
         try (PreparedStatement statement = connection.prepareStatement("""
                 select checksum
                 from %s.tenant_schema_history
-                where version = ? and success
+                where (version = ? or version like ?) and success
                 """.formatted(quotedIdentifier(tenant.schemaName())))) {
             statement.setString(1, REPAIRABLE_TENANT_MIGRATION_VERSION);
+            statement.setString(2, REPAIRABLE_TENANT_MIGRATION_VERSION + ".%");
             try (ResultSet result = statement.executeQuery()) {
                 if (!result.next() || result.getInt(1) != REPAIRABLE_TENANT_MIGRATION_CHECKSUM) {
                     throw new BootstrapFailure(
                             "tenant_checksum_repair_refused",
                             "V45 does not have the expected historical checksum");
+                }
+                if (result.next()) {
+                    throw new BootstrapFailure(
+                            "tenant_checksum_repair_refused",
+                            "V45 checksum lookup returned more than one migration");
                 }
             }
         }
