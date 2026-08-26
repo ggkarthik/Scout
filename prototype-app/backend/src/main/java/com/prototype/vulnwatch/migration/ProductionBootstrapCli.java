@@ -363,16 +363,6 @@ public final class ProductionBootstrapCli {
         }
 
         Flyway flyway = tenantFlyway(config, tenant);
-        ValidateResult validation = flyway.validateWithResult();
-        if (validation.validationSuccessful) {
-            return false;
-        }
-        if (validation.invalidMigrations.size() != 1
-                || !REPAIRABLE_TENANT_MIGRATION_VERSION.equals(validation.invalidMigrations.get(0).version)) {
-            throw new BootstrapFailure(
-                    "tenant_checksum_repair_refused",
-                    "Checksum repair is limited to the known tenant migration V45 mismatch");
-        }
         try (PreparedStatement statement = connection.prepareStatement("""
                 select checksum
                 from %s.tenant_schema_history
