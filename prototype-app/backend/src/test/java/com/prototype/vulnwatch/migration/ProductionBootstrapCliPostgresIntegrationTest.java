@@ -136,24 +136,28 @@ class ProductionBootstrapCliPostgresIntegrationTest {
 
     @Test
     void repairsOnlyTheExplicitlyApprovedHistoricalV45Checksum() throws Exception {
+        UUID tenantId = UUID.randomUUID();
+        String schemaName = "tenant_v45_repair_" + tenantId.toString().replace("-", "").substring(0, 12);
         withBootstrapProperties(() -> {
+            ProductionBootstrapCli.main(new String[0]);
+            insertProvisioningTenant(tenantId, schemaName);
             ProductionBootstrapCli.main(new String[0]);
             try (Connection connection = DriverManager.getConnection(
                     DATABASE.url(), DATABASE.username(), DATABASE.password());
                  Statement statement = connection.createStatement()) {
-                statement.executeUpdate("""
-                        update tenant_default.tenant_schema_history
+                statement.executeUpdate(("""
+                        update %s.tenant_schema_history
                         set checksum = -1614728776
                         where version = '45' and success
-                        """);
+                        """).formatted(schemaName));
             }
             set("BOOTSTRAP_REPAIR_TENANT_V45_CHECKSUM", "true");
             ProductionBootstrapCli.main(new String[0]);
             assertEquals(1, queryInt("""
                     select count(*)
-                    from tenant_default.tenant_schema_history
+                    from %s.tenant_schema_history
                     where version = '45' and success and checksum <> -1614728776
-                    """));
+                    """.formatted(schemaName)));
             assertEquals(1, queryInt("""
                     select count(*)
                     from tenant_default.tenant_schema_history
@@ -195,11 +199,13 @@ class ProductionBootstrapCliPostgresIntegrationTest {
                          created_at, updated_at, max_connector_count,
                          max_service_account_count, max_daily_sbom_uploads,
                          max_export_rows, max_daily_exposure_refreshes
-                     ) values (?, 'Bootstrap Customer', 'bootstrap-customer', ?, 'PROVISIONING',
+                     ) values (?, ?, ?, ?, 'PROVISIONING',
                                'ENTERPRISE', now(), now(), 10, 25, 100, 50000, 25)
                      """)) {
             statement.setObject(1, tenantId);
-            statement.setString(2, schemaName);
+            statement.setString(2, "Bootstrap Customer " + schemaName);
+            statement.setString(3, "bootstrap-" + schemaName.replace('_', '-'));
+            statement.setString(4, schemaName);
             statement.executeUpdate();
         }
     }

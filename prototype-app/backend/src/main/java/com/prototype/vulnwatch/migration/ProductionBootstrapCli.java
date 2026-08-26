@@ -34,6 +34,7 @@ public final class ProductionBootstrapCli {
     private static final String LOCK_NAME = "scout-production-bootstrap";
     private static final String REPAIRABLE_TENANT_MIGRATION_VERSION = "45";
     private static final int REPAIRABLE_TENANT_MIGRATION_CHECKSUM = -1614728776;
+    private static final int CURRENT_TENANT_MIGRATION_CHECKSUM = 1898972758;
     private static final UUID DEFAULT_TENANT_ID = UUID.nameUUIDFromBytes(
             "scout-default-tenant".getBytes(StandardCharsets.UTF_8));
     private static final Pattern UUID_VALUE = Pattern.compile(
@@ -67,8 +68,9 @@ public final class ProductionBootstrapCli {
                         }
                         TenantSchema defaultTenant = ensureDefaultTenant(connection);
                         phases.add(Phase.success("default_tenant_registration", defaultTenant.schemaName()));
-                        if (repairTenantV45ChecksumIfApproved(connection, config, defaultTenant)) {
-                            phases.add(Phase.success("tenant_v45_checksum_repair", defaultTenant.schemaName()));
+                        int repairedTenantCount = repairTenantV45ChecksumsIfApproved(connection, config);
+                        if (repairedTenantCount > 0) {
+                            phases.add(Phase.success("tenant_v45_checksum_repair", "count=" + repairedTenantCount));
                         }
                         migrateTenant(config, defaultTenant);
                         String templateChecksum = fingerprint(connection, defaultTenant.schemaName());
@@ -353,15 +355,27 @@ public final class ProductionBootstrapCli {
         markCurrent(connection, tenant, tenantChecksum, runId);
     }
 
+    private static int repairTenantV45ChecksumsIfApproved(
+            Connection connection,
+            Config config
+    ) throws SQLException {
+        if (!config.repairTenantV45Checksum()) {
+            return 0;
+        }
+        int repairedTenantCount = 0;
+        for (TenantSchema tenant : tenants(connection, "ACTIVE")) {
+            if (repairTenantV45ChecksumIfApproved(connection, config, tenant)) {
+                repairedTenantCount++;
+            }
+        }
+        return repairedTenantCount;
+    }
+
     private static boolean repairTenantV45ChecksumIfApproved(
             Connection connection,
             Config config,
             TenantSchema tenant
     ) throws SQLException {
-        if (!config.repairTenantV45Checksum()) {
-            return false;
-        }
-
         Flyway flyway = tenantFlyway(config, tenant);
         try (PreparedStatement statement = connection.prepareStatement("""
                 select version, checksum
@@ -378,16 +392,19 @@ public final class ProductionBootstrapCli {
                 }
                 String observedVersion = result.getString("version");
                 int observedChecksum = result.getInt("checksum");
+                if (result.next()) {
+                    throw new BootstrapFailure(
+                            "tenant_checksum_repair_refused",
+                            "V45 checksum lookup returned more than one migration");
+                }
+                if (observedChecksum == CURRENT_TENANT_MIGRATION_CHECKSUM) {
+                    return false;
+                }
                 if (observedChecksum != REPAIRABLE_TENANT_MIGRATION_CHECKSUM) {
                     throw new BootstrapFailure(
                             "tenant_checksum_repair_refused",
                             "V45 history checksum is not approved: version=" + observedVersion
                                     + " checksum=" + observedChecksum);
-                }
-                if (result.next()) {
-                    throw new BootstrapFailure(
-                            "tenant_checksum_repair_refused",
-                            "V45 checksum lookup returned more than one migration");
                 }
             }
         }
