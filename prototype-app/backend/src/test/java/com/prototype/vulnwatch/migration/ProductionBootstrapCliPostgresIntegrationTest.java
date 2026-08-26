@@ -11,6 +11,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.UUID;
+import org.flywaydb.core.Flyway;
+import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
@@ -166,6 +168,36 @@ class ProductionBootstrapCliPostgresIntegrationTest {
         });
     }
 
+    @Test
+    void reconcilesMissingV45SchemaObjectsBeforeMigratingAnActiveTenant() throws Exception {
+        UUID tenantId = UUID.randomUUID();
+        String schemaName = "tenant_v45_reconcile_" + tenantId.toString().replace("-", "").substring(0, 12);
+        withBootstrapProperties(() -> {
+            ProductionBootstrapCli.main(new String[0]);
+            insertProvisioningTenant(tenantId, schemaName);
+            migrateTenantToVersion45(tenantId, schemaName);
+            setTenantStatus(tenantId, "ACTIVE");
+            try (Connection connection = DriverManager.getConnection(
+                    DATABASE.url(), DATABASE.username(), DATABASE.password());
+                 Statement statement = connection.createStatement()) {
+                statement.execute("drop table " + schemaName + ".ai_security_connector_configs cascade");
+            }
+
+            ProductionBootstrapCli.main(new String[0]);
+
+            assertEquals(1, queryInt("""
+                    select count(*)
+                    from information_schema.tables
+                    where table_schema = ? and table_name = 'ai_security_connector_configs'
+                    """, schemaName));
+            assertEquals(1, queryInt("""
+                    select count(*)
+                    from %s.tenant_schema_history
+                    where version = '66' and success
+                    """.formatted(schemaName)));
+        });
+    }
+
     private void withBootstrapProperties(ThrowingRunnable runnable) throws Exception {
         set("DB_URL", DATABASE.url());
         set("DB_USERNAME", DATABASE.username());
@@ -206,6 +238,36 @@ class ProductionBootstrapCliPostgresIntegrationTest {
             statement.setString(2, "Bootstrap Customer " + schemaName);
             statement.setString(3, "bootstrap-" + schemaName.replace('_', '-'));
             statement.setString(4, schemaName);
+            statement.executeUpdate();
+        }
+    }
+
+    private void migrateTenantToVersion45(UUID tenantId, String schemaName) throws Exception {
+        try (Connection connection = DriverManager.getConnection(DATABASE.url(), DATABASE.username(), DATABASE.password());
+             Statement statement = connection.createStatement()) {
+            statement.execute("create schema " + schemaName);
+        }
+        Flyway.configure()
+                .dataSource(DATABASE.url(), DATABASE.username(), DATABASE.password())
+                .schemas(schemaName)
+                .defaultSchema(schemaName)
+                .table("tenant_schema_history")
+                .locations("classpath:db/migration/tenant")
+                .baselineOnMigrate(true)
+                .baselineVersion(MigrationVersion.fromVersion("41"))
+                .placeholders(java.util.Map.of(
+                        "tenantId", tenantId.toString(),
+                        "tenantSchema", schemaName))
+                .target(MigrationVersion.fromVersion("45"))
+                .load()
+                .migrate();
+    }
+
+    private void setTenantStatus(UUID tenantId, String status) throws SQLException {
+        try (Connection connection = DriverManager.getConnection(DATABASE.url(), DATABASE.username(), DATABASE.password());
+             var statement = connection.prepareStatement("update platform.tenants set status = ? where id = ?")) {
+            statement.setString(1, status);
+            statement.setObject(2, tenantId);
             statement.executeUpdate();
         }
     }
