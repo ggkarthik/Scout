@@ -558,8 +558,8 @@ class AiSecurityObservationPostgresIntegrationTest {
                     Map.of("runId", runId));
             jdbc.update("""
                     update ai_grid_relationship_snapshots
-                       set observed_at = now() - interval '48 hours',
-                           valid_from = now() - interval '48 hours'
+                       set observed_at = now() - interval '48 hours 1 second',
+                           valid_from = now() - interval '48 hours 1 second'
                      where run_id = :runId
                     """, Map.of("runId", runId));
             return null;
