@@ -10,22 +10,30 @@
   "releaseStatus": "PAUSED",
   "controlObjectiveId": "AGCF-OBJ-AWS-034",
   "provider": "AWS",
-  "evaluationMode": "DIRECT_RELATIONSHIP",
+  "evaluationMode": "ARTIFACT_FACTS",
   "evaluationDefinition": {
-    "mode": "DIRECT_RELATIONSHIP",
-    "directRelationship": {
-      "sourcePredicate": {
-        "fact": "agcf.agcf-aws-034.evidence",
-        "eq": true
-      },
-      "edgeConstraints": [
-        "DIRECT_PROVIDER_RELATIONSHIP"
-      ],
-      "targetPredicate": {
-        "fact": "agcf.agcf-aws-034.evidence",
-        "eq": true
-      },
-      "targetCardinality": "ONE_OR_MORE"
+    "mode": "ARTIFACT_FACTS",
+    "artifactFacts": {
+      "predicate": {
+        "any": [
+          {
+            "not": {
+              "fact": "mcp.target_subtype_configured",
+              "in": {
+                "parameter": "approvedMcpTargetSubtypes"
+              }
+            }
+          },
+          {
+            "not": {
+              "fact": "mcp.server_hostname_configured",
+              "in": {
+                "parameter": "approvedMcpServerHosts"
+              }
+            }
+          }
+        ]
+      }
     }
   },
   "baseEvidenceTiers": [
@@ -37,24 +45,30 @@
   "releaseFamily": "AGCF_PHASE_1",
   "wave": "PHASE_1",
   "workflowClass": "POSTURE_FINDING",
-  "artifactTypes": [
-    "AI_ARTIFACT"
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AWS_AGENTCORE_GATEWAY_TARGET",
+    "AWS_AGENTCORE_MCP_SERVER"
   ],
-  "nativeKinds": [],
   "requiredCapabilities": [
     "AGENTCORE_GATEWAYS_TARGETS"
   ],
-  "requiredRelationships": [
-    "DIRECT_PROVIDER_RELATIONSHIP"
-  ],
+  "requiredRelationships": [],
   "requiredResourceFamilies": [],
   "requiredFacts": [
     {
-      "factKey": "agcf.agcf-aws-034.evidence",
-      "valueType": "BOOLEAN",
+      "factKey": "mcp.target_subtype_configured",
+      "valueType": "STRING",
       "evidenceClasses": [
-        "E1",
-        "E2"
+        "CONFIGURATION"
+      ],
+      "maxAgeSeconds": 86400
+    },
+    {
+      "factKey": "mcp.server_hostname_configured",
+      "valueType": "STRING",
+      "evidenceClasses": [
+        "CONFIGURATION"
       ],
       "maxAgeSeconds": 86400
     }
@@ -91,18 +105,35 @@
   ],
   "parameterDefinitions": [
     {
-      "key": "approvedBaseline",
-      "type": "STRING",
-      "defaultValue": "DEFAULT"
+      "key": "approvedMcpTargetSubtypes",
+      "type": "STRING_LIST",
+      "defaultValue": [
+        "MCP",
+        "NOT_APPLICABLE"
+      ]
+    },
+    {
+      "key": "approvedMcpServerHosts",
+      "type": "STRING_LIST",
+      "defaultValue": [
+        "NOT_APPLICABLE"
+      ]
     }
   ],
   "certificationParameterProfile": {
     "immutable": true,
     "pass": {
-      "approvedBaseline": "DEFAULT"
+      "approvedMcpTargetSubtypes": [
+        "MCP",
+        "NOT_APPLICABLE"
+      ],
+      "approvedMcpServerHosts": [
+        "NOT_APPLICABLE"
+      ]
     },
     "fail": {
-      "approvedBaseline": "STRICT"
+      "approvedMcpTargetSubtypes": [],
+      "approvedMcpServerHosts": []
     },
     "invalid": {}
   },

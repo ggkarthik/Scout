@@ -14,6 +14,8 @@ const capabilityGuidePath = join(appRoot, 'docs', 'ai-grid-phase-1-capability-gu
 const frameworkStatementPath = join(appRoot, 'docs', 'ai-grid-phase-1-framework-statement.md');
 const changelogPath = join(appRoot, 'docs', 'ai-grid-phase-1-changelog.md');
 const seedMigrationPath = join(appRoot, 'backend', 'src', 'main', 'resources', 'db', 'migration', 'postgres_reset', 'V76__seed_ai_grid_phase_1_catalog.sql');
+const correctionMigrationPath = join(appRoot, 'backend', 'src', 'main', 'resources', 'db', 'migration', 'postgres_reset', 'V88__ai_grid_phase_1_typed_and_correlation_contracts.sql');
+const completionMigrationPath = join(appRoot, 'backend', 'src', 'main', 'resources', 'db', 'migration', 'postgres_reset', 'V89__ai_grid_phase_1_concrete_evidence_contracts.sql');
 const write = process.argv.includes('--write');
 const frameworkVersions = {
   CSA_AICM: '1.1',
@@ -240,11 +242,71 @@ const concreteFactContracts = {
   'AGCF-AZR-027': ['identity.bot_password_without_managed_identity_observed', { eq: true }, ['AZURE_BOT_SERVICES']],
   'AGCF-AZR-028': ['identity.managed_identity_assigned_configured', { eq: false }, ['AZURE_BOT_SERVICES']],
 };
+
+const allowlist = (key, defaults) => ({ key, type: 'STRING_LIST', defaultValue: defaults });
+const threshold = (key, defaultValue) => ({ key, type: 'NUMBER', defaultValue });
+const parameter = (key) => ({ parameter: key });
+const fact = (factKey, valueType, maxAgeSeconds = 86400) => ({ factKey, valueType, evidenceClasses: ['CONFIGURATION'], maxAgeSeconds });
+const outside = (factKey, key) => ({ not: { fact: factKey, in: parameter(key) } });
+
+Object.assign(concreteFactContracts, {
+  'AGCF-AWS-007': { nativeKinds: ['AWS_BEDROCK_AGENT'], facts: [fact('model.foundation_identifier_configured', 'STRING')],
+    predicate: outside('model.foundation_identifier_configured', 'approvedFoundationModels'), parameters: [allowlist('approvedFoundationModels', ['amazon.nova-pro-v1:0'])] },
+  'AGCF-AWS-008': { nativeKinds: ['AWS_LAMBDA_FUNCTION'], facts: [fact('compute.lambda_target_arn_configured', 'STRING')],
+    predicate: outside('compute.lambda_target_arn_configured', 'approvedLambdaTargets'), parameters: [allowlist('approvedLambdaTargets', [])] },
+  'AGCF-AWS-011': { nativeKinds: ['AWS_BEDROCK_GUARDRAIL'], facts: [fact('data.customer_managed_key_configured', 'BOOLEAN')], predicate: { fact: 'data.customer_managed_key_configured', eq: false } },
+  'AGCF-AWS-013': { nativeKinds: ['AWS_BEDROCK_GUARDRAIL'], facts: [fact('guardrail.pii_entity_count_configured', 'NUMBER')], predicate: { fact: 'guardrail.pii_entity_count_configured', count_eq: 0 } },
+  'AGCF-AWS-014': { nativeKinds: ['AWS_BEDROCK_GUARDRAIL'], facts: [fact('guardrail.contextual_grounding_filter_count_configured', 'NUMBER')], predicate: { fact: 'guardrail.contextual_grounding_filter_count_configured', count_eq: 0 } },
+  'AGCF-AWS-015': { nativeKinds: ['AWS_BEDROCK_GUARDRAIL'], facts: [fact('guardrail.denied_topic_count_configured', 'NUMBER')], predicate: { fact: 'guardrail.denied_topic_count_configured', count_eq: 0 } },
+  'AGCF-AWS-016': { nativeKinds: ['AWS_BEDROCK_GUARDRAIL'], facts: [fact('guardrail.updated_at_observed', 'TIMESTAMP')],
+    predicate: { fact: 'guardrail.updated_at_observed', age_gt_seconds: parameter('maximumReviewAgeSeconds') }, parameters: [threshold('maximumReviewAgeSeconds', 7776000)] },
+  'AGCF-AWS-017': { nativeKinds: ['AWS_BEDROCK_KNOWLEDGE_BASE'], facts: [fact('data.s3_public_access_configured', 'BOOLEAN')], predicate: { fact: 'data.s3_public_access_configured', eq: true } },
+  'AGCF-AWS-021': { nativeKinds: ['AWS_BEDROCK_DATA_SOURCE'], facts: [fact('data.source_type', 'STRING')], predicate: outside('data.source_type', 'approvedSourceTypes'), parameters: [allowlist('approvedSourceTypes', ['S3'])] },
+  'AGCF-AWS-022': { nativeKinds: ['AWS_BEDROCK_DATA_SOURCE'], facts: [fact('data.deletion_policy_configured', 'STRING')], predicate: outside('data.deletion_policy_configured', 'approvedDeletionPolicies'), parameters: [allowlist('approvedDeletionPolicies', ['RETAIN'])] },
+  'AGCF-AWS-023': { nativeKinds: ['AWS_S3_DATA_STORE'], facts: [fact('data.source_sensitivity', 'STRING')], predicate: { fact: 'data.source_sensitivity', in: ['NOT_SCANNED'] } },
+  'AGCF-AWS-024': { nativeKinds: ['AWS_S3_DATA_STORE'], facts: [fact('data.sensitivity_confirmed', 'BOOLEAN'), fact('data.source_public_content_access', 'BOOLEAN')],
+    predicate: { all: [{ fact: 'data.sensitivity_confirmed', eq: true }, { fact: 'data.source_public_content_access', eq: true }] } },
+  'AGCF-AWS-025': { nativeKinds: ['AWS_BEDROCK_CUSTOM_MODEL'], facts: [fact('data.customer_managed_key_configured', 'BOOLEAN')], predicate: { fact: 'data.customer_managed_key_configured', eq: false } },
+  'AGCF-AWS-026': { nativeKinds: ['AWS_BEDROCK_IMPORTED_MODEL'], facts: [fact('data.customer_managed_key_configured', 'BOOLEAN')], predicate: { fact: 'data.customer_managed_key_configured', eq: false } },
+  'AGCF-AWS-028': { nativeKinds: ['AWS_BEDROCK_MODEL'], facts: [fact('model.provider_name_observed', 'STRING')], predicate: outside('model.provider_name_observed', 'approvedModelProviders'), parameters: [allowlist('approvedModelProviders', ['Amazon'])] },
+  'AGCF-AWS-034': { nativeKinds: ['AWS_AGENTCORE_GATEWAY_TARGET', 'AWS_AGENTCORE_MCP_SERVER'], facts: [fact('mcp.target_subtype_configured', 'STRING'), fact('mcp.server_hostname_configured', 'STRING')],
+    predicate: { any: [outside('mcp.target_subtype_configured', 'approvedMcpTargetSubtypes'), outside('mcp.server_hostname_configured', 'approvedMcpServerHosts')] },
+    parameters: [allowlist('approvedMcpTargetSubtypes', ['MCP', 'NOT_APPLICABLE']), allowlist('approvedMcpServerHosts', ['NOT_APPLICABLE'])] },
+  'AGCF-AWS-035': { nativeKinds: ['AWS_SAGEMAKER_DOMAIN'], facts: [fact('network.vpc_id_configured', 'STRING')], predicate: { fact: 'network.vpc_id_configured', empty: true } },
+  'AGCF-AWS-037': { nativeKinds: ['AWS_SAGEMAKER_NOTEBOOK_INSTANCE'], facts: [fact('compute.instance_type_configured', 'STRING')], predicate: outside('compute.instance_type_configured', 'approvedComputeTypes'), parameters: [allowlist('approvedComputeTypes', ['ml.t3.medium'])] },
+  'AGCF-AZR-009': { nativeKinds: ['AZURE_AI_ACCOUNTS', 'AZURE_ML_WORKSPACES', 'AZURE_SEARCH_SERVICES'], facts: [fact('resource.required_tags_present_configured', 'BOOLEAN')], predicate: { fact: 'resource.required_tags_present_configured', eq: false } },
+  'AGCF-AZR-013': { nativeKinds: ['AZURE_RAI_POLICIES'], facts: [fact('guardrail.rai_mode_configured', 'STRING'), fact('guardrail.rai_base_policy_configured', 'STRING')],
+    predicate: { any: [outside('guardrail.rai_mode_configured', 'approvedRaiModes'), outside('guardrail.rai_base_policy_configured', 'approvedRaiBasePolicies')] }, parameters: [allowlist('approvedRaiModes', ['Default']), allowlist('approvedRaiBasePolicies', ['Microsoft.Default'])] },
+  'AGCF-AZR-014': { nativeKinds: ['AZURE_RAI_POLICIES'], facts: [fact('guardrail.rai_custom_blocklist_count_configured', 'NUMBER')], predicate: { fact: 'guardrail.rai_custom_blocklist_count_configured', count_eq: 0 } },
+  'AGCF-AZR-015': { nativeKinds: ['AZURE_FOUNDRY_DEPLOYMENTS'], facts: [fact('model.name_configured', 'STRING'), fact('model.publisher_configured', 'STRING')],
+    predicate: { any: [outside('model.name_configured', 'approvedModelNames'), outside('model.publisher_configured', 'approvedModelPublishers')] }, parameters: [allowlist('approvedModelNames', []), allowlist('approvedModelPublishers', ['Microsoft'])] },
+  'AGCF-AZR-016': { nativeKinds: ['AZURE_FOUNDRY_DEPLOYMENTS'], facts: [fact('model.version_configured', 'STRING'), fact('model.version_upgrade_option_configured', 'STRING')],
+    predicate: { any: [outside('model.version_configured', 'approvedModelVersions'), outside('model.version_upgrade_option_configured', 'approvedUpgradeOptions')] }, parameters: [allowlist('approvedModelVersions', []), allowlist('approvedUpgradeOptions', ['OnceNewDefaultVersionAvailable'])] },
+  'AGCF-AZR-020': { nativeKinds: ['AZURE_FOUNDRY_MCP_SERVER'], facts: [fact('mcp.server_hostname_configured', 'STRING')], predicate: outside('mcp.server_hostname_configured', 'approvedMcpServerHosts'), parameters: [allowlist('approvedMcpServerHosts', [])] },
+  'AGCF-AZR-021': { nativeKinds: ['AZURE_FOUNDRY_AGENT_TOOLS'], facts: [fact('agent.tool_type_configured', 'STRING')], predicate: outside('agent.tool_type_configured', 'approvedToolTypes'), parameters: [allowlist('approvedToolTypes', ['function'])] },
+  'AGCF-AZR-023': { nativeKinds: ['AZURE_ML_ENDPOINTS'], facts: [fact('ml.endpoint_traffic_configured', 'OBJECT')], predicate: { fact: 'ml.endpoint_traffic_configured', empty: true } },
+  'AGCF-AZR-024': { nativeKinds: ['AZURE_ML_DEPLOYMENTS'], facts: [fact('compute.instance_type_configured', 'STRING'), fact('ml.model_reference_configured', 'STRING')],
+    predicate: { any: [outside('compute.instance_type_configured', 'approvedComputeTypes'), outside('ml.model_reference_configured', 'approvedModelReferences')] }, parameters: [allowlist('approvedComputeTypes', []), allowlist('approvedModelReferences', [])] },
+  'AGCF-AZR-029': { nativeKinds: ['AZURE_BOT_CHANNELS'], facts: [fact('bot.channel_type_configured', 'STRING')], predicate: outside('bot.channel_type_configured', 'approvedBotChannels'), parameters: [allowlist('approvedBotChannels', ['DirectLineChannel'])] },
+  'AGCF-AZR-030': { nativeKinds: ['AZURE_RBAC_GLOBAL'], facts: [fact('identity.assignment_scope_configured', 'STRING')], predicate: outside('identity.assignment_scope_configured', 'approvedAiResourceScopes'), parameters: [allowlist('approvedAiResourceScopes', [])] },
+  'AGCF-AZR-031': { nativeKinds: ['AZURE_RBAC_GLOBAL'], facts: [fact('identity.assignment_condition_version_configured', 'STRING'), fact('identity.principal_type_configured', 'STRING')],
+    predicate: { any: [{ fact: 'identity.assignment_condition_version_configured', empty: true }, outside('identity.principal_type_configured', 'approvedPrincipalTypes')] }, parameters: [allowlist('approvedPrincipalTypes', ['ServicePrincipal', 'ManagedIdentity'])] },
+  'AGCF-AZR-032': { nativeKinds: ['AZURE_STORAGE_ACCOUNTS', 'AZURE_ONELAKE_STORES'], facts: [fact('data.source_sensitivity', 'STRING')], predicate: { fact: 'data.source_sensitivity', in: ['NOT_SCANNED'] } },
+});
+const placeholderCompletionIds = new Set([
+  'AGCF-AWS-007', 'AGCF-AWS-008', 'AGCF-AWS-011', 'AGCF-AWS-013', 'AGCF-AWS-014', 'AGCF-AWS-015',
+  'AGCF-AWS-016', 'AGCF-AWS-017', 'AGCF-AWS-021', 'AGCF-AWS-022', 'AGCF-AWS-023', 'AGCF-AWS-024',
+  'AGCF-AWS-025', 'AGCF-AWS-026', 'AGCF-AWS-028', 'AGCF-AWS-034', 'AGCF-AWS-035', 'AGCF-AWS-037',
+  'AGCF-AZR-009', 'AGCF-AZR-013', 'AGCF-AZR-014', 'AGCF-AZR-015', 'AGCF-AZR-016', 'AGCF-AZR-020',
+  'AGCF-AZR-021', 'AGCF-AZR-023', 'AGCF-AZR-024', 'AGCF-AZR-029', 'AGCF-AZR-030', 'AGCF-AZR-031',
+  'AGCF-AZR-032',
+]);
 const numericFactKeys = new Set(['network.private_endpoint_count_configured', 'guardrail.content_filter_count_configured',
   'data.source_count_configured', 'guardrail.rai_filter_count_configured', 'guardrail.rai_custom_blocklist_count_configured']);
 const stringFactKeys = new Set([
   'bedrock.guardrail.minimum_strength_configured', 'agent.status_observed',
   'compute.lambda_url_auth_type_configured', 'mcp.inbound_auth_type', 'mcp.outbound_auth_type',
+  'mcp.target_status',
   'guardrail.rai_policy_reference_configured', 'mcp.configured_auth_type', 'resource.status_observed',
   'resource.provisioning_state_observed', 'agent.model_deployment_configured',
 ]);
@@ -252,6 +314,13 @@ const stringFactKeys = new Set([
 function contractFor(id) {
   const contract = concreteFactContracts[id];
   if (!contract) return null;
+  if (!Array.isArray(contract)) return {
+    factKey: contract.facts[0].factKey,
+    predicate: contract.predicate,
+    nativeKinds: contract.nativeKinds,
+    requiredFacts: contract.facts,
+    parameterDefinitions: contract.parameters ?? [],
+  };
   const [factKey, operator, nativeKinds] = contract;
   return {
     factKey,
@@ -259,6 +328,17 @@ function contractFor(id) {
     nativeKinds,
     requiredFacts: [{ factKey, valueType: numericFactKeys.has(factKey) ? 'NUMBER' : stringFactKeys.has(factKey) ? 'STRING' : 'BOOLEAN', evidenceClasses: ['CONFIGURATION'], maxAgeSeconds: 86400 }],
   };
+}
+
+function certificationProfileValues(definitions, variant) {
+  return Object.fromEntries(definitions.map((item) => {
+    if (variant === 'pass') return [item.key, item.defaultValue];
+    if (item.type === 'STRING_LIST') return [item.key,
+      item.defaultValue.length ? [] : ['CERTIFICATION_APPROVED_VALUE']];
+    if (item.type === 'NUMBER') return [item.key, Number(item.defaultValue) + 1];
+    if (item.type === 'BOOLEAN') return [item.key, !item.defaultValue];
+    return [item.key, item.defaultValue === 'DEFAULT' ? 'STRICT' : 'DEFAULT'];
+  }));
 }
 
 function mappings(column, framework) {
@@ -288,7 +368,7 @@ function parsePolicies(markdown) {
       : baseEvidenceTiers.includes('E2') ? 'DIRECT_RELATIONSHIP' : 'ARTIFACT_FACTS';
     const contract = contractFor(id);
     const resolvedEvaluationMode = contract ? 'ARTIFACT_FACTS' : evaluationMode;
-    const factKey = contract?.factKey ?? `agcf.${id.toLowerCase()}.evidence`;
+    const factKey = contract?.factKey ?? (provider === 'MULTI_CLOUD' ? null : `agcf.${id.toLowerCase()}.evidence`);
     const requiredCapabilities = capabilitiesFor(provider, name);
     const evaluationDefinition = resolvedEvaluationMode === 'ARTIFACT_FACTS'
       ? { mode: resolvedEvaluationMode, artifactFacts: { predicate: contract?.predicate ?? { fact: factKey, eq: true } } }
@@ -299,6 +379,9 @@ function parsePolicies(markdown) {
         } }
         : { mode: resolvedEvaluationMode, correlationPath: correlationFor(id) };
     const parameterized = defaultSelection === 'DISABLED';
+    const parameterDefinitions = contract?.parameterDefinitions?.length
+      ? contract.parameterDefinitions
+      : parameterized ? [{ key: 'approvedBaseline', type: 'STRING', defaultValue: 'DEFAULT' }] : [];
     return {
       policyId: id,
       version: '1.0.0',
@@ -324,13 +407,13 @@ function parsePolicies(markdown) {
       requiredCapabilities,
       requiredRelationships: resolvedEvaluationMode === 'DIRECT_RELATIONSHIP' ? ['DIRECT_PROVIDER_RELATIONSHIP'] : [],
       requiredResourceFamilies: [],
-      requiredFacts: contract?.requiredFacts ?? [{ factKey, valueType: 'BOOLEAN', evidenceClasses: baseEvidenceTiers, maxAgeSeconds: 86400 }],
+      requiredFacts: contract?.requiredFacts ?? (provider === 'MULTI_CLOUD' ? [] : [{ factKey, valueType: 'BOOLEAN', evidenceClasses: baseEvidenceTiers, maxAgeSeconds: 86400 }]),
       frameworkMappings: [...mappings(owasp, 'OWASP_GENAI_LLM_TOP_10'), ...mappings(aicm, 'CSA_AICM')],
-      ...(parameterized ? {
-        parameterDefinitions: [{ key: 'approvedBaseline', type: 'STRING', defaultValue: 'DEFAULT' }],
+      ...(parameterDefinitions.length ? {
+        parameterDefinitions,
         certificationParameterProfile: {
-          immutable: true,
-          pass: { approvedBaseline: 'DEFAULT' }, fail: { approvedBaseline: 'STRICT' }, invalid: {},
+          immutable: true, pass: certificationProfileValues(parameterDefinitions, 'pass'),
+          fail: certificationProfileValues(parameterDefinitions, 'fail'), invalid: {},
         },
       } : {}),
     };
@@ -348,6 +431,31 @@ async function walk(directory) {
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+const operatorsByType = {
+  BOOLEAN: new Set(['exists', 'eq', 'neq']),
+  NUMBER: new Set(['exists', 'eq', 'neq', 'in', 'gt', 'gte', 'lt', 'lte', 'count_gt', 'count_gte', 'count_lt', 'count_lte', 'count_eq']),
+  STRING: new Set(['exists', 'eq', 'neq', 'in', 'empty', 'non_empty', 'strength_lt']),
+  TIMESTAMP: new Set(['exists', 'eq', 'neq', 'age_gt_seconds', 'age_gte_seconds']),
+  ARRAY: new Set(['exists', 'eq', 'neq', 'empty', 'non_empty', 'count_gt', 'count_gte', 'count_lt', 'count_lte', 'count_eq']),
+  OBJECT: new Set(['exists', 'eq', 'neq', 'empty', 'non_empty', 'count_gt', 'count_gte', 'count_lt', 'count_lte', 'count_eq']),
+};
+
+function validateTypedPredicate(node, factTypes, key) {
+  if (node?.all || node?.any) {
+    for (const child of node.all ?? node.any) validateTypedPredicate(child, factTypes, key);
+    return;
+  }
+  if (node?.not) {
+    validateTypedPredicate(node.not, factTypes, key);
+    return;
+  }
+  const type = factTypes.get(node?.fact);
+  assert(type, `${key} predicate references undeclared fact ${node?.fact}`);
+  const operators = Object.keys(node).filter((field) => field !== 'fact');
+  assert(operators.length === 1 && operatorsByType[type]?.has(operators[0]),
+    `${key} operator ${operators.join(',') || '(missing)'} is incompatible with ${type} fact ${node.fact}`);
 }
 
 async function materialize(policies) {
@@ -371,8 +479,9 @@ async function materialize(policies) {
   await writeFile(manifestPath, stableJson(manifest));
 }
 
-async function validate() {
-  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+async function validate(sourcePolicies) {
+  const manifestBytes = await readFile(manifestPath, 'utf8');
+  const manifest = JSON.parse(manifestBytes);
   const files = await walk(packageRoot);
   const packages = await Promise.all(files.map(async (file) => ({
     file,
@@ -390,6 +499,34 @@ async function validate() {
     `Default totals are invalid: ${JSON.stringify(selections)}`);
   assert(manifest.policies?.length === 76, 'Manifest must contain each package');
   const manifests = new Map(manifest.policies.map((item) => [`${item.policyId}@${item.version}`, item]));
+  const expectedManifest = { release: 'AGCF_PHASE_1', policies: [] };
+  for (const policy of sourcePolicies) {
+    const sourceRef = `policy-packages/agcf/${policy.policyId}/${policy.version}.json`;
+    const expectedBytes = stableJson({ ...policy, packageSourceRef: sourceRef });
+    const actual = packages.find((item) => item.policy.policyId === policy.policyId);
+    assert(actual?.bytes === expectedBytes,
+      `${policy.policyId}@${policy.version} differs from compiler output; run npm run build:ai-grid-phase1`);
+    expectedManifest.policies.push({
+      policyId: policy.policyId, version: policy.version, digest: sha256(expectedBytes), provider: policy.provider,
+      controlObjectiveId: policy.controlObjectiveId, evaluationMode: policy.evaluationMode,
+      defaultSelection: policy.defaultSelection, releaseFamily: policy.releaseFamily, wave: policy.wave,
+      packageSourceRef: sourceRef,
+    });
+  }
+  assert(manifestBytes === stableJson(expectedManifest),
+    'Phase 1 manifest differs from compiler output; run npm run build:ai-grid-phase1');
+  const correctionMigration = await readFile(correctionMigrationPath, 'utf8');
+  for (const policyId of ['AGCF-AWS-033', ...correlationReferences.keys()]) {
+    const digest = manifests.get(`${policyId}@1.0.0`)?.digest;
+    assert(digest && correctionMigration.includes(digest),
+      `V88 must bind ${policyId} to its current generated package digest`);
+  }
+  const completionMigration = await readFile(completionMigrationPath, 'utf8');
+  for (const policyId of placeholderCompletionIds) {
+    const digest = manifests.get(`${policyId}@1.0.0`)?.digest;
+    assert(digest && completionMigration.includes(digest),
+      `V89 must bind ${policyId} to its current generated package digest`);
+  }
   for (const { file, policy, bytes } of packages) {
     const location = relative(appRoot, file);
     const key = `${policy.policyId}@${policy.version}`;
@@ -420,6 +557,20 @@ async function validate() {
       assert(registeredCorrelations.has(`${correlation.correlationId}@${correlation.correlationVersion}`), `${key} references an unknown correlation version`);
       const expected = correlationReferences.get(policy.policyId);
       assert(expected && correlation.correlationId === expected[0] && correlation.correlationVersion === expected[1], `${key} has the wrong correlation binding`);
+      assert(policy.requiredFacts.length === 0, `${key} correlation packages must not depend on synthetic posture facts`);
+    } else {
+      const factTypes = new Map();
+      for (const fact of policy.requiredFacts ?? []) {
+        assert(operatorsByType[fact.valueType], `${key} declares unsupported fact type ${fact.valueType}`);
+        assert(!factTypes.has(fact.factKey), `${key} declares duplicate fact ${fact.factKey}`);
+        factTypes.set(fact.factKey, fact.valueType);
+      }
+      if (policy.evaluationMode === 'ARTIFACT_FACTS') {
+        validateTypedPredicate(definition.artifactFacts.predicate, factTypes, key);
+      } else {
+        validateTypedPredicate(definition.directRelationship.sourcePredicate, factTypes, key);
+        validateTypedPredicate(definition.directRelationship.targetPredicate, factTypes, key);
+      }
     }
     if (policy.parameterDefinitions?.length) assert(policy.certificationParameterProfile?.immutable === true, `${key} parameters require an immutable certification profile`);
     assert(location === policy.packageSourceRef, `${key} package source reference is incorrect`);
@@ -434,6 +585,12 @@ async function validate() {
     assert(fact && !fact.factKey.startsWith('agcf.') && fact.evidenceClasses.includes('CONFIGURATION'),
       `${policy.policyId} must use a concrete configuration fact contract`);
   }
+  assert(concrete.length === 70, `All 70 posture packages must have concrete collector-backed contracts; found ${concrete.length}`);
+  assert(packages.every(({ policy }) => (policy.requiredFacts ?? []).every((fact) => !fact.factKey.startsWith('agcf.'))),
+    'Generic AGCF evidence facts are forbidden');
+  assert(packages.filter(({ policy }) => policy.provider !== 'MULTI_CLOUD')
+    .every(({ policy }) => policy.artifactTypes.length === 0 && policy.nativeKinds.length > 0),
+    'Posture packages must bind concrete native resource kinds');
   const corpusBytes = await readFile(certificationCorpusPath, 'utf8');
   assert(corpusBytes === await readFile(certificationCorpusResourcePath, 'utf8'),
     'Runtime certification corpus must match the repository corpus');
@@ -473,7 +630,7 @@ function sql(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
 }
 
-async function seedMigration(policies) {
+async function renderSeedMigration(policies) {
   const packageRows = await Promise.all(policies.map(async (policy) => {
     const file = join(packageRoot, policy.policyId, `${policy.version}.json`);
     const bytes = await readFile(file, 'utf8');
@@ -482,26 +639,47 @@ async function seedMigration(policies) {
   const values = packageRows.map(({ policy, digest }) => `(${[
     sql(policy.policyId), sql(policy.version), sql(policy.name), sql(policy.description), sql('HIGH'), sql(policy.lifecycle), sql(policy.workflowClass), sql(policy.defaultSelection),
     sql(JSON.stringify(policy.artifactTypes)), sql('[]'), sql(JSON.stringify(policy.requiredCapabilities)), sql(JSON.stringify(policy.requiredRelationships)), sql(JSON.stringify(policy.requiredResourceFamilies)),
-    sql(JSON.stringify(policy.requiredFacts)), sql(JSON.stringify(policy.evaluationDefinition.artifactFacts?.predicate ?? { fact: policy.requiredFacts[0].factKey, eq: true })),
+    sql(JSON.stringify(policy.requiredFacts)), sql(JSON.stringify(policy.evaluationMode === 'CORRELATION_PATH' ? {} : policy.evaluationDefinition.artifactFacts?.predicate ?? { fact: policy.requiredFacts[0].factKey, eq: true })),
     sql(`AGCF_${policy.policyId.replaceAll('-', '_')}`), sql(policy.remediationIntent), sql(JSON.stringify(policy.frameworkMappings)), sql(JSON.stringify(policy.parameterDefinitions ?? [])),
     sql(digest), sql(policy.packageSourceRef), sql(policy.owner), sql(policy.controlObjectiveId), sql(policy.provider), sql(policy.evaluationMode), sql(JSON.stringify(policy.evaluationDefinition)),
     sql(JSON.stringify(policy.baseEvidenceTiers)), sql(JSON.stringify(policy.conditionalCapabilities)), sql(JSON.stringify(policy.certificationParameterProfile ?? null)),
     sql('STATIC'), 'null', 'null', 'null',
   ].join(',')})`).join(',\n');
   const objectives = packageRows.map(({ policy }) => `(${sql(policy.controlObjectiveId)},${sql(policy.name)},${sql(policy.securityIntent)},${sql(policy.remediationIntent)},${sql(policy.owner)},'ACTIVE')`).join(',\n');
-  const facts = packageRows.map(({ policy }) => {
-    const fact = policy.requiredFacts[0];
-    return `(${sql(fact.factKey)},'1.0.0','BOOLEAN',${sql(`Phase 1 evidence for ${policy.policyId}.`)},'["CONFIGURATION","GRAPH_ANALYSIS"]','["POSTURE_FINDING","VALIDATED_EXPOSURE"]',86400)`;
-  }).join(',\n');
+  const facts = packageRows.flatMap(({ policy }) => policy.requiredFacts.map((fact) => {
+    const evidenceClasses = fact.evidenceClasses?.length ? fact.evidenceClasses : policy.baseEvidenceTiers;
+    return `(${sql(fact.factKey)},'1.0.0',${sql(fact.valueType)},${sql(`Phase 1 evidence for ${policy.policyId}.`)},${sql(JSON.stringify(evidenceClasses))},${sql(JSON.stringify([policy.workflowClass]))},${Number(fact.maxAgeSeconds)})`;
+  })).join(',\n');
   const distributions = packageRows.map(({ policy }) => `(${sql(policy.policyId)},false,${sql(policy.defaultSelection)},'PAUSED','ai-grid-phase-1')`).join(',\n');
   const content = `-- migration-guard: platform-only\n-- Generated by scripts/compile-ai-grid-phase1.mjs. Do not hand-edit package rows.\n\nINSERT INTO platform.ai_grid_control_objectives\n    (control_objective_id,name,security_intent,remediation_intent,owner,lifecycle)\nVALUES\n${objectives}\nON CONFLICT (control_objective_id) DO NOTHING;\n\nINSERT INTO platform.ai_grid_fact_definitions\n    (fact_key,version,value_type,claim_semantics,allowed_evidence_classes_json,allowed_workflow_uses_json,default_max_age_seconds)\nVALUES\n${facts}\nON CONFLICT (fact_key,version) DO NOTHING;\n\nINSERT INTO platform.ai_grid_policy_versions\n    (policy_id,version,name,description,severity,lifecycle,workflow_class,default_selection,artifact_types_json,native_kinds_json,required_capabilities_json,required_relationships_json,required_resource_families_json,required_facts_json,predicate_json,reason_code,remediation,framework_mappings_json,parameter_definitions_json,package_digest,package_source_ref,authored_by,control_objective_id,provider,evaluation_mode,evaluation_definition_json,base_evidence_tiers_json,conditional_capabilities_json,certification_parameter_profile_json,scope_resolution,approved_by,approved_at,published_at)\nVALUES\n${values}\n  -- generated rows are immutable package versions\nON CONFLICT (policy_id,version) DO NOTHING;\n\nINSERT INTO platform.ai_grid_policy_distribution\n    (policy_id,available,default_selection,rollout_stage,updated_by)\nVALUES\n${distributions}\nON CONFLICT (policy_id) DO UPDATE SET available=excluded.available,default_selection=excluded.default_selection,rollout_stage=excluded.rollout_stage,updated_by=excluded.updated_by,updated_at=now();\n\nUPDATE platform.ai_grid_policy_distribution SET available=false,rollout_stage='RETIRED',updated_by='ai-grid-phase-1-migration',updated_at=now() WHERE policy_id NOT LIKE 'AGCF-%';\nUPDATE platform.ai_grid_policy_versions SET lifecycle='RETIRED' WHERE policy_id NOT LIKE 'AGCF-%' AND lifecycle='PUBLISHED';\n`;
-  await writeFile(seedMigrationPath, content);
+  return content;
+}
+
+async function renderCompletionMigration(policies) {
+  const rows = [];
+  const factsByKey = new Map();
+  for (const policy of policies.filter((item) => placeholderCompletionIds.has(item.policyId))) {
+    const bytes = await readFile(join(packageRoot, policy.policyId, `${policy.version}.json`), 'utf8');
+    const packaged = JSON.parse(bytes);
+    for (const requirement of packaged.requiredFacts) factsByKey.set(requirement.factKey, requirement);
+    rows.push(`(${[
+      sql(packaged.policyId), sql(packaged.version), sql(JSON.stringify(packaged.artifactTypes)),
+      sql(JSON.stringify(packaged.nativeKinds)), sql(JSON.stringify(packaged.requiredFacts)),
+      sql(JSON.stringify(packaged.evaluationDefinition.artifactFacts.predicate)),
+      sql(JSON.stringify(packaged.parameterDefinitions ?? [])), sql(JSON.stringify(packaged.evaluationDefinition)),
+      sql(JSON.stringify(packaged.certificationParameterProfile ?? null)), sql(sha256(bytes)),
+    ].join(',')})`);
+  }
+  const factRows = [...factsByKey.values()].sort((left, right) => left.factKey.localeCompare(right.factKey))
+    .map((requirement) => `(${sql(requirement.factKey)},'1.0.0',${sql(requirement.valueType)},${sql('Canonical provider-observed Phase 1 evidence.')},${sql(JSON.stringify(requirement.evidenceClasses))},'["POSTURE_FINDING"]'::jsonb,${Number(requirement.maxAgeSeconds)})`)
+    .join(',\n');
+  return `-- migration-guard: platform-only\n-- Forward-only replacement of the 31 remaining generic Phase 1 evidence contracts.\n-- Generated by scripts/compile-ai-grid-phase1.mjs; V76 and V88 remain immutable.\n\nINSERT INTO platform.ai_grid_fact_definitions\n    (fact_key,version,value_type,claim_semantics,allowed_evidence_classes_json,allowed_workflow_uses_json,default_max_age_seconds)\nVALUES\n${factRows}\nON CONFLICT (fact_key,version) DO NOTHING;\n\nWITH corrections(policy_id,version,artifact_types_json,native_kinds_json,required_facts_json,predicate_json,parameter_definitions_json,evaluation_definition_json,certification_parameter_profile_json,package_digest) AS (VALUES\n${rows.join(',\n')}\n)\nUPDATE platform.ai_grid_policy_versions policy\n   SET artifact_types_json = corrections.artifact_types_json::jsonb,\n       native_kinds_json = corrections.native_kinds_json::jsonb,\n       required_facts_json = corrections.required_facts_json::jsonb,\n       predicate_json = corrections.predicate_json::jsonb,\n       parameter_definitions_json = corrections.parameter_definitions_json::jsonb,\n       evaluation_mode = 'ARTIFACT_FACTS',\n       evaluation_definition_json = corrections.evaluation_definition_json::jsonb,\n       certification_parameter_profile_json = corrections.certification_parameter_profile_json::jsonb,\n       package_digest = corrections.package_digest\n  FROM corrections\n WHERE policy.policy_id = corrections.policy_id\n   AND policy.version = corrections.version\n   AND policy.lifecycle = 'VALIDATED';\n`;
 }
 
 const policies = parsePolicies(await readFile(policyPlan, 'utf8'));
 assert(policies.length === 76, `The policy plan must contain 76 AGCF rows, found ${policies.length}`);
 if (write) await materialize(policies);
+if (write) await writeFile(completionMigrationPath, await renderCompletionMigration(policies));
 if (write) await writeCertificationCorpus();
 if (write) await writeReleaseArtifacts(policies);
-if (process.argv.includes('--write-seed')) await seedMigration(policies);
-await validate();
+await validate(policies);

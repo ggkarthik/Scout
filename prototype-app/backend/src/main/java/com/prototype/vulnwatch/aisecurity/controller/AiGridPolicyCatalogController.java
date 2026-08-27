@@ -34,7 +34,11 @@ public class AiGridPolicyCatalogController {
     private final AiGridTestDataResetService testReset;
     private final RequestActorService actors;
     public AiGridPolicyCatalogController(AiGridPolicyCatalogService catalog, AiGridPolicyImpactPreviewService previews, AiGridValidationGovernanceService governance, AiGridPolicyPortfolioService portfolio, AiGridTestDataResetService testReset, RequestActorService actors) { this.catalog = catalog; this.previews = previews; this.governance = governance; this.portfolio = portfolio; this.testReset = testReset; this.actors = actors; }
-    @GetMapping public List<Distribution> list() { return catalog.distributions(); }
+    @GetMapping public List<Distribution> list(
+            @RequestParam(required = false) String releaseFamily,
+            @RequestParam(required = false) String lifecycle) {
+        return catalog.distributions(releaseFamily, lifecycle);
+    }
     @GetMapping("/{policyId}/versions/{version}") public PolicyDetail detail(@PathVariable String policyId, @PathVariable String version) { return catalog.detail(policyId, version); }
     @PostMapping("/imports") public PolicyVersion importDraft(@RequestBody PolicyPackageCommand command) { return catalog.importDraft(command, actors.currentActor().userId()); }
     @PutMapping("/{policyId}/distribution") public Distribution distribution(@PathVariable String policyId, @RequestBody DistributionCommand command) { return catalog.updateDistribution(policyId, command, actors.currentActor().userId()); }

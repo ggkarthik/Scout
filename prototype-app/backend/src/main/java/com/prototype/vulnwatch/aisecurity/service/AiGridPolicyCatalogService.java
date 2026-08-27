@@ -70,12 +70,13 @@ public class AiGridPolicyCatalogService {
                     || !mappings.isArray() || mappings.isEmpty()) bad("Invalid policy package shape");
             validateMappings(mappings);
             validateParameterDefinitions(parameterDefinitions, predicate);
-            predicates.validate(predicate);
+            if (!"CORRELATION_PATH".equals(command.evaluationMode())) predicates.validate(predicate);
             validateEvidenceTiers(evidenceTiers);
             validateCatalogReference(command.controlObjectiveId(), CatalogReference.OBJECTIVE);
             validateCatalogReferences(conditionalCapabilities, CatalogReference.CAPABILITY);
             validateEvaluationDefinition(command, definition, predicate);
             validateCertificationProfile(parameterDefinitions, certificationProfile);
+            validatePhase1EvidenceContract(command, facts, predicate, artifactTypes);
             facts.forEach(fact -> {
                 String key = fact.path("factKey").asText();
                 if (key.isBlank() || jdbc.queryForObject("select count(*) from platform.ai_grid_fact_definitions where fact_key=:key and lifecycle='ACTIVE'", Map.of("key", key), Integer.class) == 0) {
@@ -182,15 +183,30 @@ public class AiGridPolicyCatalogService {
                 Map.of("id", policyId), rs -> rs.next() ? rs.getString(1) : "null");
     }
 
-    public List<Distribution> distributions() { return TenantContext.runAsPlatform(() -> jdbc.query("""
+    public List<Distribution> distributions() { return distributions(null, null); }
+
+    /**
+     * Platform catalog query. Distribution availability is intentionally not a predicate here:
+     * platform owners must be able to inspect governed VALIDATED/PAUSED packages before tenant
+     * publication. Tenant-facing catalog queries apply their own availability boundary.
+     */
+    public List<Distribution> distributions(String releaseFamily, String lifecycle) {
+        String family = blank(releaseFamily);
+        String lifecycleFilter = blank(lifecycle);
+        return TenantContext.runAsPlatform(() -> jdbc.query("""
             select d.policy_id,d.available,d.default_selection,d.rollout_stage,d.canary_tenant_ids_json::text,d.pinned_version,d.updated_by,d.updated_at,
                    p.version,p.name,p.severity,p.lifecycle,p.control_objective_id,p.provider,p.evaluation_mode,
                    p.base_evidence_tiers_json::text,p.conditional_capabilities_json::text,p.framework_mappings_json::text,
                    p.release_family,p.release_wave
               from platform.ai_grid_policy_distribution d join lateral (
                   select * from platform.ai_grid_policy_versions p where p.policy_id=d.policy_id
-                  order by p.published_at desc nulls last,p.version desc limit 1) p on true order by p.severity,p.name
-            """, (rs, n) -> new Distribution(rs.getString(1),rs.getBoolean(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7),rs.getTimestamp(8).toInstant(),rs.getString(9),rs.getString(10),rs.getString(11),rs.getString(12),rs.getString(13),rs.getString(14),rs.getString(15),rs.getString(16),rs.getString(17),rs.getString(18),rs.getString(19),rs.getString(20)))); }
+                  order by p.published_at desc nulls last,p.version desc limit 1) p on true
+             where (:releaseFamily is null or p.release_family = :releaseFamily)
+               and (:lifecycle is null or p.lifecycle = :lifecycle)
+             order by p.provider,p.policy_id
+            """, new MapSqlParameterSource().addValue("releaseFamily", family).addValue("lifecycle", lifecycleFilter),
+                (rs, n) -> new Distribution(rs.getString(1),rs.getBoolean(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7),rs.getTimestamp(8).toInstant(),rs.getString(9),rs.getString(10),rs.getString(11),rs.getString(12),rs.getString(13),rs.getString(14),rs.getString(15),rs.getString(16),rs.getString(17),rs.getString(18),rs.getString(19),rs.getString(20))));
+    }
 
     public PolicyDetail detail(String policyId, String version) { return TenantContext.runAsPlatform(() -> {
         PolicyDetail result = jdbc.query("""
@@ -198,7 +214,7 @@ public class AiGridPolicyCatalogService {
                    p.control_objective_id,o.name,o.security_intent,o.remediation_intent,p.provider,p.evaluation_mode,
                    p.evaluation_definition_json::text,p.base_evidence_tiers_json::text,p.conditional_capabilities_json::text,
                    p.required_capabilities_json::text,p.required_relationships_json::text,p.required_resource_families_json::text,
-                   p.required_facts_json::text,p.framework_mappings_json::text,p.certification_parameter_profile_json::text,
+                   p.native_kinds_json::text,p.required_facts_json::text,p.framework_mappings_json::text,p.certification_parameter_profile_json::text,
                    p.package_digest,p.package_source_ref,p.release_family,p.release_wave
               from platform.ai_grid_policy_versions p
               left join platform.ai_grid_control_objectives o on o.control_objective_id=p.control_objective_id
@@ -207,7 +223,7 @@ public class AiGridPolicyCatalogService {
                     rs.getString(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7),rs.getString(8),
                     rs.getString(9),rs.getString(10),rs.getString(11),rs.getString(12),rs.getString(13),rs.getString(14),
                     tree(rs.getString(15)),tree(rs.getString(16)),tree(rs.getString(17)),tree(rs.getString(18)),tree(rs.getString(19)),tree(rs.getString(20)),
-                    tree(rs.getString(21)),tree(rs.getString(22)),nullableTree(rs.getString(23), "stored certification profile"),rs.getString(24),rs.getString(25),rs.getString(26),rs.getString(27)) : null);
+                    tree(rs.getString(21)),tree(rs.getString(22)),tree(rs.getString(23)),nullableTree(rs.getString(24), "stored certification profile"),rs.getString(25),rs.getString(26),rs.getString(27),rs.getString(28)) : null);
         if (result == null) notFound("Policy version not found");
         return result;
     }); }
@@ -249,14 +265,80 @@ public class AiGridPolicyCatalogService {
         if (definitions.isEmpty()) { if (profile != null) bad("Certification profile requires parameters"); return; }
         if (profile == null || !profile.isObject() || !profile.path("immutable").asBoolean(false) || !profile.has("pass") || !profile.has("fail") || !profile.has("invalid")) bad("Parameterized policies require an immutable certification profile");
     }
+    private void validatePhase1EvidenceContract(PolicyPackageCommand command, JsonNode facts,
+                                                JsonNode predicate, JsonNode artifactTypes) {
+        if (!"AGCF_PHASE_1".equals(command.releaseFamily())) return;
+        boolean posture = !"CORRELATION_PATH".equals(command.evaluationMode());
+        if (posture && contains(artifactTypes, mapper.getNodeFactory().textNode("AI_ARTIFACT"))) {
+            bad("Phase 1 posture policies require concrete native kinds; generic AI_ARTIFACT binding is forbidden");
+        }
+        JsonNode nativeKinds = tree(emptyArray(command.nativeKindsJson()), "nativeKindsJson");
+        if (posture && (!nativeKinds.isArray() || nativeKinds.isEmpty())) {
+            bad("Phase 1 posture policies require at least one concrete native kind");
+        }
+        if (!posture && !facts.isEmpty()) {
+            bad("Phase 1 correlation policies must use governed correlation outputs, not synthetic required facts");
+        }
+        Map<String, String> factTypes = new java.util.LinkedHashMap<>();
+        for (JsonNode fact : facts) {
+            String key = fact.path("factKey").asText();
+            String declaredType = fact.path("valueType").asText();
+            if (key.matches("(?i)^agcf\\.agcf-(aws|azr|xsp)-\\d{3}\\.evidence$") || key.isBlank()) {
+                bad("Phase 1 placeholder evidence facts are forbidden: " + key);
+            }
+            if (!Set.of("BOOLEAN", "STRING", "NUMBER", "OBJECT", "ARRAY", "TIMESTAMP").contains(declaredType)) {
+                bad("Unsupported Phase 1 fact valueType for " + key);
+            }
+            String registeredType = jdbc.query("""
+                    select value_type from platform.ai_grid_fact_definitions
+                     where fact_key=:key and lifecycle='ACTIVE'
+                     order by version desc limit 1
+                    """, Map.of("key", key), rs -> rs.next() ? rs.getString(1) : null);
+            if (registeredType == null || !registeredType.equals(declaredType)) {
+                bad("Phase 1 fact type does not match its active definition: " + key);
+            }
+            if (factTypes.put(key, declaredType) != null) bad("Duplicate required fact: " + key);
+        }
+        if (posture) validatePredicateTypes(predicate, factTypes);
+    }
+
+    private void validatePredicateTypes(JsonNode node, Map<String, String> factTypes) {
+        if (node.has("all") || node.has("any")) {
+            for (JsonNode child : node.has("all") ? node.get("all") : node.get("any")) validatePredicateTypes(child, factTypes);
+            return;
+        }
+        if (node.has("not")) { validatePredicateTypes(node.get("not"), factTypes); return; }
+        String key = node.path("fact").asText();
+        String type = factTypes.get(key);
+        if (type == null) bad("Predicate references an undeclared required fact: " + key);
+        String operator = null;
+        var fields = node.fieldNames();
+        while (fields.hasNext()) {
+            String field = fields.next();
+            if (!"fact".equals(field)) operator = field;
+        }
+        Set<String> allowed = switch (type) {
+            case "BOOLEAN" -> Set.of("exists", "eq", "neq");
+            case "NUMBER" -> Set.of("exists", "eq", "neq", "in", "gt", "gte", "lt", "lte",
+                    "count_gt", "count_gte", "count_lt", "count_lte", "count_eq");
+            case "STRING" -> Set.of("exists", "eq", "neq", "in", "empty", "non_empty", "strength_lt");
+            case "TIMESTAMP" -> Set.of("exists", "eq", "neq", "age_gt_seconds", "age_gte_seconds");
+            case "ARRAY", "OBJECT" -> Set.of("exists", "eq", "neq", "empty", "non_empty",
+                    "count_gt", "count_gte", "count_lt", "count_lte", "count_eq");
+            default -> Set.of();
+        };
+        if (!allowed.contains(operator)) bad("Predicate operator " + operator + " is incompatible with " + type + " fact " + key);
+    }
     private void validateParameterDefinitions(JsonNode definitions, JsonNode predicate) {
         if (!definitions.isArray()) bad("parameterDefinitionsJson must be an array");
         Set<String> keys = new HashSet<>();
         for (JsonNode definition : definitions) {
             String key = definition.path("key").asText();
             String type = definition.path("type").asText();
-            if (key.isBlank() || !keys.add(key) || !Set.of("BOOLEAN", "NUMBER", "STRING", "ENUM").contains(type)
+            if (key.isBlank() || !keys.add(key) || !Set.of("BOOLEAN", "NUMBER", "STRING", "STRING_LIST", "ENUM").contains(type)
                     || !definition.has("defaultValue")) bad("Invalid parameter definition");
+            if ("STRING_LIST".equals(type) && (!definition.path("defaultValue").isArray()
+                    || !allTextual(definition.path("defaultValue")))) bad("Invalid string-list parameter definition");
             if ("ENUM".equals(type) && (!definition.path("options").isArray() || definition.path("options").isEmpty()
                     || !contains(definition.path("options"), definition.get("defaultValue")))) bad("Invalid enum parameter definition");
         }
@@ -288,6 +370,7 @@ public class AiGridPolicyCatalogService {
         if (known == null || known == 0) bad("Unknown or inactive " + reference.label + ": " + value);
     }
     private boolean contains(JsonNode values, JsonNode expected) { for (JsonNode value : values) if (value.equals(expected)) return true; return false; }
+    private boolean allTextual(JsonNode values) { for (JsonNode value : values) if (!value.isTextual()) return false; return true; }
     private void validateParameterReferences(JsonNode node, Set<String> keys) {
         if (node.has("all") || node.has("any")) { for (JsonNode child : node.has("all") ? node.get("all") : node.get("any")) validateParameterReferences(child, keys); return; }
         if (node.has("not")) { validateParameterReferences(node.get("not"), keys); return; }
@@ -332,5 +415,5 @@ public class AiGridPolicyCatalogService {
     public record PolicyVersion(String policyId, String version, String lifecycle, String packageDigest, String packageSourceRef) {}
     public record DistributionCommand(boolean available, String defaultSelection, String rolloutStage, List<String> canaryTenantIds, String pinnedVersion) {}
     public record Distribution(String policyId, boolean available, String defaultSelection, String rolloutStage, String canaryTenantIdsJson, String pinnedVersion, String updatedBy, java.time.Instant updatedAt, String version, String name, String severity, String lifecycle, String controlObjectiveId, String provider, String evaluationMode, String baseEvidenceTiersJson, String conditionalCapabilitiesJson, String frameworkMappingsJson, String releaseFamily, String releaseWave) {}
-    public record PolicyDetail(String policyId, String version, String name, String description, String severity, String lifecycle, String workflowClass, String defaultSelection, String controlObjectiveId, String objectiveName, String securityIntent, String remediationIntent, String provider, String evaluationMode, JsonNode evaluationDefinition, JsonNode baseEvidenceTiers, JsonNode conditionalCapabilities, JsonNode requiredCapabilities, JsonNode requiredRelationships, JsonNode requiredResourceFamilies, JsonNode requiredFacts, JsonNode frameworkMappings, JsonNode certificationParameterProfile, String packageDigest, String packageSourceRef, String releaseFamily, String releaseWave) {}
+    public record PolicyDetail(String policyId, String version, String name, String description, String severity, String lifecycle, String workflowClass, String defaultSelection, String controlObjectiveId, String objectiveName, String securityIntent, String remediationIntent, String provider, String evaluationMode, JsonNode evaluationDefinition, JsonNode baseEvidenceTiers, JsonNode conditionalCapabilities, JsonNode requiredCapabilities, JsonNode requiredRelationships, JsonNode requiredResourceFamilies, JsonNode nativeKinds, JsonNode requiredFacts, JsonNode frameworkMappings, JsonNode certificationParameterProfile, String packageDigest, String packageSourceRef, String releaseFamily, String releaseWave) {}
 }

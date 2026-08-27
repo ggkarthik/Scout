@@ -15,8 +15,24 @@
     "mode": "ARTIFACT_FACTS",
     "artifactFacts": {
       "predicate": {
-        "fact": "agcf.agcf-azr-016.evidence",
-        "eq": true
+        "any": [
+          {
+            "not": {
+              "fact": "model.version_configured",
+              "in": {
+                "parameter": "approvedModelVersions"
+              }
+            }
+          },
+          {
+            "not": {
+              "fact": "model.version_upgrade_option_configured",
+              "in": {
+                "parameter": "approvedUpgradeOptions"
+              }
+            }
+          }
+        ]
       }
     }
   },
@@ -28,10 +44,10 @@
   "releaseFamily": "AGCF_PHASE_1",
   "wave": "PHASE_1",
   "workflowClass": "POSTURE_FINDING",
-  "artifactTypes": [
-    "AI_ARTIFACT"
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AZURE_FOUNDRY_DEPLOYMENTS"
   ],
-  "nativeKinds": [],
   "requiredCapabilities": [
     "AI_ACCOUNTS"
   ],
@@ -39,10 +55,18 @@
   "requiredResourceFamilies": [],
   "requiredFacts": [
     {
-      "factKey": "agcf.agcf-azr-016.evidence",
-      "valueType": "BOOLEAN",
+      "factKey": "model.version_configured",
+      "valueType": "STRING",
       "evidenceClasses": [
-        "E1"
+        "CONFIGURATION"
+      ],
+      "maxAgeSeconds": 86400
+    },
+    {
+      "factKey": "model.version_upgrade_option_configured",
+      "valueType": "STRING",
+      "evidenceClasses": [
+        "CONFIGURATION"
       ],
       "maxAgeSeconds": 86400
     }
@@ -79,18 +103,31 @@
   ],
   "parameterDefinitions": [
     {
-      "key": "approvedBaseline",
-      "type": "STRING",
-      "defaultValue": "DEFAULT"
+      "key": "approvedModelVersions",
+      "type": "STRING_LIST",
+      "defaultValue": []
+    },
+    {
+      "key": "approvedUpgradeOptions",
+      "type": "STRING_LIST",
+      "defaultValue": [
+        "OnceNewDefaultVersionAvailable"
+      ]
     }
   ],
   "certificationParameterProfile": {
     "immutable": true,
     "pass": {
-      "approvedBaseline": "DEFAULT"
+      "approvedModelVersions": [],
+      "approvedUpgradeOptions": [
+        "OnceNewDefaultVersionAvailable"
+      ]
     },
     "fail": {
-      "approvedBaseline": "STRICT"
+      "approvedModelVersions": [
+        "CERTIFICATION_APPROVED_VALUE"
+      ],
+      "approvedUpgradeOptions": []
     },
     "invalid": {}
   },

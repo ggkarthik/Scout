@@ -15,8 +15,12 @@
     "mode": "ARTIFACT_FACTS",
     "artifactFacts": {
       "predicate": {
-        "fact": "agcf.agcf-aws-007.evidence",
-        "eq": true
+        "not": {
+          "fact": "model.foundation_identifier_configured",
+          "in": {
+            "parameter": "approvedFoundationModels"
+          }
+        }
       }
     }
   },
@@ -28,10 +32,10 @@
   "releaseFamily": "AGCF_PHASE_1",
   "wave": "PHASE_1",
   "workflowClass": "POSTURE_FINDING",
-  "artifactTypes": [
-    "AI_ARTIFACT"
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AWS_BEDROCK_AGENT"
   ],
-  "nativeKinds": [],
   "requiredCapabilities": [
     "BEDROCK_MODELS_JOBS"
   ],
@@ -39,10 +43,10 @@
   "requiredResourceFamilies": [],
   "requiredFacts": [
     {
-      "factKey": "agcf.agcf-aws-007.evidence",
-      "valueType": "BOOLEAN",
+      "factKey": "model.foundation_identifier_configured",
+      "valueType": "STRING",
       "evidenceClasses": [
-        "E1"
+        "CONFIGURATION"
       ],
       "maxAgeSeconds": 86400
     }
@@ -79,18 +83,22 @@
   ],
   "parameterDefinitions": [
     {
-      "key": "approvedBaseline",
-      "type": "STRING",
-      "defaultValue": "DEFAULT"
+      "key": "approvedFoundationModels",
+      "type": "STRING_LIST",
+      "defaultValue": [
+        "amazon.nova-pro-v1:0"
+      ]
     }
   ],
   "certificationParameterProfile": {
     "immutable": true,
     "pass": {
-      "approvedBaseline": "DEFAULT"
+      "approvedFoundationModels": [
+        "amazon.nova-pro-v1:0"
+      ]
     },
     "fail": {
-      "approvedBaseline": "STRICT"
+      "approvedFoundationModels": []
     },
     "invalid": {}
   },

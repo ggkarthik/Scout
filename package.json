@@ -4,7 +4,7 @@
     "resend": "^6.12.2"
   },
   "scripts": {
-    "build:ai-grid-phase1": "node scripts/compile-ai-grid-phase1.mjs --write --write-seed && node scripts/validate-ai-grid-phase1-permissions.mjs --write",
+    "build:ai-grid-phase1": "node scripts/compile-ai-grid-phase1.mjs --write && node scripts/validate-ai-grid-phase1-permissions.mjs --write",
     "validate:ai-grid-phase1": "node scripts/compile-ai-grid-phase1.mjs && node scripts/validate-ai-grid-phase1-permissions.mjs"
   }
 }

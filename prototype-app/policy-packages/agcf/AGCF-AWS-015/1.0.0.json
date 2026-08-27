@@ -15,8 +15,8 @@
     "mode": "ARTIFACT_FACTS",
     "artifactFacts": {
       "predicate": {
-        "fact": "agcf.agcf-aws-015.evidence",
-        "eq": true
+        "fact": "guardrail.denied_topic_count_configured",
+        "count_eq": 0
       }
     }
   },
@@ -28,10 +28,10 @@
   "releaseFamily": "AGCF_PHASE_1",
   "wave": "PHASE_1",
   "workflowClass": "POSTURE_FINDING",
-  "artifactTypes": [
-    "AI_ARTIFACT"
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AWS_BEDROCK_GUARDRAIL"
   ],
-  "nativeKinds": [],
   "requiredCapabilities": [
     "BEDROCK_AGENTS"
   ],
@@ -39,10 +39,10 @@
   "requiredResourceFamilies": [],
   "requiredFacts": [
     {
-      "factKey": "agcf.agcf-aws-015.evidence",
-      "valueType": "BOOLEAN",
+      "factKey": "guardrail.denied_topic_count_configured",
+      "valueType": "NUMBER",
       "evidenceClasses": [
-        "E1"
+        "CONFIGURATION"
       ],
       "maxAgeSeconds": 86400
     }

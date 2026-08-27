@@ -1,10 +1,10 @@
 package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.migration.PackagedMigrationCatalog;
+import com.prototype.vulnwatch.migration.TenantSchemaFingerprint;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import com.zaxxer.hikari.HikariDataSource;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -12,12 +12,10 @@ import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.regex.Pattern;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationVersion;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -29,27 +27,27 @@ public class TenantSchemaMigrationService {
 
     private static final String LOCK_NAME = "scout-tenant-schema-migrator";
     private static final Duration LOCK_TIMEOUT = Duration.ofSeconds(30);
-    private static final Pattern UUID_VALUE = Pattern.compile(
-            "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}");
-
     private final HikariDataSource dataSource;
     private final JdbcTemplate jdbc;
     private final TenantRepository tenantRepository;
     private final TenantSchemaService schemaService;
     private final TenantSchemaStatusService statusService;
+    private final int tenantTarget;
 
     public TenantSchemaMigrationService(
             @Qualifier("hikariDataSource") HikariDataSource dataSource,
             @Qualifier("platformJdbcTemplate") JdbcTemplate jdbc,
             TenantRepository tenantRepository,
             TenantSchemaService schemaService,
-            TenantSchemaStatusService statusService
+            TenantSchemaStatusService statusService,
+            PackagedMigrationCatalog migrationCatalog
     ) {
         this.dataSource = dataSource;
         this.jdbc = jdbc;
         this.tenantRepository = tenantRepository;
         this.schemaService = schemaService;
         this.statusService = statusService;
+        this.tenantTarget = migrationCatalog.tenantTarget();
     }
 
     public MigrationReport migrateAll(boolean reportOnly) {
@@ -194,6 +192,10 @@ public class TenantSchemaMigrationService {
                     .load();
             flyway.migrate();
             int version = Integer.parseInt(flyway.info().current().getVersion().getVersion());
+            if (version != tenantTarget) {
+                throw new IllegalStateException("Tenant migration finished at V" + version
+                        + " but packaged target is V" + tenantTarget);
+            }
             String checksum = structuralFingerprint(schema);
             statusService.markCurrent(tenant.getId(), schema, version, checksum, runId);
             return new SchemaResult(tenant.getId(), schema, "CURRENT", version, checksum, null);
@@ -204,53 +206,8 @@ public class TenantSchemaMigrationService {
     }
 
     public String structuralFingerprint(String schemaName) {
-        List<String> objects = jdbc.queryForList("""
-                with objects as (
-                    select concat_ws('|', 'column', c.table_name, c.ordinal_position::text, c.column_name,
-                           c.data_type, coalesce(c.character_maximum_length::text, ''),
-                           c.is_nullable, coalesce(c.column_default, ''))::text as definition
-                    from information_schema.columns c
-                    where c.table_schema = ? and c.table_name not in ('tenant_schema_history', 'flyway_schema_history')
-                    union all
-                    select concat_ws('|', 'constraint', cl.relname::text, con.contype::text,
-                           pg_get_constraintdef(con.oid))::text
-                    from pg_constraint con
-                    join pg_class cl on cl.oid = con.conrelid
-                    join pg_namespace n on n.oid = cl.relnamespace
-                    where n.nspname = ?
-                    union all
-                    select concat_ws('|', 'index', tab.relname::text, pg_get_indexdef(idx.oid))::text
-                    from pg_index i
-                    join pg_class idx on idx.oid = i.indexrelid
-                    join pg_class tab on tab.oid = i.indrelid
-                    join pg_namespace n on n.oid = tab.relnamespace
-                    where n.nspname = ?
-                    union all
-                    select concat_ws('|', 'sequence', sequence_name, data_type, increment,
-                           minimum_value, maximum_value, cycle_option)::text
-                    from information_schema.sequences where sequence_schema = ?
-                    union all
-                    select concat_ws('|', 'rls', c.relname::text, c.relrowsecurity::text,
-                           c.relforcerowsecurity::text, coalesce(p.polname::text, ''),
-                           coalesce(pg_get_expr(p.polqual, p.polrelid), ''),
-                           coalesce(pg_get_expr(p.polwithcheck, p.polrelid), ''))::text
-                    from pg_class c
-                    join pg_namespace n on n.oid = c.relnamespace
-                    left join pg_policy p on p.polrelid = c.oid
-                    where n.nspname = ? and c.relkind in ('r', 'p')
-                      and c.relname not in ('tenant_schema_history', 'flyway_schema_history')
-                )
-                select definition from objects order by definition
-                """, String.class, schemaName, schemaName, schemaName, schemaName, schemaName);
-        String normalized = String.join("\n", objects)
-                .replace(schemaName, "<tenant_schema>");
-        normalized = UUID_VALUE.matcher(normalized).replaceAll("<tenant_id>");
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                    .digest(normalized.getBytes(StandardCharsets.UTF_8)));
-        } catch (Exception ex) {
-            throw new IllegalStateException("Unable to compute tenant schema checksum", ex);
-        }
+        return jdbc.execute((org.springframework.jdbc.core.ConnectionCallback<String>)
+                connection -> TenantSchemaFingerprint.of(connection, schemaName));
     }
 
     private void acquireLock(Connection connection) throws SQLException {

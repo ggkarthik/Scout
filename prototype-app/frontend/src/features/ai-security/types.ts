@@ -111,6 +111,45 @@ export type AiGridPolicyDistribution = {
   name: string;
   severity: string;
   lifecycle: string;
+  controlObjectiveId?: string;
+  provider?: 'AWS' | 'AZURE' | 'MULTI_CLOUD' | string;
+  evaluationMode?: string;
+  baseEvidenceTiersJson?: string;
+  conditionalCapabilitiesJson?: string;
+  frameworkMappingsJson?: string;
+  releaseFamily?: string | null;
+  releaseWave?: string | null;
+};
+
+export type AiGridPlatformPolicyDetail = {
+  policyId: string;
+  version: string;
+  name: string;
+  description: string;
+  severity: string;
+  lifecycle: string;
+  workflowClass: string;
+  defaultSelection: AiGridPolicySelection;
+  controlObjectiveId: string;
+  objectiveName: string | null;
+  securityIntent: string | null;
+  remediationIntent: string | null;
+  provider: string;
+  evaluationMode: string;
+  evaluationDefinition: unknown;
+  baseEvidenceTiers: unknown;
+  conditionalCapabilities: unknown;
+  requiredCapabilities: unknown;
+  requiredRelationships: unknown;
+  requiredResourceFamilies: unknown;
+  nativeKinds: unknown;
+  requiredFacts: unknown;
+  frameworkMappings: unknown;
+  certificationParameterProfile: unknown;
+  packageDigest: string;
+  packageSourceRef: string;
+  releaseFamily: string;
+  releaseWave: string;
 };
 
 export type AiGridPolicyImpactPreview = {

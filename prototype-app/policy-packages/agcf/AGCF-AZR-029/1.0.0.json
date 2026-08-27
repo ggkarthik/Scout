@@ -15,8 +15,12 @@
     "mode": "ARTIFACT_FACTS",
     "artifactFacts": {
       "predicate": {
-        "fact": "agcf.agcf-azr-029.evidence",
-        "eq": true
+        "not": {
+          "fact": "bot.channel_type_configured",
+          "in": {
+            "parameter": "approvedBotChannels"
+          }
+        }
       }
     }
   },
@@ -28,10 +32,10 @@
   "releaseFamily": "AGCF_PHASE_1",
   "wave": "PHASE_1",
   "workflowClass": "POSTURE_FINDING",
-  "artifactTypes": [
-    "AI_ARTIFACT"
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AZURE_BOT_CHANNELS"
   ],
-  "nativeKinds": [],
   "requiredCapabilities": [
     "BOT_CONFIGURATION"
   ],
@@ -39,10 +43,10 @@
   "requiredResourceFamilies": [],
   "requiredFacts": [
     {
-      "factKey": "agcf.agcf-azr-029.evidence",
-      "valueType": "BOOLEAN",
+      "factKey": "bot.channel_type_configured",
+      "valueType": "STRING",
       "evidenceClasses": [
-        "E1"
+        "CONFIGURATION"
       ],
       "maxAgeSeconds": 86400
     }
@@ -72,18 +76,22 @@
   ],
   "parameterDefinitions": [
     {
-      "key": "approvedBaseline",
-      "type": "STRING",
-      "defaultValue": "DEFAULT"
+      "key": "approvedBotChannels",
+      "type": "STRING_LIST",
+      "defaultValue": [
+        "DirectLineChannel"
+      ]
     }
   ],
   "certificationParameterProfile": {
     "immutable": true,
     "pass": {
-      "approvedBaseline": "DEFAULT"
+      "approvedBotChannels": [
+        "DirectLineChannel"
+      ]
     },
     "fail": {
-      "approvedBaseline": "STRICT"
+      "approvedBotChannels": []
     },
     "invalid": {}
   },

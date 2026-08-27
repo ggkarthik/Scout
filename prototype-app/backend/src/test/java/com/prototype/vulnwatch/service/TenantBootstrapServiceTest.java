@@ -66,4 +66,36 @@ class TenantBootstrapServiceTest {
         verify(tenantRepository, times(2)).save(any(Tenant.class));
         verify(tenantSchemaService, times(0)).assertSchemaReady("tenant_gm_test_platform");
     }
+
+    @Test
+    void readinessFailureDoesNotEscapeStartupOrPreventLaterTenants() {
+        Tenant defaultTenant = tenant("Default Workspace", "default-workspace", "tenant_default", "ACTIVE");
+        Tenant broken = tenant("Broken", "broken", "tenant_broken", "ACTIVE");
+        Tenant healthy = tenant("Healthy", "healthy", "tenant_healthy", "ACTIVE");
+        when(tenantSchemaService.defaultSchemaName()).thenReturn("tenant_default");
+        when(tenantSchemaService.normalizeSchemaName(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(tenantRepository.findByNameIgnoreCase(TenantService.DEFAULT_TENANT_NAME))
+                .thenReturn(Optional.of(defaultTenant));
+        when(tenantRepository.findAll()).thenReturn(List.of(defaultTenant, broken, healthy));
+        org.mockito.Mockito.doAnswer(invocation -> {
+            if ("tenant_broken".equals(invocation.getArgument(0))) {
+                throw new IllegalStateException("drifted");
+            }
+            return null;
+        }).when(tenantSchemaService).assertSchemaReady(anyString());
+
+        service.ensureBootstrapTenant();
+
+        verify(tenantSchemaService).assertSchemaReady("tenant_healthy");
+    }
+
+    private Tenant tenant(String name, String slug, String schema, String status) {
+        Tenant tenant = new Tenant();
+        tenant.setId(UUID.randomUUID());
+        tenant.setName(name);
+        tenant.setSlug(slug);
+        tenant.setSchemaName(schema);
+        tenant.setStatus(status);
+        return tenant;
+    }
 }

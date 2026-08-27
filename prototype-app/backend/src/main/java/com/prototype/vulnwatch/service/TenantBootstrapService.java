@@ -6,10 +6,14 @@ import java.time.Instant;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.annotation.Order;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
 public class TenantBootstrapService {
+
+    private static final Logger log = LoggerFactory.getLogger(TenantBootstrapService.class);
 
     private final TenantRepository tenantRepository;
     private final TenantSchemaService tenantSchemaService;
@@ -42,7 +46,10 @@ public class TenantBootstrapService {
                 defaultTenant.setUpdatedAt(Instant.now());
                 changed = true;
             }
-            tenantSchemaService.assertSchemaReady(normalizedDefaultSchema);
+            if (changed) {
+                tenantRepository.save(defaultTenant);
+            }
+            warnIfNotReady(defaultTenant, normalizedDefaultSchema);
 
             for (Tenant tenant : tenantRepository.findAll()) {
                 String normalizedSchema = tenant.getSchemaName() == null || tenant.getSchemaName().isBlank()
@@ -54,13 +61,19 @@ public class TenantBootstrapService {
                     tenantRepository.save(tenant);
                 }
                 if ("ACTIVE".equalsIgnoreCase(tenant.getStatus())) {
-                    tenantSchemaService.assertSchemaReady(tenant.getSchemaName());
+                    warnIfNotReady(tenant, tenant.getSchemaName());
                 }
             }
-
-            if (changed) {
-                tenantRepository.save(defaultTenant);
-            }
         });
+    }
+
+    private void warnIfNotReady(Tenant tenant, String schemaName) {
+        try {
+            tenantSchemaService.assertSchemaReady(schemaName);
+        } catch (RuntimeException ex) {
+            log.warn("Tenant schema is not ready; runtime remains alive and tenant access stays blocked"
+                            + " tenantId={} schema={} reason={}",
+                    tenant.getId(), schemaName, ex.getMessage());
+        }
     }
 }

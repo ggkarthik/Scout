@@ -1,0 +1,15 @@
+[
+  {"name":"valid platform table","valid":true,"sql":"-- migration-guard: platform-only\nCREATE TABLE platform.example (id uuid primary key);"},
+  {"name":"valid platform unique index","valid":true,"sql":"-- migration-guard: platform-only\nCREATE UNIQUE INDEX example_idx ON platform.example(id);"},
+  {"name":"valid platform dml and reference","valid":true,"sql":"-- migration-guard: platform-only\nINSERT INTO platform.example(id) VALUES (gen_random_uuid());\nCREATE TABLE platform.child (parent_id uuid REFERENCES platform.example(id));"},
+  {"name":"comment does not create violation","valid":true,"sql":"-- migration-guard: platform-only\n-- ALTER TABLE tenant_default.example ADD COLUMN bad text;\nCREATE TABLE platform.example (id uuid);"},
+  {"name":"missing header","valid":false,"sql":"CREATE TABLE platform.example (id uuid);"},
+  {"name":"invalid header position","valid":false,"sql":"-- explanation\n-- migration-guard: platform-only\nCREATE TABLE platform.example (id uuid);"},
+  {"name":"tenant default quoted","valid":false,"sql":"-- migration-guard: platform-only\nALTER TABLE \"tenant_default\".example ADD COLUMN bad text;"},
+  {"name":"tenant default spaced","valid":false,"sql":"-- migration-guard: platform-only\nUPDATE tenant_default . example SET id = id;"},
+  {"name":"unqualified table ddl","valid":false,"sql":"-- migration-guard: platform-only\nCREATE TABLE example (id uuid);"},
+  {"name":"unqualified unique index target","valid":false,"sql":"-- migration-guard: platform-only\nCREATE UNIQUE INDEX example_idx ON example(id);"},
+  {"name":"unqualified dml","valid":false,"sql":"-- migration-guard: platform-only\nDELETE FROM example;"},
+  {"name":"unqualified reference","valid":false,"sql":"-- migration-guard: platform-only\nCREATE TABLE platform.child (parent_id uuid REFERENCES example(id));"},
+  {"name":"dynamic sql","valid":false,"sql":"-- migration-guard: platform-only\nDO $$ BEGIN EXECUTE format('ALTER TABLE %I.example ADD COLUMN bad text', 'tenant_default'); END $$;"}
+]

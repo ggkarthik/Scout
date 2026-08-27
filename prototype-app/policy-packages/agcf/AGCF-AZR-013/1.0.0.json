@@ -15,8 +15,24 @@
     "mode": "ARTIFACT_FACTS",
     "artifactFacts": {
       "predicate": {
-        "fact": "agcf.agcf-azr-013.evidence",
-        "eq": true
+        "any": [
+          {
+            "not": {
+              "fact": "guardrail.rai_mode_configured",
+              "in": {
+                "parameter": "approvedRaiModes"
+              }
+            }
+          },
+          {
+            "not": {
+              "fact": "guardrail.rai_base_policy_configured",
+              "in": {
+                "parameter": "approvedRaiBasePolicies"
+              }
+            }
+          }
+        ]
       }
     }
   },
@@ -28,10 +44,10 @@
   "releaseFamily": "AGCF_PHASE_1",
   "wave": "PHASE_1",
   "workflowClass": "POSTURE_FINDING",
-  "artifactTypes": [
-    "AI_ARTIFACT"
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AZURE_RAI_POLICIES"
   ],
-  "nativeKinds": [],
   "requiredCapabilities": [
     "FOUNDRY_DEPLOYMENTS_RAI"
   ],
@@ -39,10 +55,18 @@
   "requiredResourceFamilies": [],
   "requiredFacts": [
     {
-      "factKey": "agcf.agcf-azr-013.evidence",
-      "valueType": "BOOLEAN",
+      "factKey": "guardrail.rai_mode_configured",
+      "valueType": "STRING",
       "evidenceClasses": [
-        "E1"
+        "CONFIGURATION"
+      ],
+      "maxAgeSeconds": 86400
+    },
+    {
+      "factKey": "guardrail.rai_base_policy_configured",
+      "valueType": "STRING",
+      "evidenceClasses": [
+        "CONFIGURATION"
       ],
       "maxAgeSeconds": 86400
     }
@@ -72,18 +96,33 @@
   ],
   "parameterDefinitions": [
     {
-      "key": "approvedBaseline",
-      "type": "STRING",
-      "defaultValue": "DEFAULT"
+      "key": "approvedRaiModes",
+      "type": "STRING_LIST",
+      "defaultValue": [
+        "Default"
+      ]
+    },
+    {
+      "key": "approvedRaiBasePolicies",
+      "type": "STRING_LIST",
+      "defaultValue": [
+        "Microsoft.Default"
+      ]
     }
   ],
   "certificationParameterProfile": {
     "immutable": true,
     "pass": {
-      "approvedBaseline": "DEFAULT"
+      "approvedRaiModes": [
+        "Default"
+      ],
+      "approvedRaiBasePolicies": [
+        "Microsoft.Default"
+      ]
     },
     "fail": {
-      "approvedBaseline": "STRICT"
+      "approvedRaiModes": [],
+      "approvedRaiBasePolicies": []
     },
     "invalid": {}
   },

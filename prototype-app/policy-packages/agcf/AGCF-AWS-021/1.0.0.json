@@ -15,8 +15,12 @@
     "mode": "ARTIFACT_FACTS",
     "artifactFacts": {
       "predicate": {
-        "fact": "agcf.agcf-aws-021.evidence",
-        "eq": true
+        "not": {
+          "fact": "data.source_type",
+          "in": {
+            "parameter": "approvedSourceTypes"
+          }
+        }
       }
     }
   },
@@ -28,10 +32,10 @@
   "releaseFamily": "AGCF_PHASE_1",
   "wave": "PHASE_1",
   "workflowClass": "POSTURE_FINDING",
-  "artifactTypes": [
-    "AI_ARTIFACT"
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AWS_BEDROCK_DATA_SOURCE"
   ],
-  "nativeKinds": [],
   "requiredCapabilities": [
     "BEDROCK_AGENTS"
   ],
@@ -39,10 +43,10 @@
   "requiredResourceFamilies": [],
   "requiredFacts": [
     {
-      "factKey": "agcf.agcf-aws-021.evidence",
-      "valueType": "BOOLEAN",
+      "factKey": "data.source_type",
+      "valueType": "STRING",
       "evidenceClasses": [
-        "E1"
+        "CONFIGURATION"
       ],
       "maxAgeSeconds": 86400
     }
@@ -79,18 +83,22 @@
   ],
   "parameterDefinitions": [
     {
-      "key": "approvedBaseline",
-      "type": "STRING",
-      "defaultValue": "DEFAULT"
+      "key": "approvedSourceTypes",
+      "type": "STRING_LIST",
+      "defaultValue": [
+        "S3"
+      ]
     }
   ],
   "certificationParameterProfile": {
     "immutable": true,
     "pass": {
-      "approvedBaseline": "DEFAULT"
+      "approvedSourceTypes": [
+        "S3"
+      ]
     },
     "fail": {
-      "approvedBaseline": "STRICT"
+      "approvedSourceTypes": []
     },
     "invalid": {}
   },

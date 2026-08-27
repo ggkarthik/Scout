@@ -35,19 +35,47 @@ public class AzureAiGridFactProducer implements AiGridFactProducer {
         }
         AiGridFactProducerSupport.copy(input, "raiFilterCount", "guardrail.rai_filter_count_configured", facts);
         AiGridFactProducerSupport.copy(input, "raiCustomBlocklistCount", "guardrail.rai_custom_blocklist_count_configured", facts);
+        AiGridFactProducerSupport.copy(input, "raiPolicyMode", "guardrail.rai_mode_configured", facts);
+        AiGridFactProducerSupport.copy(input, "raiBasePolicyName", "guardrail.rai_base_policy_configured", facts);
+        AiGridFactProducerSupport.copy(input, "modelName", "model.name_configured", facts);
+        AiGridFactProducerSupport.copy(input, "modelPublisher", "model.publisher_configured", facts);
+        AiGridFactProducerSupport.copy(input, "modelVersion", "model.version_configured", facts);
+        AiGridFactProducerSupport.copy(input, "versionUpgradeOption", "model.version_upgrade_option_configured", facts);
+        AiGridFactProducerSupport.copy(input, "endpointHost", "mcp.server_hostname_configured", facts);
+        AiGridFactProducerSupport.copy(input, "toolType", "agent.tool_type_configured", facts);
+        AiGridFactProducerSupport.copy(input, "traffic", "ml.endpoint_traffic_configured", facts);
+        AiGridFactProducerSupport.copy(input, "instanceType", "compute.instance_type_configured", facts);
+        AiGridFactProducerSupport.copy(input, "model", "ml.model_reference_configured", facts);
+        AiGridFactProducerSupport.copy(input, "assignmentScope", "identity.assignment_scope_configured", facts);
+        AiGridFactProducerSupport.copy(input, "principalType", "identity.principal_type_configured", facts);
+        AiGridFactProducerSupport.copy(input, "conditionVersion", "identity.assignment_condition_version_configured", facts);
+        if ("AZURE_BOT_CHANNELS".equals(input.resourceFamily())) {
+            AiGridFactProducerSupport.copy(input, "channelName", "bot.channel_type_configured", facts);
+            if (!input.attributes().hasNonNull("channelName")) {
+                AiGridFactProducerSupport.copy(input, "kind", "bot.channel_type_configured", facts);
+            }
+        }
         if (input.attributes().path("tags").isObject()) {
             boolean hasOwner = false;
+            boolean hasEnvironment = false;
+            boolean hasCriticality = false;
             var fields = input.attributes().path("tags").fieldNames();
             while (fields.hasNext()) {
                 String tag = fields.next();
                 if ("owner".equals(tag.toLowerCase(Locale.ROOT))
                         && !input.attributes().path("tags").path(tag).asText("").isBlank()) {
                     hasOwner = true;
-                    break;
                 }
+                if ("environment".equals(tag.toLowerCase(Locale.ROOT))
+                        && !input.attributes().path("tags").path(tag).asText("").isBlank()) hasEnvironment = true;
+                if ("criticality".equals(tag.toLowerCase(Locale.ROOT))
+                        && !input.attributes().path("tags").path(tag).asText("").isBlank()) hasCriticality = true;
             }
             facts.add(AiGridFactProducerSupport.known("owner.owner_tag_present_configured",
                     com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.booleanNode(hasOwner), "tags.owner"));
+            facts.add(AiGridFactProducerSupport.known("resource.required_tags_present_configured",
+                    com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.booleanNode(hasEnvironment && hasCriticality),
+                    "tags.environment+tags.criticality"));
         }
         AiGridFactProducerSupport.copy(input, "raiPolicyName", "guardrail.rai_policy_reference_configured", facts);
         return List.copyOf(facts);

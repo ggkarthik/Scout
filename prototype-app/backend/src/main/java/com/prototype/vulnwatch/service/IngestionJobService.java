@@ -17,6 +17,8 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -25,6 +27,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class IngestionJobService {
+
+    private static final Logger log = LoggerFactory.getLogger(IngestionJobService.class);
 
     public static final String JOB_TYPE_REMOTE_ENDPOINT = "REMOTE_ENDPOINT";
     public static final String JOB_TYPE_GITHUB_REPOSITORY = "GITHUB_REPOSITORY";
@@ -320,24 +324,30 @@ public class IngestionJobService {
             Instant now = Instant.now();
             int recovered = 0;
             for (Tenant tenant : tenantService.listActiveTenants()) {
-                List<IngestionJob> stale = tenantSchemaExecutionService.run(tenant, () -> ingestionJobRepository.findByStatus(STATUS_RUNNING));
-                if (stale.isEmpty()) {
-                    continue;
-                }
-                for (IngestionJob job : stale) {
-                    job.setStatus(STATUS_FAILED);
-                    job.setFailureCode("WORKER_INTERRUPTED");
-                    if (job.getFailureMessage() == null || job.getFailureMessage().isBlank()) {
-                        job.setFailureMessage("Ingestion job interrupted by service restart");
+                try {
+                    List<IngestionJob> stale = tenantSchemaExecutionService.run(
+                            tenant, () -> ingestionJobRepository.findByStatus(STATUS_RUNNING));
+                    if (stale.isEmpty()) {
+                        continue;
                     }
-                    if (job.getCompletedAt() == null) {
-                        job.setCompletedAt(now);
+                    for (IngestionJob job : stale) {
+                        job.setStatus(STATUS_FAILED);
+                        job.setFailureCode("WORKER_INTERRUPTED");
+                        if (job.getFailureMessage() == null || job.getFailureMessage().isBlank()) {
+                            job.setFailureMessage("Ingestion job interrupted by service restart");
+                        }
+                        if (job.getCompletedAt() == null) {
+                            job.setCompletedAt(now);
+                        }
                     }
-                }
-                tenantSchemaExecutionService.run(tenant, () -> ingestionJobRepository.saveAll(stale));
-                recovered += stale.size();
-                for (IngestionJob job : stale) {
-                    recordFailed(job);
+                    tenantSchemaExecutionService.run(tenant, () -> ingestionJobRepository.saveAll(stale));
+                    recovered += stale.size();
+                    for (IngestionJob job : stale) {
+                        recordFailed(job);
+                    }
+                } catch (RuntimeException ex) {
+                    log.warn("Skipped interrupted ingestion recovery for tenant {}: {}",
+                            tenant.getId(), ex.getMessage());
                 }
             }
             return recovered;
