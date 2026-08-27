@@ -15,8 +15,12 @@
     "mode": "ARTIFACT_FACTS",
     "artifactFacts": {
       "predicate": {
-        "fact": "agcf.agcf-aws-028.evidence",
-        "eq": true
+        "not": {
+          "fact": "model.provider_name_observed",
+          "in": {
+            "parameter": "approvedModelProviders"
+          }
+        }
       }
     }
   },
@@ -28,10 +32,10 @@
   "releaseFamily": "AGCF_PHASE_1",
   "wave": "PHASE_1",
   "workflowClass": "POSTURE_FINDING",
-  "artifactTypes": [
-    "AI_ARTIFACT"
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AWS_BEDROCK_MODEL"
   ],
-  "nativeKinds": [],
   "requiredCapabilities": [
     "BEDROCK_MODELS_JOBS"
   ],
@@ -39,10 +43,10 @@
   "requiredResourceFamilies": [],
   "requiredFacts": [
     {
-      "factKey": "agcf.agcf-aws-028.evidence",
-      "valueType": "BOOLEAN",
+      "factKey": "model.provider_name_observed",
+      "valueType": "STRING",
       "evidenceClasses": [
-        "E1"
+        "CONFIGURATION"
       ],
       "maxAgeSeconds": 86400
     }
@@ -72,18 +76,22 @@
   ],
   "parameterDefinitions": [
     {
-      "key": "approvedBaseline",
-      "type": "STRING",
-      "defaultValue": "DEFAULT"
+      "key": "approvedModelProviders",
+      "type": "STRING_LIST",
+      "defaultValue": [
+        "Amazon"
+      ]
     }
   ],
   "certificationParameterProfile": {
     "immutable": true,
     "pass": {
-      "approvedBaseline": "DEFAULT"
+      "approvedModelProviders": [
+        "Amazon"
+      ]
     },
     "fail": {
-      "approvedBaseline": "STRICT"
+      "approvedModelProviders": []
     },
     "invalid": {}
   },

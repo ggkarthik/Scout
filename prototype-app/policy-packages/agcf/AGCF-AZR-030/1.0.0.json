@@ -10,22 +10,18 @@
   "releaseStatus": "PAUSED",
   "controlObjectiveId": "AGCF-OBJ-AZR-030",
   "provider": "AZURE",
-  "evaluationMode": "DIRECT_RELATIONSHIP",
+  "evaluationMode": "ARTIFACT_FACTS",
   "evaluationDefinition": {
-    "mode": "DIRECT_RELATIONSHIP",
-    "directRelationship": {
-      "sourcePredicate": {
-        "fact": "agcf.agcf-azr-030.evidence",
-        "eq": true
-      },
-      "edgeConstraints": [
-        "DIRECT_PROVIDER_RELATIONSHIP"
-      ],
-      "targetPredicate": {
-        "fact": "agcf.agcf-azr-030.evidence",
-        "eq": true
-      },
-      "targetCardinality": "ONE_OR_MORE"
+    "mode": "ARTIFACT_FACTS",
+    "artifactFacts": {
+      "predicate": {
+        "not": {
+          "fact": "identity.assignment_scope_configured",
+          "in": {
+            "parameter": "approvedAiResourceScopes"
+          }
+        }
+      }
     }
   },
   "baseEvidenceTiers": [
@@ -37,24 +33,21 @@
   "releaseFamily": "AGCF_PHASE_1",
   "wave": "PHASE_1",
   "workflowClass": "POSTURE_FINDING",
-  "artifactTypes": [
-    "AI_ARTIFACT"
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AZURE_RBAC_GLOBAL"
   ],
-  "nativeKinds": [],
   "requiredCapabilities": [
     "RBAC_ASSIGNMENTS"
   ],
-  "requiredRelationships": [
-    "DIRECT_PROVIDER_RELATIONSHIP"
-  ],
+  "requiredRelationships": [],
   "requiredResourceFamilies": [],
   "requiredFacts": [
     {
-      "factKey": "agcf.agcf-azr-030.evidence",
-      "valueType": "BOOLEAN",
+      "factKey": "identity.assignment_scope_configured",
+      "valueType": "STRING",
       "evidenceClasses": [
-        "E1",
-        "E2"
+        "CONFIGURATION"
       ],
       "maxAgeSeconds": 86400
     }
@@ -89,5 +82,24 @@
       "rationale": "This control is independently mapped to the policy's stated security intent."
     }
   ],
+  "parameterDefinitions": [
+    {
+      "key": "approvedAiResourceScopes",
+      "type": "STRING_LIST",
+      "defaultValue": []
+    }
+  ],
+  "certificationParameterProfile": {
+    "immutable": true,
+    "pass": {
+      "approvedAiResourceScopes": []
+    },
+    "fail": {
+      "approvedAiResourceScopes": [
+        "CERTIFICATION_APPROVED_VALUE"
+      ]
+    },
+    "invalid": {}
+  },
   "packageSourceRef": "policy-packages/agcf/AGCF-AZR-030/1.0.0.json"
 }

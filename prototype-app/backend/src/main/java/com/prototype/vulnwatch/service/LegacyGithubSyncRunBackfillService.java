@@ -20,6 +20,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.data.domain.Sort;
@@ -27,6 +29,8 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class LegacyGithubSyncRunBackfillService {
+
+    private static final Logger log = LoggerFactory.getLogger(LegacyGithubSyncRunBackfillService.class);
 
     private static final String SYNC_TYPE_GITHUB_REPOSITORY_SBOM = "GITHUB_REPOSITORY_SBOM";
     private static final String SYNC_TYPE_GITHUB_GHCR_SBOM = "GITHUB_GHCR_SBOM";
@@ -69,21 +73,26 @@ public class LegacyGithubSyncRunBackfillService {
             List<SyncRun> backfilledRuns = new ArrayList<>();
             List<SyncRun> persistedRuns = new ArrayList<>(syncRunRepository.findAll(Sort.by(Sort.Direction.DESC, "startedAt")));
             for (Tenant tenant : tenantService.listActiveTenants()) {
-                List<SbomUpload> uploads = tenantSchemaExecutionService.run(
-                        tenant,
-                        () -> sbomUploadRepository.findByIngestionSourceSystemIgnoreCaseOrderByUploadedAtDesc("github")
-                );
-                if (uploads.isEmpty()) {
-                    continue;
-                }
-                List<LegacyGithubRunGroup> groups = groupLegacyGithubUploads(uploads);
-                for (LegacyGithubRunGroup group : groups) {
-                    if (hasPersistedSyncRunOverlap(group, persistedRuns)) {
+                try {
+                    List<SbomUpload> uploads = tenantSchemaExecutionService.run(
+                            tenant,
+                            () -> sbomUploadRepository.findByIngestionSourceSystemIgnoreCaseOrderByUploadedAtDesc("github")
+                    );
+                    if (uploads.isEmpty()) {
                         continue;
                     }
-                    SyncRun run = toSyncRun(tenant, group);
-                    backfilledRuns.add(run);
-                    persistedRuns.add(run);
+                    List<LegacyGithubRunGroup> groups = groupLegacyGithubUploads(uploads);
+                    for (LegacyGithubRunGroup group : groups) {
+                        if (hasPersistedSyncRunOverlap(group, persistedRuns)) {
+                            continue;
+                        }
+                        SyncRun run = toSyncRun(tenant, group);
+                        backfilledRuns.add(run);
+                        persistedRuns.add(run);
+                    }
+                } catch (RuntimeException ex) {
+                    log.warn("Skipped legacy GitHub sync-run backfill for tenant {}: {}",
+                            tenant.getId(), ex.getMessage());
                 }
             }
             if (backfilledRuns.isEmpty()) {

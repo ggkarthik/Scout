@@ -630,7 +630,7 @@ public class AwsBedrockDiscoveryService {
                     }
                     artifacts.add(new ArtifactObservation(
                             lambdaArn, "SUPPORTING_RESOURCE", "AWS_LAMBDA_FUNCTION", functionName(lambdaArn),
-                            Map.of("functionUrlAuthType", authType)));
+                            Map.of("functionUrlAuthType", authType, "lambdaArn", lambdaArn)));
                     relationships.add(new RelationshipObservation(
                             agent.arn(), lambdaArn, "INVOKES_LAMBDA", Map.of()));
                 }
@@ -1039,13 +1039,11 @@ public class AwsBedrockDiscoveryService {
         if (detail.updatedAt() != null) {
             attributes.put("updatedAt", detail.updatedAt().toString());
         }
-        if (hasText(detail.kmsKeyArn())) {
-            attributes.put("kmsKeyArn", detail.kmsKeyArn());
-        }
+        attributes.put("kmsKeyArn", safeValue(detail.kmsKeyArn()));
         List<GuardrailContentFilter> contentFilters = detail.contentPolicy() == null
                 ? List.of() : detail.contentPolicy().filters();
+        attributes.put("contentFilterCount", contentFilters == null ? 0 : contentFilters.size());
         if (contentFilters != null && !contentFilters.isEmpty()) {
-            attributes.put("contentFilterCount", contentFilters.size());
             attributes.put("contentFilters", contentFilters.stream()
                     .map(f -> entryMap(
                             "type", f.typeAsString(),
@@ -1058,8 +1056,8 @@ public class AwsBedrockDiscoveryService {
 
         List<GuardrailTopic> deniedTopics = detail.topicPolicy() == null
                 ? List.of() : detail.topicPolicy().topics();
+        attributes.put("deniedTopicCount", deniedTopics == null ? 0 : deniedTopics.size());
         if (deniedTopics != null && !deniedTopics.isEmpty()) {
-            attributes.put("deniedTopicCount", deniedTopics.size());
             attributes.put("deniedTopics", deniedTopics.stream()
                     .map(t -> entryMap(
                             "name", t.name(),
@@ -1079,10 +1077,12 @@ public class AwsBedrockDiscoveryService {
             }
         }
 
+        attributes.put("piiEntityCount", detail.sensitiveInformationPolicy() == null
+                || detail.sensitiveInformationPolicy().piiEntities() == null
+                ? 0 : detail.sensitiveInformationPolicy().piiEntities().size());
         if (detail.sensitiveInformationPolicy() != null) {
             List<GuardrailPiiEntity> piiEntities = detail.sensitiveInformationPolicy().piiEntities();
             if (piiEntities != null && !piiEntities.isEmpty()) {
-                attributes.put("piiEntityCount", piiEntities.size());
                 attributes.put("piiEntities", piiEntities.stream()
                         .map(e -> entryMap(
                                 "type", e.typeAsString(),
@@ -1096,10 +1096,12 @@ public class AwsBedrockDiscoveryService {
             }
         }
 
+        attributes.put("contextualGroundingFilterCount", detail.contextualGroundingPolicy() == null
+                || detail.contextualGroundingPolicy().filters() == null
+                ? 0 : detail.contextualGroundingPolicy().filters().size());
         if (detail.contextualGroundingPolicy() != null) {
             List<GuardrailContextualGroundingFilter> groundingFilters = detail.contextualGroundingPolicy().filters();
             if (groundingFilters != null && !groundingFilters.isEmpty()) {
-                attributes.put("contextualGroundingFilterCount", groundingFilters.size());
                 attributes.put("contextualGroundingFilters", groundingFilters.stream()
                         .map(f -> entryMap(
                                 "type", f.typeAsString(),

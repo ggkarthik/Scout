@@ -15,8 +15,12 @@
     "mode": "ARTIFACT_FACTS",
     "artifactFacts": {
       "predicate": {
-        "fact": "agcf.agcf-azr-021.evidence",
-        "eq": true
+        "not": {
+          "fact": "agent.tool_type_configured",
+          "in": {
+            "parameter": "approvedToolTypes"
+          }
+        }
       }
     }
   },
@@ -31,10 +35,10 @@
   "releaseFamily": "AGCF_PHASE_1",
   "wave": "PHASE_1",
   "workflowClass": "POSTURE_FINDING",
-  "artifactTypes": [
-    "AI_ARTIFACT"
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AZURE_FOUNDRY_AGENT_TOOLS"
   ],
-  "nativeKinds": [],
   "requiredCapabilities": [
     "FOUNDRY_AGENTS_TOOLS"
   ],
@@ -42,10 +46,10 @@
   "requiredResourceFamilies": [],
   "requiredFacts": [
     {
-      "factKey": "agcf.agcf-azr-021.evidence",
-      "valueType": "BOOLEAN",
+      "factKey": "agent.tool_type_configured",
+      "valueType": "STRING",
       "evidenceClasses": [
-        "E1"
+        "CONFIGURATION"
       ],
       "maxAgeSeconds": 86400
     }
@@ -75,18 +79,22 @@
   ],
   "parameterDefinitions": [
     {
-      "key": "approvedBaseline",
-      "type": "STRING",
-      "defaultValue": "DEFAULT"
+      "key": "approvedToolTypes",
+      "type": "STRING_LIST",
+      "defaultValue": [
+        "function"
+      ]
     }
   ],
   "certificationParameterProfile": {
     "immutable": true,
     "pass": {
-      "approvedBaseline": "DEFAULT"
+      "approvedToolTypes": [
+        "function"
+      ]
     },
     "fail": {
-      "approvedBaseline": "STRICT"
+      "approvedToolTypes": []
     },
     "invalid": {}
   },

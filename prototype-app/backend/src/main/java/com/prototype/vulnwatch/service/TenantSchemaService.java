@@ -73,13 +73,27 @@ public class TenantSchemaService {
         if (!enforceSchemaVersion) {
             return;
         }
-        Integer currentVersion = platformJdbcTemplate.queryForObject("""
-                select current_version
+        List<SchemaProjection> projections = platformJdbcTemplate.query("""
+                select current_version, status
                 from platform.tenant_schema_versions
-                where schema_name = ? and status = 'CURRENT'
-                """, Integer.class, normalized);
-        if (currentVersion == null || currentVersion < minimumCompatibleSchemaVersion) {
-            throw new IllegalStateException("Tenant schema is not at the minimum compatible version: " + normalized);
+                where schema_name = ?
+                """, (rs, rowNum) -> new SchemaProjection(rs.getInt("current_version"), rs.getString("status")),
+                normalized);
+        if (projections.isEmpty()) {
+            throw new IllegalStateException("Tenant schema has no readiness projection: " + normalized);
+        }
+        if (projections.size() > 1) {
+            throw new IllegalStateException("Tenant schema has duplicate readiness projections: " + normalized);
+        }
+        SchemaProjection projection = projections.get(0);
+        if (!"CURRENT".equals(projection.status())) {
+            throw new IllegalStateException("Tenant schema is not CURRENT: " + normalized
+                    + " (status=" + projection.status() + ")");
+        }
+        if (projection.currentVersion() < minimumCompatibleSchemaVersion) {
+            throw new IllegalStateException("Tenant schema is below compatible version V"
+                    + minimumCompatibleSchemaVersion + ": " + normalized
+                    + " (current=V" + projection.currentVersion() + ")");
         }
     }
 
@@ -557,5 +571,8 @@ public class TenantSchemaService {
             String defaultExpression,
             boolean nullable
     ) {
+    }
+
+    private record SchemaProjection(int currentVersion, String status) {
     }
 }

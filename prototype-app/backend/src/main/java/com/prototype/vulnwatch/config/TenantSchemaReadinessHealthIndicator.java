@@ -1,7 +1,7 @@
 package com.prototype.vulnwatch.config;
 
 import com.prototype.vulnwatch.service.TenantSchemaStatusService;
-import org.springframework.beans.factory.annotation.Value;
+import com.prototype.vulnwatch.migration.PackagedMigrationCatalog;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -12,24 +12,24 @@ import org.springframework.stereotype.Component;
 public class TenantSchemaReadinessHealthIndicator implements HealthIndicator {
 
     private final TenantSchemaStatusService service;
-    private final int minimumVersion;
+    private final int packagedTenantTarget;
 
     public TenantSchemaReadinessHealthIndicator(
             TenantSchemaStatusService service,
-            @Value("${app.tenancy.minimum-compatible-schema-version:53}") int minimumVersion
+            PackagedMigrationCatalog migrationCatalog
     ) {
         this.service = service;
-        this.minimumVersion = minimumVersion;
+        this.packagedTenantTarget = migrationCatalog.tenantTarget();
     }
 
     @Override
     public Health health() {
         try {
-            long failures = service.readinessFailures(minimumVersion);
+            long failures = service.readinessFailures(packagedTenantTarget);
             return failures == 0
-                    ? Health.up().withDetail("minimumCompatibleVersion", minimumVersion).build()
+                    ? Health.up().withDetail("packagedTenantTarget", packagedTenantTarget).build()
                     : Health.down().withDetail("unreadyTenantCount", failures)
-                            .withDetail("minimumCompatibleVersion", minimumVersion).build();
+                            .withDetail("packagedTenantTarget", packagedTenantTarget).build();
         } catch (RuntimeException ex) {
             return Health.down().withDetail("reason", "tenant schema control plane unavailable").build();
         }

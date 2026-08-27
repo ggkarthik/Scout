@@ -15,8 +15,8 @@
     "mode": "ARTIFACT_FACTS",
     "artifactFacts": {
       "predicate": {
-        "fact": "agcf.agcf-aws-026.evidence",
-        "eq": true
+        "fact": "data.customer_managed_key_configured",
+        "eq": false
       }
     }
   },
@@ -28,10 +28,10 @@
   "releaseFamily": "AGCF_PHASE_1",
   "wave": "PHASE_1",
   "workflowClass": "POSTURE_FINDING",
-  "artifactTypes": [
-    "AI_ARTIFACT"
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AWS_BEDROCK_IMPORTED_MODEL"
   ],
-  "nativeKinds": [],
   "requiredCapabilities": [
     "BEDROCK_MODELS_JOBS"
   ],
@@ -39,10 +39,10 @@
   "requiredResourceFamilies": [],
   "requiredFacts": [
     {
-      "factKey": "agcf.agcf-aws-026.evidence",
+      "factKey": "data.customer_managed_key_configured",
       "valueType": "BOOLEAN",
       "evidenceClasses": [
-        "E1"
+        "CONFIGURATION"
       ],
       "maxAgeSeconds": 86400
     }

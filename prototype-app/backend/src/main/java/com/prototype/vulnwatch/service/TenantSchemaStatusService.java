@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.dto.TenantSchemaStatusResponse;
+import com.prototype.vulnwatch.migration.PackagedMigrationCatalog;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -12,12 +13,15 @@ import org.springframework.stereotype.Service;
 @Service
 public class TenantSchemaStatusService {
 
-    public static final int TARGET_VERSION = 59;
-
     private final JdbcTemplate jdbc;
+    private final int targetVersion;
 
-    public TenantSchemaStatusService(@Qualifier("platformJdbcTemplate") JdbcTemplate jdbc) {
+    public TenantSchemaStatusService(
+            @Qualifier("platformJdbcTemplate") JdbcTemplate jdbc,
+            PackagedMigrationCatalog migrationCatalog
+    ) {
         this.jdbc = jdbc;
+        this.targetVersion = migrationCatalog.tenantTarget();
     }
 
     public TenantSchemaStatusResponse list(int requestedPage, int requestedSize) {
@@ -61,11 +65,11 @@ public class TenantSchemaStatusService {
                 instant(rs.getTimestamp("migration_completed_at")),
                 instant(rs.getTimestamp("updated_at")),
                 rs.getObject("migration_run_id", UUID.class)
-        ), TARGET_VERSION, size, page * size);
+        ), targetVersion, size, page * size);
         return new TenantSchemaStatusResponse(items, page, size, total == null ? 0 : total);
     }
 
-    public long readinessFailures(int minimumVersion) {
+    public long readinessFailures(int requiredVersion) {
         Long count = jdbc.queryForObject("""
                 select count(*)
                 from platform.tenants t
@@ -74,8 +78,9 @@ public class TenantSchemaStatusService {
                   and (v.tenant_id is null
                        or v.status in ('FAILED', 'DRIFTED', 'PROVISIONING_FAILED')
                        or v.status <> 'CURRENT'
-                       or v.current_version < ?)
-                """, Long.class, minimumVersion);
+                       or v.current_version <> ?
+                       or v.target_version <> ?)
+                """, Long.class, requiredVersion, requiredVersion);
         return count == null ? 0 : count;
     }
 
@@ -132,7 +137,7 @@ public class TenantSchemaStatusService {
                     failure_message = excluded.failure_message,
                     updated_at = now(),
                     migration_run_id = excluded.migration_run_id
-                """, tenantId, schemaName, version, TARGET_VERSION, status, checksum,
+                """, tenantId, schemaName, version, targetVersion, status, checksum,
                 starting, starting, version, failureCode, failureMessage, runId, starting, starting);
     }
 

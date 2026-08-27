@@ -4,7 +4,7 @@
 
 - 76 independently governed packages: 38 AWS, 32 Azure, and 6 multi-resource.
 - Tenant defaults: 26 REQUIRED, 24 ENABLED, and 26 DISABLED.
-- Manifest digest: 811e42e72720f14079cdee037d5e98fe99d3cb3fb4b1e3795539bdfb9419688b.
+- Manifest digest: f7c737e3c94738fde4db8a004035d9c1d7d5d78535661f55821c6dfc87339fc4.
 - Answer-key corpus: 456 draft cases across all 76 package digests.
 - Permission contract: AWS and Azure read-only manifest checks are generated separately in ai-grid-phase-1-permission-delta.md.
 

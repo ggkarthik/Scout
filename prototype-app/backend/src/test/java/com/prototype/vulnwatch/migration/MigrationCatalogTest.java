@@ -24,6 +24,14 @@ class MigrationCatalogTest {
     private static final Pattern VERSION_PATTERN = Pattern.compile("^V(\\d+)__.+\\.sql$");
 
     @Test
+    void packagedCatalogResolvesPlatformAndTenantTargetsIndependently() {
+        PackagedMigrationCatalog.Targets targets = PackagedMigrationCatalog.resolve();
+
+        assertEquals(89, targets.platformTarget());
+        assertEquals(68, targets.tenantTarget());
+    }
+
+    @Test
     void migrationsHaveUniqueVersionsMeaningfulSqlAndNoUnexpectedDuplicateBodies() throws IOException {
         List<MigrationFile> migrations = Files.list(MIGRATION_DIR)
                 .filter(path -> path.getFileName().toString().endsWith(".sql"))

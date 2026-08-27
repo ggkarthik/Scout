@@ -15,8 +15,12 @@
     "mode": "ARTIFACT_FACTS",
     "artifactFacts": {
       "predicate": {
-        "fact": "agcf.agcf-aws-037.evidence",
-        "eq": true
+        "not": {
+          "fact": "compute.instance_type_configured",
+          "in": {
+            "parameter": "approvedComputeTypes"
+          }
+        }
       }
     }
   },
@@ -28,10 +32,10 @@
   "releaseFamily": "AGCF_PHASE_1",
   "wave": "PHASE_1",
   "workflowClass": "POSTURE_FINDING",
-  "artifactTypes": [
-    "AI_ARTIFACT"
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AWS_SAGEMAKER_NOTEBOOK_INSTANCE"
   ],
-  "nativeKinds": [],
   "requiredCapabilities": [
     "SAGEMAKER_DOMAINS_MODELS_ENDPOINTS"
   ],
@@ -39,10 +43,10 @@
   "requiredResourceFamilies": [],
   "requiredFacts": [
     {
-      "factKey": "agcf.agcf-aws-037.evidence",
-      "valueType": "BOOLEAN",
+      "factKey": "compute.instance_type_configured",
+      "valueType": "STRING",
       "evidenceClasses": [
-        "E1"
+        "CONFIGURATION"
       ],
       "maxAgeSeconds": 86400
     }
@@ -72,18 +76,22 @@
   ],
   "parameterDefinitions": [
     {
-      "key": "approvedBaseline",
-      "type": "STRING",
-      "defaultValue": "DEFAULT"
+      "key": "approvedComputeTypes",
+      "type": "STRING_LIST",
+      "defaultValue": [
+        "ml.t3.medium"
+      ]
     }
   ],
   "certificationParameterProfile": {
     "immutable": true,
     "pass": {
-      "approvedBaseline": "DEFAULT"
+      "approvedComputeTypes": [
+        "ml.t3.medium"
+      ]
     },
     "fail": {
-      "approvedBaseline": "STRICT"
+      "approvedComputeTypes": []
     },
     "invalid": {}
   },

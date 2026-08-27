@@ -10,22 +10,18 @@
   "releaseStatus": "PAUSED",
   "controlObjectiveId": "AGCF-OBJ-AWS-008",
   "provider": "AWS",
-  "evaluationMode": "DIRECT_RELATIONSHIP",
+  "evaluationMode": "ARTIFACT_FACTS",
   "evaluationDefinition": {
-    "mode": "DIRECT_RELATIONSHIP",
-    "directRelationship": {
-      "sourcePredicate": {
-        "fact": "agcf.agcf-aws-008.evidence",
-        "eq": true
-      },
-      "edgeConstraints": [
-        "DIRECT_PROVIDER_RELATIONSHIP"
-      ],
-      "targetPredicate": {
-        "fact": "agcf.agcf-aws-008.evidence",
-        "eq": true
-      },
-      "targetCardinality": "ONE_OR_MORE"
+    "mode": "ARTIFACT_FACTS",
+    "artifactFacts": {
+      "predicate": {
+        "not": {
+          "fact": "compute.lambda_target_arn_configured",
+          "in": {
+            "parameter": "approvedLambdaTargets"
+          }
+        }
+      }
     }
   },
   "baseEvidenceTiers": [
@@ -36,23 +32,21 @@
   "releaseFamily": "AGCF_PHASE_1",
   "wave": "PHASE_1",
   "workflowClass": "POSTURE_FINDING",
-  "artifactTypes": [
-    "AI_ARTIFACT"
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AWS_LAMBDA_FUNCTION"
   ],
-  "nativeKinds": [],
   "requiredCapabilities": [
     "LAMBDA_URLS"
   ],
-  "requiredRelationships": [
-    "DIRECT_PROVIDER_RELATIONSHIP"
-  ],
+  "requiredRelationships": [],
   "requiredResourceFamilies": [],
   "requiredFacts": [
     {
-      "factKey": "agcf.agcf-aws-008.evidence",
-      "valueType": "BOOLEAN",
+      "factKey": "compute.lambda_target_arn_configured",
+      "valueType": "STRING",
       "evidenceClasses": [
-        "E2"
+        "CONFIGURATION"
       ],
       "maxAgeSeconds": 86400
     }
@@ -82,18 +76,20 @@
   ],
   "parameterDefinitions": [
     {
-      "key": "approvedBaseline",
-      "type": "STRING",
-      "defaultValue": "DEFAULT"
+      "key": "approvedLambdaTargets",
+      "type": "STRING_LIST",
+      "defaultValue": []
     }
   ],
   "certificationParameterProfile": {
     "immutable": true,
     "pass": {
-      "approvedBaseline": "DEFAULT"
+      "approvedLambdaTargets": []
     },
     "fail": {
-      "approvedBaseline": "STRICT"
+      "approvedLambdaTargets": [
+        "CERTIFICATION_APPROVED_VALUE"
+      ]
     },
     "invalid": {}
   },

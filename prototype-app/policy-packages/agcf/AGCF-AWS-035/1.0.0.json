@@ -15,8 +15,8 @@
     "mode": "ARTIFACT_FACTS",
     "artifactFacts": {
       "predicate": {
-        "fact": "agcf.agcf-aws-035.evidence",
-        "eq": true
+        "fact": "network.vpc_id_configured",
+        "empty": true
       }
     }
   },
@@ -28,10 +28,10 @@
   "releaseFamily": "AGCF_PHASE_1",
   "wave": "PHASE_1",
   "workflowClass": "POSTURE_FINDING",
-  "artifactTypes": [
-    "AI_ARTIFACT"
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AWS_SAGEMAKER_DOMAIN"
   ],
-  "nativeKinds": [],
   "requiredCapabilities": [
     "SAGEMAKER_DOMAINS_MODELS_ENDPOINTS"
   ],
@@ -39,10 +39,10 @@
   "requiredResourceFamilies": [],
   "requiredFacts": [
     {
-      "factKey": "agcf.agcf-aws-035.evidence",
-      "valueType": "BOOLEAN",
+      "factKey": "network.vpc_id_configured",
+      "valueType": "STRING",
       "evidenceClasses": [
-        "E1"
+        "CONFIGURATION"
       ],
       "maxAgeSeconds": 86400
     }

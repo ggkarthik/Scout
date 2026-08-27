@@ -15,7 +15,7 @@
     "mode": "ARTIFACT_FACTS",
     "artifactFacts": {
       "predicate": {
-        "fact": "agcf.agcf-aws-017.evidence",
+        "fact": "data.s3_public_access_configured",
         "eq": true
       }
     }
@@ -28,10 +28,10 @@
   "releaseFamily": "AGCF_PHASE_1",
   "wave": "PHASE_1",
   "workflowClass": "POSTURE_FINDING",
-  "artifactTypes": [
-    "AI_ARTIFACT"
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AWS_BEDROCK_KNOWLEDGE_BASE"
   ],
-  "nativeKinds": [],
   "requiredCapabilities": [
     "BEDROCK_KNOWLEDGE_BASES"
   ],
@@ -39,10 +39,10 @@
   "requiredResourceFamilies": [],
   "requiredFacts": [
     {
-      "factKey": "agcf.agcf-aws-017.evidence",
+      "factKey": "data.s3_public_access_configured",
       "valueType": "BOOLEAN",
       "evidenceClasses": [
-        "E0"
+        "CONFIGURATION"
       ],
       "maxAgeSeconds": 86400
     }

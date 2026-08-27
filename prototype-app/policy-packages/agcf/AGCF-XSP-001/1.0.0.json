@@ -38,16 +38,7 @@
   ],
   "requiredRelationships": [],
   "requiredResourceFamilies": [],
-  "requiredFacts": [
-    {
-      "factKey": "agcf.agcf-xsp-001.evidence",
-      "valueType": "BOOLEAN",
-      "evidenceClasses": [
-        "E2"
-      ],
-      "maxAgeSeconds": 86400
-    }
-  ],
+  "requiredFacts": [],
   "frameworkMappings": [
     {
       "framework": "OWASP_GENAI_LLM_TOP_10",

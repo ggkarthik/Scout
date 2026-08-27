@@ -15,8 +15,8 @@
     "mode": "ARTIFACT_FACTS",
     "artifactFacts": {
       "predicate": {
-        "fact": "agcf.agcf-azr-009.evidence",
-        "eq": true
+        "fact": "resource.required_tags_present_configured",
+        "eq": false
       }
     }
   },
@@ -28,10 +28,12 @@
   "releaseFamily": "AGCF_PHASE_1",
   "wave": "PHASE_1",
   "workflowClass": "POSTURE_FINDING",
-  "artifactTypes": [
-    "AI_ARTIFACT"
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AZURE_AI_ACCOUNTS",
+    "AZURE_ML_WORKSPACES",
+    "AZURE_SEARCH_SERVICES"
   ],
-  "nativeKinds": [],
   "requiredCapabilities": [
     "AI_ACCOUNTS"
   ],
@@ -39,10 +41,10 @@
   "requiredResourceFamilies": [],
   "requiredFacts": [
     {
-      "factKey": "agcf.agcf-azr-009.evidence",
+      "factKey": "resource.required_tags_present_configured",
       "valueType": "BOOLEAN",
       "evidenceClasses": [
-        "E1"
+        "CONFIGURATION"
       ],
       "maxAgeSeconds": 86400
     }

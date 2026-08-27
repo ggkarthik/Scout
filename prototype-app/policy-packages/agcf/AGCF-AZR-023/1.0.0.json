@@ -10,22 +10,14 @@
   "releaseStatus": "PAUSED",
   "controlObjectiveId": "AGCF-OBJ-AZR-023",
   "provider": "AZURE",
-  "evaluationMode": "DIRECT_RELATIONSHIP",
+  "evaluationMode": "ARTIFACT_FACTS",
   "evaluationDefinition": {
-    "mode": "DIRECT_RELATIONSHIP",
-    "directRelationship": {
-      "sourcePredicate": {
-        "fact": "agcf.agcf-azr-023.evidence",
-        "eq": true
-      },
-      "edgeConstraints": [
-        "DIRECT_PROVIDER_RELATIONSHIP"
-      ],
-      "targetPredicate": {
-        "fact": "agcf.agcf-azr-023.evidence",
-        "eq": true
-      },
-      "targetCardinality": "ONE_OR_MORE"
+    "mode": "ARTIFACT_FACTS",
+    "artifactFacts": {
+      "predicate": {
+        "fact": "ml.endpoint_traffic_configured",
+        "empty": true
+      }
     }
   },
   "baseEvidenceTiers": [
@@ -37,24 +29,21 @@
   "releaseFamily": "AGCF_PHASE_1",
   "wave": "PHASE_1",
   "workflowClass": "POSTURE_FINDING",
-  "artifactTypes": [
-    "AI_ARTIFACT"
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AZURE_ML_ENDPOINTS"
   ],
-  "nativeKinds": [],
   "requiredCapabilities": [
     "ML_WORKSPACES_ENDPOINTS"
   ],
-  "requiredRelationships": [
-    "DIRECT_PROVIDER_RELATIONSHIP"
-  ],
+  "requiredRelationships": [],
   "requiredResourceFamilies": [],
   "requiredFacts": [
     {
-      "factKey": "agcf.agcf-azr-023.evidence",
-      "valueType": "BOOLEAN",
+      "factKey": "ml.endpoint_traffic_configured",
+      "valueType": "OBJECT",
       "evidenceClasses": [
-        "E1",
-        "E2"
+        "CONFIGURATION"
       ],
       "maxAgeSeconds": 86400
     }

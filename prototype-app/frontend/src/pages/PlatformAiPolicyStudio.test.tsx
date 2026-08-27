@@ -1,7 +1,7 @@
 import { screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../api/client';
-import type { AiGridControlCoverage } from '../features/ai-security/types';
+import type { AiGridControlCoverage, AiGridPolicyDistribution, AiGridPolicySelection } from '../features/ai-security/types';
 import { renderWithProviders } from '../test/test-utils';
 import { PlatformAiPolicyStudio } from './PlatformAiPolicyStudio';
 
@@ -61,5 +61,39 @@ describe('PlatformAiPolicyStudio framework coverage', () => {
       .toBeInTheDocument();
     expect(screen.queryByText(/OWASP compliant/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/AICM certified/i)).not.toBeInTheDocument();
+  });
+
+  it('renders the complete paused Phase 1 catalog with exact provider and default summaries', async () => {
+    stubBaselineQueries();
+    const ids = [
+      ...Array.from({ length: 38 }, (_, index) => `AGCF-AWS-${String(index + 1).padStart(3, '0')}`),
+      ...Array.from({ length: 32 }, (_, index) => `AGCF-AZR-${String(index + 1).padStart(3, '0')}`),
+      ...Array.from({ length: 6 }, (_, index) => `AGCF-XSP-${String(index + 1).padStart(3, '0')}`),
+    ];
+    const policies: AiGridPolicyDistribution[] = ids.map((policyId, index) => {
+      const defaultSelection: AiGridPolicySelection = index < 26 ? 'REQUIRED' : index < 50 ? 'ENABLED' : 'DISABLED';
+      return {
+        policyId, available: false, defaultSelection, rolloutStage: 'PAUSED', canaryTenantIdsJson: '[]',
+        pinnedVersion: null, updatedBy: 'seed', updatedAt: '2026-08-27T00:00:00Z', version: '1.0.0',
+        name: `${policyId} governed policy`, severity: 'HIGH', lifecycle: 'VALIDATED',
+        provider: policyId.includes('-AWS-') ? 'AWS' : policyId.includes('-AZR-') ? 'AZURE' : 'MULTI_CLOUD',
+        releaseFamily: 'AGCF_PHASE_1', releaseWave: 'PHASE_1',
+      };
+    });
+    vi.mocked(api.listPlatformAiGridPolicies).mockResolvedValue(policies);
+    vi.spyOn(api, 'getPlatformAiGridFrameworkCoverage').mockResolvedValue([]);
+
+    renderWithProviders(<PlatformAiPolicyStudio />);
+
+    const summary = await screen.findByRole('region', { name: 'Phase 1 out-of-box catalog summary' });
+    expect(await within(summary).findAllByText('76')).toHaveLength(3);
+    expect(within(summary).getByText('38')).toBeInTheDocument();
+    expect(within(summary).getByText('32')).toBeInTheDocument();
+    expect(within(summary).getByText('24')).toBeInTheDocument();
+    expect(screen.getAllByText(/AGCF-AWS-001/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/AGCF-AZR-001/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/AGCF-XSP-001/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('VALIDATED')).toHaveLength(76);
+    expect(screen.getAllByRole('combobox', { name: /rollout$/i })).toHaveLength(76);
   });
 });

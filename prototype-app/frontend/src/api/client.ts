@@ -522,6 +522,7 @@ import type {
   AiGridCoverageDimension,
   AiGridPolicy,
   AiGridPolicyDistribution,
+  AiGridPlatformPolicyDetail,
   AiGridPolicyImpactPreview,
   AiGridPolicyReleaseReadiness,
   AiGridPhase1CertificationReadiness,
@@ -1363,7 +1364,16 @@ export const api = {
   getAiGridCoverage: () => request<AiGridCoverage>('/ai-coverage'),
   getAiGridCoverageDimensions: () => request<AiGridCoverageDimension[]>('/ai-coverage/dimensions'),
   listAiGridPolicies: () => request<AiGridPolicy[]>('/ai-policies'),
-  listPlatformAiGridPolicies: () => request<AiGridPolicyDistribution[]>('/platform/ai-grid/policies'),
+  listPlatformAiGridPolicies: (filters?: { releaseFamily?: string; lifecycle?: string }) => {
+    const params = new URLSearchParams();
+    if (filters?.releaseFamily) params.set('releaseFamily', filters.releaseFamily);
+    if (filters?.lifecycle) params.set('lifecycle', filters.lifecycle);
+    const query = params.size > 0 ? `?${params.toString()}` : '';
+    return request<AiGridPolicyDistribution[]>(`/platform/ai-grid/policies${query}`);
+  },
+  getPlatformAiGridPolicyDetail: (policyId: string, version: string) => request<AiGridPlatformPolicyDetail>(
+    `/platform/ai-grid/policies/${encodeURIComponent(policyId)}/versions/${encodeURIComponent(version)}`,
+  ),
   updatePlatformAiGridPolicyDistribution: (
     policyId: string,
     payload: Pick<AiGridPolicyDistribution, 'available' | 'defaultSelection' | 'rolloutStage' | 'pinnedVersion'> & { canaryTenantIds: string[] },

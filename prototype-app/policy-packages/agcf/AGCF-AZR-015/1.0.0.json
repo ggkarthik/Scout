@@ -15,8 +15,24 @@
     "mode": "ARTIFACT_FACTS",
     "artifactFacts": {
       "predicate": {
-        "fact": "agcf.agcf-azr-015.evidence",
-        "eq": true
+        "any": [
+          {
+            "not": {
+              "fact": "model.name_configured",
+              "in": {
+                "parameter": "approvedModelNames"
+              }
+            }
+          },
+          {
+            "not": {
+              "fact": "model.publisher_configured",
+              "in": {
+                "parameter": "approvedModelPublishers"
+              }
+            }
+          }
+        ]
       }
     }
   },
@@ -28,10 +44,10 @@
   "releaseFamily": "AGCF_PHASE_1",
   "wave": "PHASE_1",
   "workflowClass": "POSTURE_FINDING",
-  "artifactTypes": [
-    "AI_ARTIFACT"
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AZURE_FOUNDRY_DEPLOYMENTS"
   ],
-  "nativeKinds": [],
   "requiredCapabilities": [
     "AI_ACCOUNTS"
   ],
@@ -39,10 +55,18 @@
   "requiredResourceFamilies": [],
   "requiredFacts": [
     {
-      "factKey": "agcf.agcf-azr-015.evidence",
-      "valueType": "BOOLEAN",
+      "factKey": "model.name_configured",
+      "valueType": "STRING",
       "evidenceClasses": [
-        "E1"
+        "CONFIGURATION"
+      ],
+      "maxAgeSeconds": 86400
+    },
+    {
+      "factKey": "model.publisher_configured",
+      "valueType": "STRING",
+      "evidenceClasses": [
+        "CONFIGURATION"
       ],
       "maxAgeSeconds": 86400
     }
@@ -79,18 +103,31 @@
   ],
   "parameterDefinitions": [
     {
-      "key": "approvedBaseline",
-      "type": "STRING",
-      "defaultValue": "DEFAULT"
+      "key": "approvedModelNames",
+      "type": "STRING_LIST",
+      "defaultValue": []
+    },
+    {
+      "key": "approvedModelPublishers",
+      "type": "STRING_LIST",
+      "defaultValue": [
+        "Microsoft"
+      ]
     }
   ],
   "certificationParameterProfile": {
     "immutable": true,
     "pass": {
-      "approvedBaseline": "DEFAULT"
+      "approvedModelNames": [],
+      "approvedModelPublishers": [
+        "Microsoft"
+      ]
     },
     "fail": {
-      "approvedBaseline": "STRICT"
+      "approvedModelNames": [
+        "CERTIFICATION_APPROVED_VALUE"
+      ],
+      "approvedModelPublishers": []
     },
     "invalid": {}
   },

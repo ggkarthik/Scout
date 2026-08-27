@@ -62,4 +62,38 @@ class AiGridFactProducerTest {
 
         assertTrue(fact.value().asBoolean());
     }
+
+    @Test
+    void awsProducerNormalizesRemainingGuardrailModelAndNetworkContracts() throws Exception {
+        var input = new AiGridFactProducer.FactInput("AWS", "BEDROCK_GUARDRAILS", "AI_GUARDRAIL", "AWS_BEDROCK_GUARDRAIL",
+                mapper.readTree("""
+                        {"piiEntityCount":0,"contextualGroundingFilterCount":1,"deniedTopicCount":2,
+                         "updatedAt":"2026-01-01T00:00:00Z","kmsKeyArn":"arn:aws:kms:region:account:key/id",
+                         "foundationModel":"amazon.nova-pro-v1:0","vpcId":"vpc-123","instanceType":"ml.t3.medium"}
+                        """), null, null, Instant.now());
+        Map<String, AiGridFactProducer.ProducedFact> facts = new AwsAiGridFactProducer().produce(input).stream()
+                .collect(java.util.stream.Collectors.toMap(AiGridFactProducer.ProducedFact::factKey, value -> value));
+
+        assertEquals(0, facts.get("guardrail.pii_entity_count_configured").value().intValue());
+        assertEquals("amazon.nova-pro-v1:0", facts.get("model.foundation_identifier_configured").value().asText());
+        assertEquals("vpc-123", facts.get("network.vpc_id_configured").value().asText());
+        assertTrue(facts.get("data.customer_managed_key_configured").value().asBoolean());
+    }
+
+    @Test
+    void azureProducerNormalizesAllowlistAndRbacContracts() throws Exception {
+        var input = new AiGridFactProducer.FactInput("AZURE", "AZURE_RBAC_GLOBAL", "IDENTITY", "AZURE_RBAC_GLOBAL",
+                mapper.readTree("""
+                        {"raiPolicyMode":"Default","modelPublisher":"Microsoft","toolType":"function",
+                         "assignmentScope":"/subscriptions/sub/resourceGroups/rg/providers/Microsoft.CognitiveServices/accounts/a",
+                         "principalType":"ServicePrincipal","conditionVersion":"2.0",
+                         "tags":{"environment":"prod","criticality":"high"}}
+                        """), null, null, Instant.now());
+        Map<String, AiGridFactProducer.ProducedFact> facts = new AzureAiGridFactProducer().produce(input).stream()
+                .collect(java.util.stream.Collectors.toMap(AiGridFactProducer.ProducedFact::factKey, value -> value));
+
+        assertEquals("Default", facts.get("guardrail.rai_mode_configured").value().asText());
+        assertEquals("ServicePrincipal", facts.get("identity.principal_type_configured").value().asText());
+        assertTrue(facts.get("resource.required_tags_present_configured").value().asBoolean());
+    }
 }

@@ -15,8 +15,10 @@
     "mode": "ARTIFACT_FACTS",
     "artifactFacts": {
       "predicate": {
-        "fact": "agcf.agcf-aws-016.evidence",
-        "eq": true
+        "fact": "guardrail.updated_at_observed",
+        "age_gt_seconds": {
+          "parameter": "maximumReviewAgeSeconds"
+        }
       }
     }
   },
@@ -28,10 +30,10 @@
   "releaseFamily": "AGCF_PHASE_1",
   "wave": "PHASE_1",
   "workflowClass": "POSTURE_FINDING",
-  "artifactTypes": [
-    "AI_ARTIFACT"
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AWS_BEDROCK_GUARDRAIL"
   ],
-  "nativeKinds": [],
   "requiredCapabilities": [
     "BEDROCK_GUARDRAILS"
   ],
@@ -39,10 +41,10 @@
   "requiredResourceFamilies": [],
   "requiredFacts": [
     {
-      "factKey": "agcf.agcf-aws-016.evidence",
-      "valueType": "BOOLEAN",
+      "factKey": "guardrail.updated_at_observed",
+      "valueType": "TIMESTAMP",
       "evidenceClasses": [
-        "E1"
+        "CONFIGURATION"
       ],
       "maxAgeSeconds": 86400
     }
@@ -72,18 +74,18 @@
   ],
   "parameterDefinitions": [
     {
-      "key": "approvedBaseline",
-      "type": "STRING",
-      "defaultValue": "DEFAULT"
+      "key": "maximumReviewAgeSeconds",
+      "type": "NUMBER",
+      "defaultValue": 7776000
     }
   ],
   "certificationParameterProfile": {
     "immutable": true,
     "pass": {
-      "approvedBaseline": "DEFAULT"
+      "maximumReviewAgeSeconds": 7776000
     },
     "fail": {
-      "approvedBaseline": "STRICT"
+      "maximumReviewAgeSeconds": 7776001
     },
     "invalid": {}
   },

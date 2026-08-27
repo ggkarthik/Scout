@@ -2,65 +2,120 @@ package com.prototype.vulnwatch.migration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.HexFormat;
+import java.util.List;
+import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 class PostgresResetMigrationGuardTest {
 
-    private static final int LAST_LEGACY_MIGRATION_VERSION = 41;
-    private static final Pattern MIGRATION_VERSION = Pattern.compile("^V(\\d+)__.*\\.sql$");
-    private static final Pattern TENANT_DEFAULT_DDL =
-            Pattern.compile("(?is)\\b(?:create|alter|drop)\\s+(?:table|index|sequence|view)\\s+(?:if\\s+(?:not\\s+)?exists\\s+)?tenant_default\\.");
-    private static final Pattern UNQUALIFIED_TENANT_DDL =
-            Pattern.compile("(?is)\\b(?:create|alter|drop)\\s+(?:table|index|sequence|view)\\s+(?:if\\s+(?:not\\s+)?exists\\s+)?(?!platform\\.|tenant_default\\.|information_schema\\.|pg_catalog\\.)[a-z_][a-z0-9_]*\\b");
+    private static final String HEADER = "-- migration-guard: platform-only";
+    private static final String V46_SHA256 =
+            "ce5b27f49fa2a7512adcdc2fdd503f57b2744dc7f310068323f552445abeebbf";
+    private static final Pattern VERSION = Pattern.compile("^V(\\d+)__.+\\.sql$");
+    private static final Pattern TENANT_DEFAULT = Pattern.compile(
+            "(?i)(?:\\\"tenant_default\\\"|tenant_default)\\s*\\.");
+    private static final Pattern DYNAMIC_SQL = Pattern.compile(
+            "(?is)\\bexecute\\s+(?:format\\s*\\(|['\\\"])");
+    private static final String QUALIFIED_PLATFORM = "(?:\\\"?platform\\\"?\\s*\\.\\s*)";
+    private static final String IDENTIFIER = "\\\"?[a-z_][a-z0-9_]*\\\"?";
+    private static final List<String> OBJECT_PREFIXES = List.of(
+            "\\b(?:create|alter|drop|truncate)\\s+(?:table|sequence|view|policy)\\s+(?:if\\s+(?:not\\s+)?exists\\s+)?",
+            "\\binsert\\s+into\\s+",
+            "(?<!before )(?<!do )\\bupdate\\s+",
+            "\\bdelete\\s+from\\s+",
+            "\\breferences\\s+");
+    private static final Pattern UNQUALIFIED_INDEX_TARGET = Pattern.compile(
+            "(?is)\\bcreate\\s+(?:unique\\s+)?index\\s+(?:concurrently\\s+)?"
+                    + "(?:if\\s+not\\s+exists\\s+)?\\S+\\s+on\\s+(?:only\\s+)?"
+                    + "(?!\\\"?platform\\\"?\\s*\\.)\\\"?[a-z_][a-z0-9_]*\\\"?");
 
     @Test
-    void newPlatformMigrationsMustNotOwnTenantDdl() throws IOException {
+    void sharedGuardFixturesHaveExpectedResults() throws Exception {
+        Path fixtures = Path.of("../../.github/scripts/fixtures/tenant-migration-guard-cases.json");
+        JsonNode cases = new ObjectMapper().readTree(Files.readString(fixtures));
+        List<String> mismatches = new ArrayList<>();
+        for (JsonNode fixture : cases) {
+            boolean actual = violations(fixture.path("sql").asText()).isEmpty();
+            if (actual != fixture.path("valid").asBoolean()) {
+                mismatches.add(fixture.path("name").asText() + " expected="
+                        + fixture.path("valid").asBoolean() + " actual=" + actual);
+            }
+        }
+        assertThat(mismatches).isEmpty();
+    }
+
+    @Test
+    void platformMigrationsAfterV46AreStrictlyPlatformOnly() throws Exception {
         Path migrationDir = Path.of("src/main/resources/db/migration/postgres_reset");
+        List<String> failures = new ArrayList<>();
         try (var files = Files.list(migrationDir)) {
-            var violations = files
-                    .filter(path -> path.getFileName().toString().endsWith(".sql"))
-                    .filter(path -> migrationVersion(path) > LAST_LEGACY_MIGRATION_VERSION)
-                    .filter(path -> isDriftProne(path, read(path)))
-                    .map(Path::getFileName)
-                    .map(Path::toString)
-                    .toList();
-
-            assertThat(violations)
-                    .as("Platform migrations V42+ must not own tenant DDL")
-                    .isEmpty();
+            for (Path migration : files.filter(path -> path.getFileName().toString().endsWith(".sql")).toList()) {
+                Matcher matcher = VERSION.matcher(migration.getFileName().toString());
+                if (!matcher.matches()) {
+                    failures.add("malformed filename: " + migration.getFileName());
+                    continue;
+                }
+                int version = Integer.parseInt(matcher.group(1));
+                if (version < 46) {
+                    continue;
+                }
+                if (version == 46) {
+                    assertThat(sha256(migration)).isEqualTo(V46_SHA256);
+                    continue;
+                }
+                for (String violation : violations(Files.readString(migration))) {
+                    failures.add(migration.getFileName() + ": " + violation);
+                }
+            }
         }
+        assertThat(failures).isEmpty();
     }
 
-    private boolean isDriftProne(Path path, String sql) {
-        if (approvedFlywayPerSchema(sql) || platformOnly(sql)) {
-            return false;
+    private static List<String> violations(String sql) {
+        List<String> failures = new ArrayList<>();
+        if (sql.lines().findFirst().filter(HEADER::equals).isEmpty()) {
+            failures.add("missing exact first-line header");
         }
-        return TENANT_DEFAULT_DDL.matcher(sql).find() || UNQUALIFIED_TENANT_DDL.matcher(sql).find();
-    }
-
-    private boolean approvedFlywayPerSchema(String sql) {
-        return sql.contains("migration-guard: flyway-per-schema");
-    }
-
-    private boolean platformOnly(String sql) {
-        return sql.contains("migration-guard: platform-only") && !sql.contains("tenant_default.");
-    }
-
-    private int migrationVersion(Path path) {
-        Matcher matcher = MIGRATION_VERSION.matcher(path.getFileName().toString());
-        return matcher.matches() ? Integer.parseInt(matcher.group(1)) : Integer.MAX_VALUE;
-    }
-
-    private String read(Path path) {
-        try {
-            return Files.readString(path);
-        } catch (IOException ex) {
-            throw new IllegalStateException("Unable to read migration " + path, ex);
+        String body = withoutComments(sql);
+        if (TENANT_DEFAULT.matcher(body).find()) {
+            failures.add("references tenant_default");
         }
+        if (DYNAMIC_SQL.matcher(body).find()) {
+            failures.add("contains dynamic SQL");
+        }
+        String analysis = body.replaceAll("'(?:''|[^'])*'", "''").toLowerCase(Locale.ROOT);
+        for (String prefix : OBJECT_PREFIXES) {
+            Matcher matcher = Pattern.compile(prefix + "(" + QUALIFIED_PLATFORM + ")?" + IDENTIFIER,
+                    Pattern.CASE_INSENSITIVE | Pattern.DOTALL).matcher(analysis);
+            while (matcher.find()) {
+                if (matcher.group(1) == null) {
+                    failures.add("contains unqualified DDL/DML/reference");
+                    break;
+                }
+            }
+        }
+        if (UNQUALIFIED_INDEX_TARGET.matcher(analysis).find()) {
+            failures.add("contains unqualified index target");
+        }
+        return failures;
+    }
+
+    private static String withoutComments(String sql) {
+        return sql.replaceAll("(?s)/\\*.*?\\*/", " ").replaceAll("(?m)--[^\\n]*", " ");
+    }
+
+    private static String sha256(Path path) throws Exception {
+        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(path)));
     }
 }

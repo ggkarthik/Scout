@@ -142,10 +142,11 @@ class AwsBedrockDiscoveryServiceTest {
     }
 
     @Test
-    void omitsUnsetPoliciesAndSkipsNullFieldsInsteadOfThrowing() {
+    void recordsZeroCountsForUnsetPoliciesAndSkipsNullNestedFields() {
         // A minimal guardrail with no topic/word/PII/grounding policy configured, and a content
         // filter missing its per-direction action fields (older guardrails may predate them) —
-        // must not throw NPE, and must not fabricate keys/values for data that was never observed.
+        // must not throw NPE. Authoritative zero counts and an empty KMS identifier are retained
+        // so absence evaluates as insecure instead of being mistaken for missing evidence.
         GetGuardrailResponse detail = GetGuardrailResponse.builder()
                 .name("minimal-guardrail")
                 .status(GuardrailStatus.READY)
@@ -162,10 +163,10 @@ class AwsBedrockDiscoveryServiceTest {
 
         assertEquals("READY", attributes.get("status"));
         assertFalse(attributes.containsKey("description"));
-        assertFalse(attributes.containsKey("kmsKeyArn"));
-        assertFalse(attributes.containsKey("deniedTopicCount"));
-        assertFalse(attributes.containsKey("piiEntityCount"));
-        assertFalse(attributes.containsKey("contextualGroundingFilterCount"));
+        assertEquals("", attributes.get("kmsKeyArn"));
+        assertEquals(0, attributes.get("deniedTopicCount"));
+        assertEquals(0, attributes.get("piiEntityCount"));
+        assertEquals(0, attributes.get("contextualGroundingFilterCount"));
 
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> contentFilters = (List<Map<String, Object>>) attributes.get("contentFilters");

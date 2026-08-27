@@ -5,19 +5,17 @@ import com.prototype.vulnwatch.client.ResendEmailClient;
 import com.prototype.vulnwatch.service.TenantSchemaService;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.net.URI;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
-import java.util.regex.Pattern;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationVersion;
 import org.flywaydb.core.api.output.RepairResult;
@@ -28,7 +26,7 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 /** Production-only bootstrap entry point. Does not initialize Spring or JPA. */
 public final class ProductionBootstrapCli {
 
-    private static final int TARGET_VERSION = 67;
+    private static final PackagedMigrationCatalog.Targets MIGRATION_TARGETS = PackagedMigrationCatalog.resolve();
     private static final String DEFAULT_TENANT_NAME = "Default Workspace";
     private static final String DEFAULT_TENANT_SLUG = "default-workspace";
     private static final String DEFAULT_TENANT_SCHEMA = "tenant_default";
@@ -40,14 +38,11 @@ public final class ProductionBootstrapCli {
     private static final String V45_CONNECTOR_CONFIG_TABLE = "ai_security_connector_configs";
     private static final UUID DEFAULT_TENANT_ID = UUID.nameUUIDFromBytes(
             "scout-default-tenant".getBytes(StandardCharsets.UTF_8));
-    private static final Pattern UUID_VALUE = Pattern.compile(
-            "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}");
 
     private ProductionBootstrapCli() {
     }
 
     public static void main(String[] args) throws Exception {
-        Config config = Config.fromEnvironment();
         UUID runId = UUID.randomUUID();
         Instant startedAt = Instant.now();
         List<Phase> phases = new ArrayList<>();
@@ -55,16 +50,18 @@ public final class ProductionBootstrapCli {
         String failureCode = null;
         String failureMessage = null;
         try {
-            try (Connection connection = DriverManager.getConnection(
-                    config.dbUrl(), config.dbUsername(), config.dbPassword())) {
+            Config config = validatedConfig();
+            try (Connection connection = ownerConnection(config)) {
+                verifyOwnerPreflight(connection, config);
+                phases.add(Phase.success("database_preflight", "configuration and connectivity verified"));
                 acquireLock(connection);
                 try {
                     if (config.reportOnly()) {
                         verifyControlPlane(connection, config.runtimeDbUsername());
                         phases.add(Phase.success("report_only_owner_verification", "complete"));
                     } else {
-                        runPlatformMigrations(config);
-                        phases.add(Phase.success("platform_migrations", "version=" + platformVersion(connection)));
+                        int platformVersion = runPlatformMigrations(config);
+                        phases.add(Phase.success("platform_migrations", "version=" + platformVersion));
                         if (config.platformOwnerBootstrapEnabled()) {
                             reconcilePlatformOwner(connection, config);
                             phases.add(Phase.success("platform_owner_identity", "configured"));
@@ -82,7 +79,8 @@ public final class ProductionBootstrapCli {
                         migrateTenant(config, defaultTenant);
                         String templateChecksum = fingerprint(connection, defaultTenant.schemaName());
                         markCurrent(connection, defaultTenant, templateChecksum, runId);
-                        phases.add(Phase.success("default_tenant_migration", "version=" + TARGET_VERSION));
+                        phases.add(Phase.success("default_tenant_migration",
+                                "version=" + MIGRATION_TARGETS.tenantTarget()));
                         BootstrapResult tenantResult = migrateExistingAndProvisioningTenants(
                                 connection, config, defaultTenant, templateChecksum, runId);
                         phases.addAll(tenantResult.phases());
@@ -130,8 +128,55 @@ public final class ProductionBootstrapCli {
         }
     }
 
-    private static void runPlatformMigrations(Config config) {
-        Flyway.configure()
+    private static Config validatedConfig() {
+        try {
+            Config config = Config.fromEnvironment();
+            URI uri = URI.create(config.dbUrl().substring("jdbc:".length()));
+            if (!"postgresql".equals(uri.getScheme()) || uri.getUserInfo() != null || uri.getHost() == null
+                    || uri.getPort() < 1 || uri.getPort() > 65535 || uri.getPath() == null
+                    || uri.getPath().length() < 2 || uri.getPath().substring(1).contains("/")) {
+                throw new IllegalArgumentException("DB_URL must be jdbc:postgresql://host:port/database");
+            }
+            if (!uri.getPath().substring(1).equals(config.expectedDatabase())) {
+                throw new IllegalArgumentException("DB_URL database does not match EXPECTED_DB_NAME");
+            }
+            return config;
+        } catch (RuntimeException ex) {
+            throw new BootstrapFailure("preflight_db_config", sanitize(ex.getMessage()));
+        }
+    }
+
+    private static Connection ownerConnection(Config config) {
+        try {
+            DriverManager.setLoginTimeout(10);
+            return DriverManager.getConnection(config.dbUrl(), config.dbUsername(), config.dbPassword());
+        } catch (SQLException ex) {
+            throw new BootstrapFailure("preflight_db_connectivity", "Unable to connect to configured database");
+        }
+    }
+
+    private static void verifyOwnerPreflight(Connection connection, Config config) {
+        try (Statement statement = connection.createStatement();
+             ResultSet result = statement.executeQuery("select current_user, current_database()")) {
+            if (!result.next()) {
+                throw new SQLException("Database identity query returned no row");
+            }
+            if (!config.dbUsername().equals(result.getString(1))) {
+                throw new BootstrapFailure("preflight_db_config", "Connected database user does not match DB_USERNAME");
+            }
+            if (!config.expectedDatabase().equals(result.getString(2))) {
+                throw new BootstrapFailure("preflight_db_config",
+                        "Connected database does not match EXPECTED_DB_NAME");
+            }
+        } catch (BootstrapFailure ex) {
+            throw ex;
+        } catch (SQLException ex) {
+            throw new BootstrapFailure("preflight_db_connectivity", "Unable to verify database identity");
+        }
+    }
+
+    private static int runPlatformMigrations(Config config) {
+        Flyway flyway = Flyway.configure()
                 .dataSource(config.dbUrl(), config.dbUsername(), config.dbPassword())
                 .schemas("public")
                 .defaultSchema("public")
@@ -140,8 +185,14 @@ public final class ProductionBootstrapCli {
                 .baselineOnMigrate(false)
                 .validateOnMigrate(true)
                 .outOfOrder(false)
-                .load()
-                .migrate();
+                .load();
+        flyway.migrate();
+        int actualVersion = Integer.parseInt(flyway.info().current().getVersion().getVersion());
+        if (actualVersion != MIGRATION_TARGETS.platformTarget()) {
+            throw new BootstrapFailure("platform_target_mismatch", "Platform migration finished at V"
+                    + actualVersion + " but packaged target is V" + MIGRATION_TARGETS.platformTarget());
+        }
+        return actualVersion;
     }
 
     private static PlatformOwnerSetupLinkIssuer platformOwnerSetupLinkIssuer(Config config) {
@@ -519,7 +570,13 @@ public final class ProductionBootstrapCli {
     }
 
     private static void migrateTenant(Config config, TenantSchema tenant) {
-        tenantFlyway(config, tenant).migrate();
+        Flyway flyway = tenantFlyway(config, tenant);
+        flyway.migrate();
+        int actualVersion = Integer.parseInt(flyway.info().current().getVersion().getVersion());
+        if (actualVersion != MIGRATION_TARGETS.tenantTarget()) {
+            throw new BootstrapFailure("tenant_target_mismatch", "Tenant migration finished at V"
+                    + actualVersion + " but packaged target is V" + MIGRATION_TARGETS.tenantTarget());
+        }
     }
 
     private static Flyway tenantFlyway(Config config, TenantSchema tenant) {
@@ -599,10 +656,10 @@ public final class ProductionBootstrapCli {
                 """)) {
             statement.setObject(1, tenant.tenantId());
             statement.setString(2, tenant.schemaName());
-            statement.setInt(3, TARGET_VERSION);
-            statement.setInt(4, TARGET_VERSION);
+            statement.setInt(3, MIGRATION_TARGETS.tenantTarget());
+            statement.setInt(4, MIGRATION_TARGETS.tenantTarget());
             statement.setString(5, checksum);
-            statement.setInt(6, TARGET_VERSION);
+            statement.setInt(6, MIGRATION_TARGETS.tenantTarget());
             statement.setObject(7, runId);
             statement.executeUpdate();
         }
@@ -632,7 +689,7 @@ public final class ProductionBootstrapCli {
                 """)) {
             statement.setObject(1, tenant.tenantId());
             statement.setString(2, tenant.schemaName());
-            statement.setInt(3, TARGET_VERSION);
+            statement.setInt(3, MIGRATION_TARGETS.tenantTarget());
             statement.setString(4, status);
             statement.setString(5, code);
             statement.setString(6, sanitize(message));
@@ -705,7 +762,7 @@ public final class ProductionBootstrapCli {
                 select coalesce(max(version::integer), 0)
                 from public.flyway_schema_history
                 where version ~ '^[0-9]+$'
-                """, TARGET_VERSION, "platform version");
+                """, MIGRATION_TARGETS.platformTarget(), "platform version");
         requireZero(connection, """
                 select count(*)
                 from pg_roles
@@ -799,7 +856,8 @@ public final class ProductionBootstrapCli {
                   and upper(t.status) = 'ACTIVE'
                   and (v.tenant_id is null or v.status <> 'CURRENT'
                        or v.current_version < %d or v.last_successful_version < %d)
-                """.formatted(TARGET_VERSION, TARGET_VERSION), "active tenants missing current schema projection");
+                """.formatted(MIGRATION_TARGETS.tenantTarget(), MIGRATION_TARGETS.tenantTarget()),
+                "active tenants missing current schema projection");
         verifyActiveTenantSchemaState(connection);
     }
 
@@ -821,7 +879,8 @@ public final class ProductionBootstrapCli {
                         select count(*)
                         from %s.tenant_schema_history
                         where version = '%d' and success
-                        """.formatted(quotedIdentifier(schemaName), TARGET_VERSION), 1, schemaName + " tenant migration version");
+                        """.formatted(quotedIdentifier(schemaName), MIGRATION_TARGETS.tenantTarget()),
+                        1, schemaName + " tenant migration version");
                 String actualChecksum = fingerprint(connection, schemaName);
                 if (recordedChecksum == null
                         || !recordedChecksum.equals(actualChecksum)
@@ -934,87 +993,7 @@ public final class ProductionBootstrapCli {
     }
 
     private static String fingerprint(Connection connection, String schemaName) throws Exception {
-        String sql = """
-                with objects as (
-                    select concat_ws('|', 'column', c.table_name, c.ordinal_position::text, c.column_name,
-                           c.data_type, coalesce(c.character_maximum_length::text, ''),
-                           c.is_nullable, coalesce(c.column_default, ''))::text as definition
-                    from information_schema.columns c
-                    where c.table_schema = ? and c.table_name not in ('tenant_schema_history', 'flyway_schema_history')
-                    union all
-                    select concat_ws('|', 'constraint', cl.relname::text, con.contype::text,
-                           pg_get_constraintdef(con.oid))::text
-                    from pg_constraint con
-                    join pg_class cl on cl.oid = con.conrelid
-                    join pg_namespace n on n.oid = cl.relnamespace
-                    where n.nspname = ?
-                    union all
-                    select concat_ws('|', 'index', tab.relname::text, idx.relname::text,
-                           i.indisunique::text, i.indisprimary::text, i.indkey::text,
-                           i.indclass::text, i.indcollation::text, i.indoption::text,
-                           regexp_replace(
-                               regexp_replace(coalesce(pg_get_expr(i.indexprs, i.indrelid), ''),
-                                   '::(character varying|text)(\\[\\])?', '', 'g'),
-                               '[()[:space:]]', '', 'g'),
-                           regexp_replace(
-                               regexp_replace(coalesce(pg_get_expr(i.indpred, i.indrelid), ''),
-                                   '::(character varying|text)(\\[\\])?', '', 'g'),
-                               '[()[:space:]]', '', 'g'))::text
-                    from pg_index i
-                    join pg_class idx on idx.oid = i.indexrelid
-                    join pg_class tab on tab.oid = i.indrelid
-                    join pg_namespace n on n.oid = tab.relnamespace
-                    where n.nspname = ?
-                    union all
-                    select concat_ws('|', 'sequence', sequence_name, data_type, increment,
-                           minimum_value, maximum_value, cycle_option)::text
-                    from information_schema.sequences where sequence_schema = ?
-                    union all
-                    select concat_ws('|', 'rls', c.relname::text, c.relrowsecurity::text,
-                           c.relforcerowsecurity::text, coalesce(p.polname::text, ''),
-                           coalesce(pg_get_expr(p.polqual, p.polrelid), ''),
-                           coalesce(pg_get_expr(p.polwithcheck, p.polrelid), ''))::text
-                    from pg_class c
-                    join pg_namespace n on n.oid = c.relnamespace
-                    left join pg_policy p on p.polrelid = c.oid
-                    where n.nspname = ? and c.relkind in ('r', 'p')
-                      and c.relname not in ('tenant_schema_history', 'flyway_schema_history')
-                )
-                select definition from objects order by definition
-                """;
-        List<String> definitions = new ArrayList<>();
-        String originalSearchPath;
-        try (Statement statement = connection.createStatement();
-             ResultSet result = statement.executeQuery("SHOW search_path")) {
-            result.next();
-            originalSearchPath = result.getString(1);
-        }
-        try {
-            try (PreparedStatement setSearchPath = connection.prepareStatement(
-                    "select set_config('search_path', 'pg_catalog', false)")) {
-                setSearchPath.execute();
-            }
-            try (PreparedStatement statement = connection.prepareStatement(sql)) {
-                for (int index = 1; index <= 5; index++) {
-                    statement.setString(index, schemaName);
-                }
-                try (ResultSet result = statement.executeQuery()) {
-                    while (result.next()) {
-                        definitions.add(result.getString(1));
-                    }
-                }
-            }
-        } finally {
-            try (PreparedStatement restoreSearchPath = connection.prepareStatement(
-                    "select set_config('search_path', ?, false)")) {
-                restoreSearchPath.setString(1, originalSearchPath);
-                restoreSearchPath.execute();
-            }
-        }
-        String normalized = String.join("\n", definitions).replace(schemaName, "<tenant_schema>");
-        normalized = UUID_VALUE.matcher(normalized).replaceAll("<tenant_id>");
-        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                .digest(normalized.getBytes(StandardCharsets.UTF_8)));
+        return TenantSchemaFingerprint.of(connection, schemaName);
     }
 
     private static void acquireLock(Connection connection) throws SQLException {
@@ -1142,7 +1121,7 @@ public final class ProductionBootstrapCli {
             String resendFromDomain
     ) {
         static Config fromEnvironment() {
-            String dbUrl = required("DB_URL");
+            String dbUrl = boundedJdbcUrl(required("DB_URL"));
             boolean setupLinkEnabled = Boolean.parseBoolean(env("PLATFORM_OWNER_SETUP_LINK_ENABLED", "false"));
             boolean ownerBootstrapEnabled = Boolean.parseBoolean(
                     env("APP_PLATFORM_OWNER_BOOTSTRAP_ENABLED", "false")) || setupLinkEnabled;
@@ -1187,6 +1166,19 @@ public final class ProductionBootstrapCli {
             throw new IllegalArgumentException("DB_URL must include a database name");
         }
         return withoutQuery.substring(slashIndex + 1);
+    }
+
+    private static String boundedJdbcUrl(String jdbcUrl) {
+        String bounded = jdbcUrl;
+        String separator = jdbcUrl.contains("?") ? "&" : "?";
+        if (!jdbcUrl.matches("(?i).*([?&])connectTimeout=.*")) {
+            bounded += separator + "connectTimeout=10";
+            separator = "&";
+        }
+        if (!bounded.matches("(?i).*([?&])socketTimeout=.*")) {
+            bounded += separator + "socketTimeout=30";
+        }
+        return bounded;
     }
 
     private record TenantSchema(UUID tenantId, String schemaName, String status) {

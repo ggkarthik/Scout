@@ -15,8 +15,12 @@
     "mode": "ARTIFACT_FACTS",
     "artifactFacts": {
       "predicate": {
-        "fact": "agcf.agcf-azr-020.evidence",
-        "eq": true
+        "not": {
+          "fact": "mcp.server_hostname_configured",
+          "in": {
+            "parameter": "approvedMcpServerHosts"
+          }
+        }
       }
     }
   },
@@ -31,10 +35,10 @@
   "releaseFamily": "AGCF_PHASE_1",
   "wave": "PHASE_1",
   "workflowClass": "POSTURE_FINDING",
-  "artifactTypes": [
-    "AI_ARTIFACT"
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AZURE_FOUNDRY_MCP_SERVER"
   ],
-  "nativeKinds": [],
   "requiredCapabilities": [
     "FOUNDRY_AGENTS_TOOLS"
   ],
@@ -42,10 +46,10 @@
   "requiredResourceFamilies": [],
   "requiredFacts": [
     {
-      "factKey": "agcf.agcf-azr-020.evidence",
-      "valueType": "BOOLEAN",
+      "factKey": "mcp.server_hostname_configured",
+      "valueType": "STRING",
       "evidenceClasses": [
-        "E1"
+        "CONFIGURATION"
       ],
       "maxAgeSeconds": 86400
     }
@@ -82,18 +86,20 @@
   ],
   "parameterDefinitions": [
     {
-      "key": "approvedBaseline",
-      "type": "STRING",
-      "defaultValue": "DEFAULT"
+      "key": "approvedMcpServerHosts",
+      "type": "STRING_LIST",
+      "defaultValue": []
     }
   ],
   "certificationParameterProfile": {
     "immutable": true,
     "pass": {
-      "approvedBaseline": "DEFAULT"
+      "approvedMcpServerHosts": []
     },
     "fail": {
-      "approvedBaseline": "STRICT"
+      "approvedMcpServerHosts": [
+        "CERTIFICATION_APPROVED_VALUE"
+      ]
     },
     "invalid": {}
   },

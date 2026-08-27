@@ -24,6 +24,7 @@ class ProductionBootstrapCliPostgresIntegrationTest {
     private static final String RUNTIME_USERNAME = "scout_runtime_bootstrap_it";
     private static final String RUNTIME_PASSWORD = "scout-runtime-bootstrap-it-" + UUID.randomUUID();
     private static final String PLATFORM_OWNER_EMAIL = "bootstrap-owner@example.test";
+    private static final int TENANT_TARGET_VERSION = PackagedMigrationCatalog.resolve().tenantTarget();
 
     @Test
     void cleanDatabaseBootstrapsProvisionsTenantAndRerunsIdempotently() throws Exception {
@@ -41,7 +42,7 @@ class ProductionBootstrapCliPostgresIntegrationTest {
             }
         });
 
-        assertEquals(87, queryInt("""
+        assertEquals(PackagedMigrationCatalog.resolve().platformTarget(), queryInt("""
                 select max(version::integer)
                 from public.flyway_schema_history
                 where version ~ '^[0-9]+$' and success
@@ -58,10 +59,10 @@ class ProductionBootstrapCliPostgresIntegrationTest {
                 from platform.tenant_schema_versions
                 where schema_name = 'tenant_default'
                   and status = 'CURRENT'
-                  and current_version = 67
-                  and last_successful_version = 67
+                  and current_version = %d
+                  and last_successful_version = %d
                   and nullif(structural_checksum, '') is not null
-                """));
+                """.formatted(TENANT_TARGET_VERSION, TENANT_TARGET_VERSION)));
         assertEquals(1, queryInt("""
                 select count(*)
                 from platform.app_users u
@@ -75,8 +76,8 @@ class ProductionBootstrapCliPostgresIntegrationTest {
         assertEquals(1, queryInt("""
                 select count(*)
                 from tenant_default.tenant_schema_history
-                where version = '67' and success
-                """));
+                where version = '%d' and success
+                """.formatted(TENANT_TARGET_VERSION)));
         assertTrue(queryInt("""
                 select count(*)
                 from pg_roles
@@ -100,9 +101,9 @@ class ProductionBootstrapCliPostgresIntegrationTest {
                   on template.schema_name = 'tenant_default'
                 where customer.tenant_id = ?
                   and customer.status = 'CURRENT'
-                  and customer.current_version = 67
+                  and customer.current_version = %d
                   and customer.structural_checksum = template.structural_checksum
-                """, tenantId));
+                """.formatted(TENANT_TARGET_VERSION), tenantId));
         assertEquals(0, queryInt("""
                 select count(*)
                 from pg_constraint con
@@ -163,8 +164,8 @@ class ProductionBootstrapCliPostgresIntegrationTest {
             assertEquals(1, queryInt("""
                     select count(*)
                     from tenant_default.tenant_schema_history
-                    where version = '67' and success
-                    """));
+                    where version = '%d' and success
+                    """.formatted(TENANT_TARGET_VERSION)));
         });
     }
 
@@ -189,8 +190,8 @@ class ProductionBootstrapCliPostgresIntegrationTest {
             assertEquals(1, queryInt("""
                     select count(*)
                     from %s.tenant_schema_history
-                    where version = '67' and success
-                    """.formatted(schemaName)));
+                    where version = '%d' and success
+                    """.formatted(schemaName, TENANT_TARGET_VERSION)));
         });
     }
 
