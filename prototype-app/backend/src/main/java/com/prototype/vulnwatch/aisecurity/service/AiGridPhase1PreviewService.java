@@ -97,9 +97,9 @@ public class AiGridPhase1PreviewService {
         if (!List.of("PASSED", "FAILED").contains(command.status())) throw badRequest("status must be PASSED or FAILED");
         if ("CERTIFICATION_246".equals(gateKey) && "PASSED".equals(command.status())) {
             Map<String, Object> results = command.results() == null ? Map.of() : command.results();
-            if (!number(results, "caseCount", -1).equals(246)
-                    || !number(results, "matchedCases", -1).equals(246)
-                    || !number(results, "falsePasses", -1).equals(0)
+            if (number(results, "caseCount", -1) != 246
+                    || number(results, "matchedCases", -1) != 246
+                    || number(results, "falsePasses", -1) != 0
                     || !Boolean.TRUE.equals(results.get("engineProvenance"))
                     || !Boolean.TRUE.equals(results.get("digestMatches"))) {
                 throw badRequest("CERTIFICATION_246 requires 246 matched engine-backed cases, zero false PASS results, provenance, and digest binding");
@@ -336,10 +336,10 @@ public class AiGridPhase1PreviewService {
         catch (Exception ex) { return Map.of("evidence", value == null ? "" : value); }
     }
     private String blank(String value) { return value == null || value.isBlank() ? null : value.trim(); }
-    private Integer number(Map<String, Object> values, String key, int fallback) {
+    private int number(Map<String, Object> values, String key, int fallback) {
         Object value = values.get(key);
         if (value instanceof Number number) return number.intValue();
-        return value instanceof String text && text.matches("-?\\d+") ? Integer.valueOf(text) : fallback;
+        return value instanceof String text && text.matches("-?\\d+") ? Integer.parseInt(text) : fallback;
     }
     private ResponseStatusException badRequest(String message) { return new ResponseStatusException(HttpStatus.BAD_REQUEST, message); }
     private ResponseStatusException conflict(String message) { return new ResponseStatusException(HttpStatus.CONFLICT, message); }
