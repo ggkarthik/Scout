@@ -41,7 +41,9 @@ def violations(sql: str, require_header: bool = True) -> list[str]:
         (r"\b(?:create|alter|drop|truncate)\s+(?:table|sequence|view|policy)\s+"
          r"(?:if\s+(?:not\s+)?exists\s+)?", "unqualified platform DDL"),
         (r"\binsert\s+into\s+", "unqualified INSERT"),
-        (r"(?<!before )(?<!do )\bupdate\s+", "unqualified UPDATE"),
+        # Do not treat trigger declarations such as `AFTER UPDATE OF ... ON`
+        # as UPDATE statements. The trigger body is checked separately.
+        (r"(?<!before )(?<!do )(?<!after )\bupdate\s+(?!of\b|on\b)", "unqualified UPDATE"),
         (r"\bdelete\s+from\s+", "unqualified DELETE"),
         (r"\breferences\s+", "unqualified REFERENCES"),
     ]
