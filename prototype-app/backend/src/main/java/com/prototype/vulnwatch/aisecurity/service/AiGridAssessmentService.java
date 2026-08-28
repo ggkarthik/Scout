@@ -291,7 +291,7 @@ public class AiGridAssessmentService {
                        evaluation_mode,evaluation_definition_json::text,p.provider
                   from platform.ai_grid_policy_versions p
                   join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id and d.available=true
-                 where p.release_family = 'AGCF_PHASE_1'
+                where (p.release_family = 'AGCF_PHASE_1' or p.release_family is null)
                    and p.lifecycle in ('PUBLISHED', 'CANARY')
                    and (d.rollout_stage = 'GENERAL_AVAILABILITY'
                         or (d.rollout_stage = 'CANARY' and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
