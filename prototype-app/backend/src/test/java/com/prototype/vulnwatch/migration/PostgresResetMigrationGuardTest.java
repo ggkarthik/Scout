@@ -32,7 +32,7 @@ class PostgresResetMigrationGuardTest {
     private static final List<String> OBJECT_PREFIXES = List.of(
             "\\b(?:create|alter|drop|truncate)\\s+(?:table|sequence|view|policy)\\s+(?:if\\s+(?:not\\s+)?exists\\s+)?",
             "\\binsert\\s+into\\s+",
-            "(?<!before )(?<!do )\\bupdate\\s+",
+            "(?<!before )(?<!do )(?<!after )\\bupdate\\s+(?!of\\b|on\\b)",
             "\\bdelete\\s+from\\s+",
             "\\breferences\\s+");
     private static final Pattern UNQUALIFIED_INDEX_TARGET = Pattern.compile(
