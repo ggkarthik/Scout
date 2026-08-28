@@ -78,7 +78,7 @@ describe('AiPoliciesPage', () => {
     expect(screen.getByRole('heading', { name: 'Public knowledge-base S3 source' })).toBeInTheDocument();
   });
 
-  it('groups by provider and reveals capability setup items and framework mappings on expand', async () => {
+  it('groups by provider and opens metadata in the policy overview', async () => {
     vi.spyOn(api, 'listAiGridPolicies').mockResolvedValue([
       buildPolicy({
         policyId: 'AGCF-AWS-013', name: 'Sensitive-data agent lacks PII guardrail',
@@ -87,18 +87,26 @@ describe('AiPoliciesPage', () => {
       }),
       buildPolicy({ policyId: 'AGCF-AZR-001', name: 'Azure public network access', provider: 'AZURE' }),
     ]);
+    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([{
+      id: 'AGCF-AWS-013', version: '1.0.0', name: 'Sensitive-data agent lacks PII guardrail', severity: 'CRITICAL',
+      artifactTypes: [], requiredResourceFamilies: [], description: 'Require a PII guardrail.',
+      remediation: 'Attach a PII guardrail.', controlMappings: {}, available: true, enabled: true,
+      openFindings: 0, lifetimeFindings: 0, lastEvaluatedAt: null, decisionCoverage: 1, decisionCoverageThreshold: 1,
+      decisionCoverageStatus: 'PASS', evaluatedArtifacts: 1, noDecisionCount: 0,
+    }]);
+    vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({ items: [], page: 0, size: 200, total: 0 });
     renderPoliciesPage();
 
     await screen.findByText('Sensitive-data agent lacks PII guardrail');
     // Two provider groups render as separate section headings.
     expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(2);
-    // A conditional-capability policy is flagged, and detail is hidden until expanded.
+    // A conditional-capability policy is flagged, but metadata is no longer inline.
     expect(screen.getByText(/needs capability/)).toBeInTheDocument();
     expect(screen.queryByText('Required connector capabilities')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Expand Sensitive-data agent lacks PII guardrail/ }));
+    fireEvent.click(screen.getByText('Sensitive-data agent lacks PII guardrail').closest('tr')!);
 
-    expect(screen.getByText('Required connector capabilities')).toBeInTheDocument();
+    expect(await screen.findByText('Required connector capabilities')).toBeInTheDocument();
     expect(screen.getByText('DIRECT')).toBeInTheDocument();
     expect(screen.getByText('PII guardrail reduces sensitive disclosure.')).toBeInTheDocument();
   });
