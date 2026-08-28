@@ -84,6 +84,9 @@ const OperationalDashboardPage = React.lazy(async () => ({
 const VulnRepoDashboardPage = React.lazy(async () => ({
   default: (await import('./pages/VulnRepoDashboardPage')).VulnRepoDashboardPage
 }));
+const PlatformVulnRepoPoliciesPage = React.lazy(async () => ({
+  default: (await import('./pages/PlatformVulnRepoPoliciesPage')).PlatformVulnRepoPoliciesPage
+}));
 const PlatformVulnIntelDetailPage = React.lazy(async () => ({
   default: (await import('./pages/PlatformVulnIntelDetailPage')).PlatformVulnIntelDetailPage
 }));
@@ -730,14 +733,12 @@ function AppShell() {
       ? 'campaigns'
     : vulnRepoSegment === 'org-cves'
       ? 'org-cves'
+    : vulnRepoSegment === 'policies'
+      ? 'policies'
       : 'dashboard';
   const isPlatformScope = actor?.platformScope ?? false;
   const platformScopeOwner = canAccessPlatformConsole(actor) && isPlatformScope;
   const aiSecurityEnabled = canUseEntitlement(actor, 'ai.security') && !isPlatformScope;
-  const visibleVulnRepoNavItems = React.useMemo(
-    () => VULN_REPO_NAV_ITEMS,
-    []
-  );
   const visiblePrimaryNavTabs = React.useMemo(() => {
     if (platformScopeOwner) {
       return ['vuln-repo', 'connect', 'platform', 'end-of-life'] satisfies AppTab[];
@@ -952,6 +953,19 @@ function AppShell() {
 
           <div className="nav-main-section">
             {visiblePrimaryNavTabs.filter((tab) => tab !== 'admin' && tab !== 'configurations').map((tab) => {
+              if (tab === 'vuln-repo' && platformScopeOwner) {
+                return (
+                  <React.Fragment key={tab}>
+                    {renderNavButton(tab)}
+                    <button
+                      className={activeVulnRepoView === 'policies' ? 'nav-btn active' : 'nav-btn'}
+                      onClick={() => navigate(pathForVulnRepoView('policies'))}
+                    >
+                      <span className="nav-label">AI Policies</span>
+                    </button>
+                  </React.Fragment>
+                );
+              }
               if (tab === 'findings' && aiSecurityEnabled) {
                 return renderExpandableNavButton(
                   tab,
@@ -1133,7 +1147,7 @@ function AppShell() {
 
           {activeTab === 'vuln-repo' && (
             <div className="section-tab-row">
-              {visibleVulnRepoNavItems.map((item) => (
+              {VULN_REPO_NAV_ITEMS.map((item) => (
                 <button
                   key={item.key}
                   type="button"
@@ -1163,6 +1177,7 @@ function AppShell() {
               <Route path="/vulnerability-intelligence/vulnerabilities" element={<LegacyVulnerabilityIntelVulnerabilitiesRoute />} />
               <Route path="/vulnerability-intelligence/org-cves/:cveId?" element={<LegacyVulnerabilityIntelWorkbenchRoute />} />
               <Route path="/vuln-repo" element={<VulnRepoDashboardRoute />} />
+              <Route path="/vuln-repo/policies" element={<PlatformVulnRepoPoliciesPage />} />
               <Route path="/vuln-repo/intel/:externalId" element={<PlatformVulnIntelDetailPage />} />
               <Route path="/vuln-repo/vulnerabilities" element={<VulnRepoVulnerabilitiesPage />} />
               <Route path="/vuln-repo/campaigns" element={<CampaignsPage />} />

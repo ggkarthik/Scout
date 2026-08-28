@@ -19,7 +19,7 @@ export type AppTab =
   | 'configurations';
 
 export type OperationsRouteView = 'quality' | 'pipeline' | 'platform-health';
-export type VulnerabilityIntelRouteView = 'dashboard' | 'vulnerabilities' | 'campaigns' | 'end-of-life' | 'org-cves';
+export type VulnerabilityIntelRouteView = 'dashboard' | 'vulnerabilities' | 'campaigns' | 'end-of-life' | 'org-cves' | 'policies';
 export type ConnectRouteView = 'sources' | 'run-history';
 export type AdminRouteView = 'users' | 'invites' | 'roles' | 'service-accounts' | 'audit';
 export type PlatformRouteView = 'tenants' | 'users' | 'platform-audit' | 'demo-requests' | 'operations' | 'vuln-intel' | 'eol' | 'ai-policies';
@@ -325,6 +325,9 @@ export function pathForVulnRepoView(view: VulnerabilityIntelRouteView, cveId?: s
   }
   if (view === 'end-of-life') {
     return pathForPlatformView('eol');
+  }
+  if (view === 'policies') {
+    return '/vuln-repo/policies';
   }
   return cveId ? `/vuln-repo/org-cves/${encodeURIComponent(cveId)}` : '/vuln-repo/org-cves';
 }

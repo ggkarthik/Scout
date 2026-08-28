@@ -1014,6 +1014,14 @@
 .ai-policy-detail-row > td { background: rgba(148, 163, 184, 0.08); }
 .ai-policy-detail { display: flex; flex-direction: column; gap: 0.75rem; padding: 0.5rem 0.25rem; }
 .ai-policy-detail-block > strong { display: block; margin-bottom: 0.25rem; }
+.ai-policy-overview-metadata { padding: 8px 16px 12px; font-size: 0.82rem; color: var(--title); }
+.ai-policy-overview-metadata .ai-policy-detail { gap: 0.65rem; padding: 0; }
+.ai-policy-overview-metadata .ai-policy-detail-evidence { margin: 0; line-height: 1.45; }
+.ai-policy-overview-metadata .ai-policy-detail-block > strong { font-family: var(--font-mono, monospace); font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted, #8b9cb6); }
+.ai-policy-overview-metadata .ai-policy-detail-block > p { margin: 0; line-height: 1.45; }
+.ai-policy-overview-metadata .ai-policy-setup-list,
+.ai-policy-overview-metadata .ai-policy-mapping-list { font-size: 0.82rem; line-height: 1.45; }
+.ai-policy-overview-metadata .ai-policy-mapping-list small { font-size: 0.75rem; color: var(--text-muted, #8b9cb6); }
 .ai-policy-setup-list, .ai-policy-mapping-list { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.35rem; }
 .ai-policy-mapping-type { font-size: 0.75rem; font-weight: 600; padding: 0.05rem 0.4rem; border-radius: 0.5rem; background: rgba(59, 130, 246, 0.15); }
 .ai-policy-deprecation-banner ul { margin: 0.5rem 0 0; padding-left: 1.1rem; }

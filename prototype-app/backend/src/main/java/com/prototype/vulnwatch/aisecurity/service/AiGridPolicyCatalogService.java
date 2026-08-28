@@ -201,8 +201,8 @@ public class AiGridPolicyCatalogService {
               from platform.ai_grid_policy_distribution d join lateral (
                   select * from platform.ai_grid_policy_versions p where p.policy_id=d.policy_id
                   order by p.published_at desc nulls last,p.version desc limit 1) p on true
-             where (:releaseFamily is null or p.release_family = :releaseFamily)
-               and (:lifecycle is null or p.lifecycle = :lifecycle)
+             where (cast(:releaseFamily as text) is null or p.release_family = cast(:releaseFamily as text))
+               and (cast(:lifecycle as text) is null or p.lifecycle = cast(:lifecycle as text))
              order by p.provider,p.policy_id
             """, new MapSqlParameterSource().addValue("releaseFamily", family).addValue("lifecycle", lifecycleFilter),
                 (rs, n) -> new Distribution(rs.getString(1),rs.getBoolean(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7),rs.getTimestamp(8).toInstant(),rs.getString(9),rs.getString(10),rs.getString(11),rs.getString(12),rs.getString(13),rs.getString(14),rs.getString(15),rs.getString(16),rs.getString(17),rs.getString(18),rs.getString(19),rs.getString(20))));
