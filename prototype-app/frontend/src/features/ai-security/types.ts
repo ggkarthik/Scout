@@ -262,6 +262,36 @@ export type AiGridPhase1MigrationPreview = {
 
 export type AiGridPhase1MigrationResult = Omit<AiGridPhase1MigrationPreview, 'blockers'>;
 
+export type AiGridPhase1PreviewGate = {
+  gateKey: string;
+  status: 'PENDING' | 'PASSED' | 'FAILED' | string;
+  evidenceReference: string | null;
+  resultsJson: string;
+  recordedBy: string | null;
+  recordedAt: string | null;
+};
+
+export type AiGridPhase1PreviewStatus = {
+  manifestDigest: string;
+  totalPolicies: number;
+  providerCounts: Record<string, number>;
+  defaultSelectionCounts: Record<string, number>;
+  state: string;
+  internalTenantId: string | null;
+  approvedCohort: string[];
+  gates: AiGridPhase1PreviewGate[];
+  blockers: string[];
+};
+
+export type AiGridPhase1PreviewCertificationProfile = {
+  sourceManifestDigest: string;
+  profileDigest: string;
+  posturePolicies: number;
+  correlationPolicies: number;
+  caseCount: number;
+  scenarioCounts: Record<string, number>;
+};
+
 export type AiGridPolicyTenantReconciliation = {
   tenantId: string;
   tenantName: string;

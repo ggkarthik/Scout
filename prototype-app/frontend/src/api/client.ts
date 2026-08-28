@@ -530,6 +530,8 @@ import type {
   AiGridPhase1CorpusReadiness,
   AiGridPhase1CorpusCertification,
   AiGridPhase1MigrationPreview,
+  AiGridPhase1PreviewCertificationProfile,
+  AiGridPhase1PreviewStatus,
   AiGridPhase1MigrationResult,
   AiGridControlCoverage,
   AiGridOwaspCoverage,
@@ -1393,6 +1395,16 @@ export const api = {
   getPlatformAiGridPhase1CertificationReadiness: () => request<AiGridPhase1CertificationReadiness>(
     '/platform/ai-grid/validation/releases/phase-1/certification-readiness',
   ),
+  getPlatformAiGridPhase1PreviewStatus: () => request<AiGridPhase1PreviewStatus>('/platform/ai-grid/releases/phase-1/preview'),
+  getPlatformAiGridPhase1PreviewProfile: () => request<AiGridPhase1PreviewCertificationProfile>('/platform/ai-grid/releases/phase-1/preview/profile'),
+  recordPlatformAiGridPhase1PreviewGate: (gateKey: string, payload: { status: 'PASSED' | 'FAILED'; evidenceReference: string; results?: Record<string, unknown> }) =>
+    request<AiGridPhase1PreviewStatus>(`/platform/ai-grid/releases/phase-1/preview/gates/${encodeURIComponent(gateKey)}`, { method: 'POST', body: JSON.stringify(payload) }),
+  promotePlatformAiGridPhase1Internal: (tenantId: string) =>
+    request<AiGridPhase1PreviewStatus>('/platform/ai-grid/releases/phase-1/preview/promote-internal', { method: 'POST', body: JSON.stringify({ tenantId }) }),
+  setPlatformAiGridPhase1PreviewCohort: (tenantIds: string[]) =>
+    request<AiGridPhase1PreviewStatus>('/platform/ai-grid/releases/phase-1/preview/cohort', { method: 'POST', body: JSON.stringify({ tenantIds }) }),
+  pausePlatformAiGridPhase1Preview: () => request<AiGridPhase1PreviewStatus>('/platform/ai-grid/releases/phase-1/preview/pause', { method: 'POST' }),
+  resumePlatformAiGridPhase1Preview: () => request<AiGridPhase1PreviewStatus>('/platform/ai-grid/releases/phase-1/preview/resume', { method: 'POST' }),
   bootstrapPlatformAiGridPhase1CertificationCorpus: (payload: { engineeringOwner: string; securityReviewer: string; reviewDueAt: string }) =>
     request<AiGridPhase1CorpusBootstrap>('/platform/ai-grid/validation/releases/phase-1/certification-corpus/bootstrap', {
       method: 'POST', body: JSON.stringify(payload),

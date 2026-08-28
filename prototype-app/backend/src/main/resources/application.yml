@@ -117,6 +117,7 @@ app:
     bootstrap:
       platform-owners:
         enabled: ${APP_PLATFORM_OWNER_BOOTSTRAP_ENABLED:false}
+        local-password: ${APP_LOCAL_PLATFORM_OWNER_PASSWORD:}
         users: []
     playground:
       memberships:

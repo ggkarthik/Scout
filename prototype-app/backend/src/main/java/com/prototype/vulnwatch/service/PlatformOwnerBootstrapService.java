@@ -7,10 +7,14 @@ import java.time.Instant;
 import java.util.Locale;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.security.crypto.bcrypt.BCrypt;
 
 @Service
 public class PlatformOwnerBootstrapService implements ApplicationRunner {
@@ -20,15 +24,27 @@ public class PlatformOwnerBootstrapService implements ApplicationRunner {
     private final PlatformOwnerBootstrapProperties properties;
     private final AppUserRepository userRepository;
     private final AppUserGlobalRoleService appUserGlobalRoleService;
+    private final Environment environment;
+
+    @Autowired
+    public PlatformOwnerBootstrapService(
+            PlatformOwnerBootstrapProperties properties,
+            AppUserRepository userRepository,
+            AppUserGlobalRoleService appUserGlobalRoleService,
+            Environment environment
+    ) {
+        this.properties = properties;
+        this.userRepository = userRepository;
+        this.appUserGlobalRoleService = appUserGlobalRoleService;
+        this.environment = environment;
+    }
 
     public PlatformOwnerBootstrapService(
             PlatformOwnerBootstrapProperties properties,
             AppUserRepository userRepository,
             AppUserGlobalRoleService appUserGlobalRoleService
     ) {
-        this.properties = properties;
-        this.userRepository = userRepository;
-        this.appUserGlobalRoleService = appUserGlobalRoleService;
+        this(properties, userRepository, appUserGlobalRoleService, new StandardEnvironment());
     }
 
     @Override
@@ -64,6 +80,10 @@ public class PlatformOwnerBootstrapService implements ApplicationRunner {
         }
         user.setPlatformOwner(true);
         user.setStatus("ACTIVE");
+        if (isLocalProfile() && hasText(properties.getLocalPassword())) {
+            user.setPasswordHash(BCrypt.hashpw(properties.getLocalPassword(), BCrypt.gensalt(10)));
+            user.setPasswordSetAt(Instant.now());
+        }
         user.setUpdatedAt(Instant.now());
         user = userRepository.save(user);
         appUserGlobalRoleService.ensureRole(user, "PLATFORM_OWNER");
@@ -89,5 +109,9 @@ public class PlatformOwnerBootstrapService implements ApplicationRunner {
 
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private boolean isLocalProfile() {
+        return environment.matchesProfiles("local");
     }
 }

@@ -92,7 +92,12 @@ public class AiGridAssessmentService {
         RunEvaluationCache cache = new RunEvaluationCache(runId);
         boolean findingChanged = false;
         for (Policy policy : policies) {
-            predicates.validate(policy.predicate());
+            // Correlation-path policies are evaluated by the graph evidence resolver and
+            // intentionally have no artifact predicate. Only artifact-fact policies require
+            // validation by the leaf predicate engine.
+            if (!"CORRELATION_PATH".equals(policy.evaluationMode())) {
+                predicates.validate(policy.predicate());
+            }
             for (Artifact artifact : artifacts) {
                 if (!providerMatches(policy.provider(), artifact.provider())) continue;
                 if (!policy.artifactTypes().isEmpty() && !policy.artifactTypes().contains(artifact.artifactType())) continue;
@@ -286,7 +291,8 @@ public class AiGridAssessmentService {
                        evaluation_mode,evaluation_definition_json::text,p.provider
                   from platform.ai_grid_policy_versions p
                   join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id and d.available=true
-                 where p.lifecycle = 'PUBLISHED'
+                 where p.release_family = 'AGCF_PHASE_1'
+                   and p.lifecycle in ('PUBLISHED', 'CANARY')
                    and (d.rollout_stage = 'GENERAL_AVAILABILITY'
                         or (d.rollout_stage = 'CANARY' and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
                  order by p.policy_id, p.published_at desc, p.version desc
