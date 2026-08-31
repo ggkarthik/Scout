@@ -4250,6 +4250,10 @@ a.btn {
   font-size: 0.86rem;
 }
 
+.ops-table-row:hover {
+  background: color-mix(in srgb, var(--accent) 5%, var(--panel-solid));
+}
+
 .ops-table-row:last-child {
   border-bottom: 0;
 }
@@ -4262,6 +4266,38 @@ a.btn {
   grid-template-columns: minmax(130px, 1fr) minmax(160px, 1.2fr) minmax(150px, 1.2fr) minmax(260px, 2.4fr);
   align-items: start;
   min-width: 900px;
+}
+
+.platform-ops-action-header {
+  align-items: start;
+  gap: 14px;
+}
+
+.platform-ops-row-status {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: var(--panel-muted);
+  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.platform-ops-row-status--suspended,
+.platform-ops-row-status--expired {
+  border-color: color-mix(in srgb, var(--critical) 48%, var(--border));
+  color: var(--critical);
+}
+
+@media (max-width: 720px) {
+  .platform-ops-action-header {
+    display: grid;
+  }
+
+  .platform-ops-action-header .btn {
+    width: fit-content;
+  }
 }
 
 .match-breakdown {

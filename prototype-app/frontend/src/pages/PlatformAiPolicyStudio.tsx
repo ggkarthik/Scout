@@ -1,372 +1,139 @@
 import React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { AiGridControlCoverage, AiGridCoverageStatus, AiGridPhase1CertificationReadiness, AiGridPhase1CorpusReadiness, AiGridPhase1MigrationPreview, AiGridPlatformPolicyDetail, AiGridPolicyCandidate, AiGridPolicyDistribution, AiGridPolicyImpactPreview, AiGridPolicyReleaseReadiness, AiGridPolicySelection } from '../features/ai-security/types';
+import type { AiGridPolicyDistribution, AiGridPolicySelection } from '../features/ai-security/types';
 
-const SELECTIONS: AiGridPolicySelection[] = ['REQUIRED', 'ENABLED', 'PREVIEW', 'DISABLED'];
-const STAGES: AiGridPolicyDistribution['rolloutStage'][] = ['GENERAL_AVAILABILITY', 'CANARY', 'PAUSED', 'RETIRED'];
-const COVERAGE_STATUS_LABELS: Record<AiGridCoverageStatus, string> = {
-  AUTOMATED: 'Automated',
-  CONDITIONAL_AUTOMATED: 'Conditional (needs connector capability)',
-  PREVENTIVE_ONLY: 'Preventive configuration only',
-  REQUIRES_RUNTIME_OR_TEST: 'Requires runtime or test evidence',
-  NOT_COVERED: 'Not covered',
-};
+const DEFAULTS: AiGridPolicySelection[] = ['REQUIRED', 'ENABLED', 'DISABLED'];
+const ROLLOUTS: AiGridPolicyDistribution['rolloutStage'][] = ['GENERAL_AVAILABILITY', 'CANARY', 'PAUSED', 'RETIRED'];
 
-type PolicyStudioWorkspace = 'overview' | 'policies' | 'governance';
-type PolicyStudioFocusTarget = PolicyStudioWorkspace | 'certification' | 'migration' | 'portfolio';
+function owaspMappings(value?: string): string {
+  try {
+    return (JSON.parse(value ?? '[]') as Array<{ framework?: string; controlId?: string; mappingType?: string }>)
+      .filter((mapping) => mapping.framework === 'OWASP_GENAI_LLM_TOP_10' && /^LLM\d{2}$/.test(mapping.controlId ?? ''))
+      .map((mapping) => `${mapping.controlId} (${mapping.mappingType})`).join(', ') || '—';
+  } catch { return '—'; }
+}
 
-const POLICY_STUDIO_NAV_ITEMS: Array<{ id: PolicyStudioWorkspace; label: string; helper: string }> = [
-  { id: 'overview', label: 'Overview', helper: 'What needs your attention' },
-  { id: 'policies', label: 'Policies', helper: 'Manage governed controls and rollout' },
-  { id: 'governance', label: 'Governance', helper: 'Certification, migration, and coverage' },
-];
+function rolloutLabel(stage: AiGridPolicyDistribution['rolloutStage']): string {
+  return stage === 'GENERAL_AVAILABILITY' ? 'General availability' : stage.charAt(0) + stage.slice(1).toLowerCase();
+}
+
+function statusClass(value: string): string {
+  return `policy-status policy-status--${value.toLowerCase().replace(/_/g, '-')}`;
+}
+
+function parseCohort(value: string): string[] { try { return JSON.parse(value || '[]') as string[]; } catch { return []; } }
 
 export function PlatformAiPolicyStudio() {
-  const queryClient = useQueryClient();
-  const [activeWorkspace, setActiveWorkspace] = React.useState<PolicyStudioWorkspace>('overview');
-  const [focusTarget, setFocusTarget] = React.useState<PolicyStudioFocusTarget | null>(null);
-  const tabRefs = React.useRef<Record<PolicyStudioWorkspace, HTMLButtonElement | null>>({ overview: null, policies: null, governance: null });
-  const sectionRefs = React.useRef<Record<PolicyStudioFocusTarget, HTMLElement | null>>({ overview: null, policies: null, governance: null, certification: null, migration: null, portfolio: null });
-  const catalogQuery = useQuery({ queryKey: ['platform-ai-grid-policies'], queryFn: () => api.listPlatformAiGridPolicies() });
-  const tenantsQuery = useQuery({ queryKey: ['platform-policy-preview-tenants'], queryFn: api.listTenants });
-  const [tenantId, setTenantId] = React.useState('');
-  React.useEffect(() => {
-    if (!tenantId && tenantsQuery.data?.[0]) setTenantId(tenantsQuery.data[0].id);
-  }, [tenantId, tenantsQuery.data]);
-  const [preview, setPreview] = React.useState<AiGridPolicyImpactPreview | null>(null);
-  const frameworkCoverageQuery = useQuery({ queryKey: ['platform-ai-grid-framework-coverage', 'OWASP_GENAI_LLM_TOP_10', '2026'], queryFn: () => api.getPlatformAiGridFrameworkCoverage('OWASP_GENAI_LLM_TOP_10', '2026') });
-  const candidatesQuery = useQuery({ queryKey: ['platform-ai-grid-policy-candidates'], queryFn: api.getPlatformAiGridPolicyCandidates });
-  const certificationQuery = useQuery({ queryKey: ['platform-ai-grid-phase-1-certification'], queryFn: api.getPlatformAiGridPhase1CertificationReadiness });
-  const [providerFilter, setProviderFilter] = React.useState('ALL');
-  const [lifecycleFilter, setLifecycleFilter] = React.useState('ALL');
-  const mutation = useMutation({
-    mutationFn: ({ policy, patch, canaryTenantIds }: { policy: AiGridPolicyDistribution; patch: Partial<AiGridPolicyDistribution>; canaryTenantIds?: string[] }) => api.updatePlatformAiGridPolicyDistribution(policy.policyId, {
-      available: patch.available ?? policy.available,
-      defaultSelection: patch.defaultSelection ?? policy.defaultSelection,
-      rolloutStage: patch.rolloutStage ?? policy.rolloutStage,
-      pinnedVersion: patch.pinnedVersion ?? policy.pinnedVersion,
-      canaryTenantIds: canaryTenantIds ?? JSON.parse(policy.canaryTenantIdsJson || '[]'),
-    }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['platform-ai-grid-policies'] }),
+  const client = useQueryClient();
+  const [provider, setProvider] = React.useState('ALL');
+  const [rollout, setRollout] = React.useState('ALL');
+  const [selection, setSelection] = React.useState('ALL');
+  const [owasp, setOwasp] = React.useState('ALL');
+  const [query, setQuery] = React.useState('');
+  const [activePolicyId, setActivePolicyId] = React.useState<string | null>(null);
+  const catalog = useQuery({ queryKey: ['platform-ai-grid-policies'], queryFn: () => api.listPlatformAiGridPolicies({ releaseFamily: 'AGCF_PHASE_1', lifecycle: 'PUBLISHED' }) });
+  const shipping = useQuery({ queryKey: ['platform-ai-grid-shipping-status'], queryFn: api.getPlatformAiGridShippingStatus });
+  const tenants = useQuery({ queryKey: ['platform-ai-grid-active-tenants'], queryFn: api.listTenants });
+  const rollouts = useQuery({ queryKey: ['platform-ai-grid-policy-rollouts'], queryFn: api.listPlatformAiGridPolicyRollouts });
+  const update = useMutation({
+    mutationFn: ({ policy, patch, canaryTenantIds }: { policy: AiGridPolicyDistribution; patch: Partial<AiGridPolicyDistribution>; canaryTenantIds: string[] }) =>
+      api.updatePlatformAiGridPolicyDistribution(policy.policyId, {
+        available: patch.available ?? policy.available,
+        defaultSelection: patch.defaultSelection ?? policy.defaultSelection,
+        rolloutStage: patch.rolloutStage ?? policy.rolloutStage,
+        pinnedVersion: patch.pinnedVersion ?? policy.pinnedVersion,
+        canaryTenantIds,
+      }),
+    onSuccess: () => void Promise.all([
+      client.invalidateQueries({ queryKey: ['platform-ai-grid-policies'] }),
+      client.invalidateQueries({ queryKey: ['platform-ai-grid-shipping-status'] }),
+    ]),
   });
-  const catalog = catalogQuery.data ?? [];
-  const catalogLoaded = Array.isArray(catalogQuery.data);
-  const phase1Policies = catalog.filter((policy) => policy.releaseFamily === 'AGCF_PHASE_1');
-  const legacyPolicies = catalog.filter((policy) => policy.releaseFamily !== 'AGCF_PHASE_1');
-  const policies = phase1Policies.filter((policy) =>
-    (providerFilter === 'ALL' || policy.provider === providerFilter)
-    && (lifecycleFilter === 'ALL' || policy.lifecycle === lifecycleFilter));
-  const count = (value: string, field: 'provider' | 'defaultSelection' | 'lifecycle' | 'rolloutStage') =>
-    phase1Policies.filter((policy) => policy[field] === value).length;
-  const pendingPolicies = certificationQuery.data?.pendingPolicies ?? 0;
-  const canaryPolicies = count('CANARY', 'rolloutStage');
-  const coverageGaps = (frameworkCoverageQuery.data ?? []).filter((control) => control.coverageStatus === 'NOT_COVERED').length;
+  const retry = useMutation({
+    mutationFn: api.retryPlatformAiGridPolicyRollout,
+    onSuccess: () => void client.invalidateQueries({ queryKey: ['platform-ai-grid-policy-rollouts'] }),
+  });
+  const policies = React.useMemo(() => (catalog.data ?? []).filter((item) => {
+    const searchable = `${item.name} ${item.policyId} ${item.provider} ${owaspMappings(item.frameworkMappingsJson)}`.toLowerCase();
+    return (provider === 'ALL' || item.provider === provider)
+      && (rollout === 'ALL' || item.rolloutStage === rollout)
+      && (selection === 'ALL' || item.defaultSelection === selection)
+      && (owasp === 'ALL' || owaspMappings(item.frameworkMappingsJson).includes(owasp))
+      && (query.trim() === '' || searchable.includes(query.trim().toLowerCase()));
+  }), [catalog.data, owasp, provider, query, rollout, selection]);
+  const activePolicy = (catalog.data ?? []).find((policy) => policy.policyId === activePolicyId) ?? null;
+  const activeTenantIds = (tenants.data ?? []).filter((tenant) => tenant.status === 'ACTIVE').map((tenant) => tenant.id);
+  const hasFilters = provider !== 'ALL' || rollout !== 'ALL' || selection !== 'ALL' || owasp !== 'ALL' || query.trim() !== '';
 
-  React.useEffect(() => {
-    if (!focusTarget) return;
-    sectionRefs.current[focusTarget]?.focus();
-    setFocusTarget(null);
-  }, [activeWorkspace, focusTarget]);
+  return <section className="platform-ai-policy-studio">
+    <header className="ai-security-hero policies policy-studio-hero"><div>
+      <span className="ai-security-kicker">Tenant Management / Policies</span><h2>Policy distribution</h2>
+      <p>Ship a governed catalog, make tenant defaults clear, and stage rollout changes from one workspace.</p>
+    </div><div className={shipping.data?.blockers.length ? 'policy-shipping-state policy-shipping-state--blocked' : 'policy-shipping-state'}>
+      <span>{shipping.data?.blockers.length ? 'Action needed' : 'Catalog healthy'}</span>
+      <strong>{shipping.data?.blockers.length ? `${shipping.data.blockers.length} blocker${shipping.data.blockers.length === 1 ? '' : 's'}` : 'Ready to ship'}</strong>
+    </div></header>
+    <ShippingSummary status={shipping.data} />
+    {shipping.data?.blockers.length ? <p className="notice error">{shipping.data.blockers.join(' · ')}</p> : null}
 
-  const activateWorkspace = (workspace: PolicyStudioWorkspace, target: PolicyStudioFocusTarget) => {
-    setActiveWorkspace(workspace);
-    setFocusTarget(target);
-  };
-
-  const handleWorkspaceKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, workspace: PolicyStudioWorkspace) => {
-    const currentIndex = POLICY_STUDIO_NAV_ITEMS.findIndex((item) => item.id === workspace);
-    let nextIndex: number | null = null;
-    if (event.key === 'ArrowDown' || event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % POLICY_STUDIO_NAV_ITEMS.length;
-    if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + POLICY_STUDIO_NAV_ITEMS.length) % POLICY_STUDIO_NAV_ITEMS.length;
-    if (event.key === 'Home') nextIndex = 0;
-    if (event.key === 'End') nextIndex = POLICY_STUDIO_NAV_ITEMS.length - 1;
-    if (nextIndex == null) return;
-    event.preventDefault();
-    const next = POLICY_STUDIO_NAV_ITEMS[nextIndex].id;
-    activateWorkspace(next, next);
-    tabRefs.current[next]?.focus();
-  };
-
-  return (
-    <section className="platform-ai-policy-studio">
-      <aside className="platform-ai-policy-studio-sidebar">
-        <div className="platform-ai-policy-studio-sidebar-header">
-          <span className="ai-security-kicker">Platform controls</span>
-          <h3>Policy Studio</h3>
-        </div>
-        <nav className="platform-ai-policy-studio-nav" aria-label="AI Policy Studio sections" role="tablist" aria-orientation="vertical">
-          {POLICY_STUDIO_NAV_ITEMS.map((item) => (
-            <button key={item.id} ref={(element) => { tabRefs.current[item.id] = element; }} type="button" role="tab"
-              id={`policy-studio-tab-${item.id}`} aria-controls={`policy-studio-panel-${item.id}`} aria-selected={activeWorkspace === item.id}
-              tabIndex={activeWorkspace === item.id ? 0 : -1} className="platform-ai-policy-studio-nav-link"
-              onClick={() => activateWorkspace(item.id, item.id)} onKeyDown={(event) => handleWorkspaceKeyDown(event, item.id)}>
-              <span>{item.label}</span>
-              <small>{item.helper}</small>
-            </button>
-          ))}
-        </nav>
-      </aside>
-
-      <div className="platform-ai-policy-studio-content">
-        <section id="policy-studio-panel-overview" role="tabpanel" aria-labelledby="policy-studio-tab-overview" hidden={activeWorkspace !== 'overview'} className="platform-ai-policy-studio-workspace">
-        <header ref={(element) => { sectionRefs.current.overview = element; }} tabIndex={-1} className="ai-security-hero policies">
-          <div><span className="ai-security-kicker">Platform-owned, versioned controls</span><h2>AI Policy Studio</h2>
-            <p>Start with the controls and governance work that need your attention.</p></div>
-        </header>
-        <section className="panel"><h3>Attention required</h3>
-          <div className="policy-studio-attention-grid">
-            <button type="button" className="policy-studio-attention-card" onClick={() => activateWorkspace('governance', 'certification')}><strong>{pendingPolicies}</strong><span>policies awaiting release evidence</span><small>Review certification blockers</small></button>
-            <button type="button" className="policy-studio-attention-card" onClick={() => activateWorkspace('policies', 'policies')}><strong>{canaryPolicies}</strong><span>policies in canary</span><small>Review rollout cohorts</small></button>
-            <button type="button" className="policy-studio-attention-card" onClick={() => activateWorkspace('governance', 'portfolio')}><strong>{coverageGaps}</strong><span>framework coverage gaps</span><small>Review coverage and intake</small></button>
-            <button type="button" className="policy-studio-attention-card" onClick={() => activateWorkspace('governance', 'migration')}><strong>→</strong><span>tenant migration</span><small>Review an approved tenant migration</small></button>
-          </div>
-        </section>
-        </section>
-
-        <section id="policy-studio-panel-policies" role="tabpanel" aria-labelledby="policy-studio-tab-policies" hidden={activeWorkspace !== 'policies'} className="platform-ai-policy-studio-workspace">
-        <section ref={(element) => { sectionRefs.current.policies = element; }} tabIndex={-1} className="panel" aria-label="Phase 1 out-of-box catalog summary">
-          <h2>Policies</h2>
-          <p>Manage the governed policy catalog, tenant defaults, rollout, and expected tenant impact.</p>
-          {catalogQuery.isLoading ? <p role="status">Loading governed policy catalog…</p> : null}
-          {catalogQuery.isError ? (
-            <div className="notice error" role="alert">
-              <p>The governed policy catalog could not be loaded.</p>
-              <button type="button" className="btn btn-secondary" onClick={() => void catalogQuery.refetch()} disabled={catalogQuery.isFetching}>
-                {catalogQuery.isFetching ? 'Retrying…' : 'Retry catalog'}
-              </button>
-            </div>
-          ) : null}
-          <div className="summary-strip" aria-label="Phase 1 catalog summary"><span><strong>{catalogLoaded ? phase1Policies.length : '—'}</strong> total</span><span><strong>{catalogLoaded ? canaryPolicies : '—'}</strong> canary</span><span><strong>{catalogLoaded ? count('PAUSED', 'rolloutStage') : '—'}</strong> paused</span></div>
-          {catalogLoaded && phase1Policies.length !== 76 ? <p className="notice error">Catalog mismatch: expected 76 AGCF Phase 1 policies, received {phase1Policies.length}. Check migrations V75–V89 and the deployment smoke check.</p> : null}
-        </section>
-        <div className="connect-filter-bar connect-filter-bar--standalone" aria-label="Phase 1 catalog filters">
-          <label htmlFor="phase1-provider-filter">Provider</label>
-          <select id="phase1-provider-filter" value={providerFilter} onChange={(event) => setProviderFilter(event.target.value)}><option value="ALL">All providers</option><option value="AWS">AWS</option><option value="AZURE">Azure</option><option value="MULTI_CLOUD">Multi-resource</option></select>
-          <label htmlFor="phase1-lifecycle-filter">Lifecycle</label>
-          <select id="phase1-lifecycle-filter" value={lifecycleFilter} onChange={(event) => setLifecycleFilter(event.target.value)}><option value="ALL">All lifecycles</option><option value="VALIDATED">Validated</option><option value="PUBLISHED">Published</option><option value="RETIRED">Retired</option></select>
-        </div>
-        <div className="panel ai-security-table-panel">
-          <h3>AGCF Phase 1 governed policies</h3>
-          <p>Catalog readiness and tenant distribution are separate. VALIDATED/PAUSED rows remain visible here while tenant APIs continue to exclude them.</p>
-          <table className="data-table"><thead><tr><th>Policy</th><th>Provider</th><th>Version</th><th>Lifecycle</th><th>Readiness</th><th>Tenant distribution</th><th>Tenant default</th><th>Rollout</th><th>Actions</th></tr></thead>
-            <tbody>{policies.map((policy) => <PolicyRow key={policy.policyId} policy={policy} saving={mutation.isPending} tenantId={tenantId} onPreview={setPreview} onSave={(patch, canaryTenantIds) => mutation.mutate({ policy, patch, canaryTenantIds })} />)}</tbody>
-          </table>
-          {catalogLoaded && policies.length === 0 ? <div className="empty-state"><p>No Phase 1 policies match these filters.</p></div> : null}
-        </div>
-        {preview ? <ImpactPreview preview={preview} /> : null}
-        </section>
-
-        <section ref={(element) => { sectionRefs.current.governance = element; }} tabIndex={-1} id="policy-studio-panel-governance" role="tabpanel" aria-labelledby="policy-studio-tab-governance" hidden={activeWorkspace !== 'governance'} className="platform-ai-policy-studio-workspace">
-          <section ref={(element) => { sectionRefs.current.certification = element; }} tabIndex={-1}><CertificationLedger readiness={certificationQuery.data} loading={certificationQuery.isLoading} failed={certificationQuery.isError} /></section>
-          <section ref={(element) => { sectionRefs.current.migration = element; }} tabIndex={-1} className="platform-ai-policy-studio-governance-section">
-            <h2>Tenant migration</h2>
-            <div className="connect-filter-bar connect-filter-bar--standalone">
-              <label htmlFor="policy-preview-tenant">Impact-preview tenant</label>
-              <select id="policy-preview-tenant" value={tenantId} onChange={(event) => { setTenantId(event.target.value); setPreview(null); }}>
-                <option value="">Select tenant</option>{(tenantsQuery.data ?? []).map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}
-              </select>
-            </div>
-            <Phase1TenantMigration tenantId={tenantId} tenantName={(tenantsQuery.data ?? []).find((tenant) => tenant.id === tenantId)?.name} />
-            {legacyPolicies.length > 0 ? <LegacyPolicyCatalog policies={legacyPolicies} /> : null}
-          </section>
-          <section ref={(element) => { sectionRefs.current.portfolio = element; }} tabIndex={-1}><PolicyPortfolio coverage={frameworkCoverageQuery.data ?? []} candidates={candidatesQuery.data ?? []} /></section>
-        </section>
+    <section className="panel policy-catalog-panel">
+      <div className="panel-header policy-catalog-header"><div><h3>Policy catalog</h3><p className="panel-caption">Select a policy to manage its availability, default, rollout stage, and canary cohort without editing the table in place.</p></div>
+        <span className="policy-results-count">{policies.length} of {catalog.data?.length ?? 0} policies</span></div>
+      <div className="policy-filter-bar" aria-label="Policy catalog filters">
+        <label className="policy-search"><span>Find policy</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, ID, provider, or OWASP mapping" /></label>
+        <label>Provider <select value={provider} onChange={(event) => setProvider(event.target.value)}><option value="ALL">All providers</option><option value="AWS">AWS</option><option value="AZURE">Azure</option><option value="MULTI_CLOUD">Multi-cloud</option></select></label>
+        <label>Rollout <select value={rollout} onChange={(event) => setRollout(event.target.value)}><option value="ALL">All stages</option>{ROLLOUTS.map((value) => <option key={value} value={value}>{rolloutLabel(value)}</option>)}</select></label>
+        <label>Default <select value={selection} onChange={(event) => setSelection(event.target.value)}><option value="ALL">All defaults</option>{DEFAULTS.map((value) => <option key={value}>{value}</option>)}</select></label>
+        <label>OWASP <select value={owasp} onChange={(event) => setOwasp(event.target.value)}><option value="ALL">All mappings</option>{Array.from({ length: 10 }, (_, index) => `LLM${String(index + 1).padStart(2, '0')}`).map((value) => <option key={value}>{value}</option>)}</select></label>
+        {hasFilters ? <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setProvider('ALL'); setRollout('ALL'); setSelection('ALL'); setOwasp('ALL'); setQuery(''); }}>Clear filters</button> : null}
       </div>
+      {catalog.isLoading ? <p role="status">Loading shipped policies…</p> : null}
+      {catalog.isError ? <p className="notice error">The policy catalog could not be loaded.</p> : null}
+      <div className="policy-management-layout">
+        <div className="table-scroll policy-catalog-table"><table className="data-table"><thead><tr><th>Policy</th><th>Framework mapping</th><th>Availability</th><th>Tenant default</th><th>Rollout</th><th aria-label="Actions" /></tr></thead>
+          <tbody>{policies.length === 0 ? <tr><td colSpan={6} className="policy-empty-cell">No policies match the selected filters.</td></tr> : policies.map((policy) => <tr key={policy.policyId} className={activePolicyId === policy.policyId ? 'policy-catalog-row active' : 'policy-catalog-row'}>
+            <td><strong>{policy.name}</strong><br /><small>{policy.policyId} · {policy.provider} · {policy.severity} · v{policy.version}</small></td>
+            <td>{owaspMappings(policy.frameworkMappingsJson)}</td><td><span className={statusClass(policy.available ? 'available' : 'unavailable')}>{policy.available ? 'Available' : 'Unavailable'}</span></td>
+            <td><span className={statusClass(policy.defaultSelection)}>{policy.defaultSelection}</span></td><td><span className={statusClass(policy.rolloutStage)}>{rolloutLabel(policy.rolloutStage)}</span></td>
+            <td><button type="button" className="btn btn-secondary btn-sm" aria-label={`Manage ${policy.name}`} onClick={() => setActivePolicyId(policy.policyId)}>Manage</button></td>
+          </tr>)}</tbody></table></div>
+        <PolicyConfigurationPanel key={activePolicy?.policyId ?? 'empty'} policy={activePolicy} tenantIds={activeTenantIds} saving={update.isPending}
+          onClose={() => setActivePolicyId(null)} onSave={(policy, patch, cohort) => update.mutate({ policy, patch, canaryTenantIds: cohort })} />
+      </div>
+      {catalog.data && catalog.data.length !== 76 ? <p className="notice error">Catalog mismatch: expected 76 shipped policies, found {catalog.data.length}.</p> : null}
     </section>
-  );
-}
 
-function Phase1TenantMigration({ tenantId, tenantName }: { tenantId: string; tenantName?: string }) {
-  const queryClient = useQueryClient();
-  const [preview, setPreview] = React.useState<AiGridPhase1MigrationPreview | null>(null);
-  const [confirmation, setConfirmation] = React.useState('');
-  const previewMutation = useMutation({
-    mutationFn: () => api.getPlatformAiGridPhase1MigrationPreview(tenantId),
-    onSuccess: (result) => { setPreview(result); setConfirmation(''); },
-  });
-  const applyMutation = useMutation({
-    mutationFn: () => api.applyPlatformAiGridPhase1Migration(tenantId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['platform-ai-grid-policies'] });
-      void previewMutation.mutate();
-    },
-  });
-  const canApply = Boolean(preview && preview.actions.length > 0 && preview.blockers.length === 0 && confirmation === 'MIGRATE');
-  return <section className="panel"><h3>Phase 1 tenant migration</h3>
-    <p>Applies the approved legacy-policy ledger only to the selected tenant. It copies safe one-to-one selections/configuration, preserves history, and auto-closes only policies explicitly retired for insufficient evidence.</p>
-    <div className="connect-filter-bar connect-filter-bar--standalone"><button type="button" className="btn btn-secondary" disabled={!tenantId || previewMutation.isPending} onClick={() => previewMutation.mutate()}>{previewMutation.isPending ? 'Reviewing…' : `Preview ${tenantName ?? 'tenant'} migration`}</button></div>
-    {previewMutation.isError ? <p className="notice error">Migration preview could not be loaded.</p> : null}
-    {preview ? <><div className="summary-strip"><span><strong>{preview.legacySelections}</strong> legacy selections</span><span><strong>{preview.selectionCopies}</strong> selection copies</span><span><strong>{preview.retirements}</strong> retirements</span><span><strong>{preview.openFindingsToClose}</strong> findings to close</span><span><strong>{preview.openFindingsReconciled}</strong> findings reconciled</span><span><strong>{preview.parameterManualReviews}</strong> manual config reviews</span></div>
-      <DeprecationBanner actions={preview.actions} />
-      {preview.blockers.length > 0 ? <p className="notice error">Migration blocked: {preview.blockers.join(' · ')}</p> : preview.actions.length === 0 ? <p className="notice success">No selected legacy Phase 1 policies remain for this tenant.</p> : <><details><summary>View planned migration actions</summary><table className="data-table"><thead><tr><th>Legacy policy</th><th>Disposition</th><th>Successors</th><th>Manual review</th></tr></thead><tbody>{preview.actions.map((action) => <tr key={action.legacyDetectorId}><td>{action.legacyDetectorId}</td><td>{action.disposition}</td><td>{action.selectionCopies.map((copy) => `${copy.policyId} (${copy.selection})`).join(', ') || 'Retire'}</td><td>{action.manualConfigurationReview ? 'Required' : 'None'}</td></tr>)}</tbody></table></details>
-        <div className="connect-filter-bar connect-filter-bar--standalone"><input aria-label="Confirm Phase 1 migration" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="Type MIGRATE to apply" /><button type="button" className="btn btn-danger" disabled={!canApply || applyMutation.isPending} onClick={() => applyMutation.mutate()}>{applyMutation.isPending ? 'Applying…' : 'Apply approved migration'}</button></div>
-      </>}
-    </> : null}
-    {applyMutation.isSuccess ? <p className="notice success">Migration applied. Review any configuration marked for manual handling before the next assessment run.</p> : null}
-    {applyMutation.isError ? <p className="notice error">Migration was not applied. Reload the preview and resolve any reported blocker.</p> : null}
+    <section className="panel policy-rollout-panel"><div className="panel-header"><div><h3>Automatic rollout queue</h3><p className="panel-caption">Queued jobs wait for a complete stored connector snapshot; catalog shipping remains available while they do.</p></div><span className="policy-results-count">{rollouts.data?.filter((item) => item.status !== 'COMPLETED').length ?? 0} active</span></div>
+      <div className="table-scroll"><table className="data-table"><thead><tr><th>Policy</th><th>Version</th><th>State</th><th>Created</th><th>Action</th></tr></thead><tbody>
+        {rollouts.isLoading ? <tr><td colSpan={5}>Loading rollout jobs…</td></tr> : (rollouts.data ?? []).length === 0 ? <tr><td colSpan={5}>No rollout jobs are waiting.</td></tr> : (rollouts.data ?? []).map((item) => <tr key={item.id}><td><strong>{item.policyId}</strong></td><td>{item.newVersion}</td><td><span className={statusClass(item.status)}>{item.status}</span></td><td>{new Date(item.createdAt).toLocaleString()}</td><td><button type="button" className="btn btn-secondary btn-sm" onClick={() => retry.mutate(item.id)} disabled={retry.isPending || item.status === 'COMPLETED'}>{item.status === 'COMPLETED' ? 'Complete' : 'Retry'}</button></td></tr>)}
+      </tbody></table></div>
+    </section>
   </section>;
 }
 
-function DeprecationBanner({ actions }: { actions: AiGridPhase1MigrationPreview['actions'] }) {
-  const retired = actions.filter((action) => action.disposition === 'RETIRED_INSUFFICIENT_EVIDENCE');
-  if (retired.length === 0) return null;
-  return <div className="notice warning ai-policy-deprecation-banner">
-    <strong>Deprecated for insufficient evidence.</strong> These legacy detectors are retired in Phase 1. Their open findings are closed with a machine-readable reason (never “remediated”), history is preserved, and each is tracked as a connector-capability backlog candidate for reactivation once evidence exists.
-    <ul>{retired.map((action) => <li key={action.legacyDetectorId}><code>{action.legacyDetectorId}</code> — {action.closureReason ?? 'POLICY_RETIRED_INSUFFICIENT_EVIDENCE'}</li>)}</ul>
-  </div>;
+function ShippingSummary({ status }: { status?: { expectedPolicies: number; installedPolicies: number; publishedPolicies: number; distributedPolicies: number; digestMatchedPolicies: number; rolloutPendingTenants: number } }) {
+  const value = (key: keyof NonNullable<typeof status>) => status ? status[key] : '—';
+  return <section className="summary-strip policy-shipping-summary" aria-label="Shipping summary"><span><strong>{value('expectedPolicies')}</strong> catalog packages</span><span><strong>{value('installedPolicies')}</strong> installed</span><span><strong>{value('publishedPolicies')}</strong> published</span><span><strong>{value('distributedPolicies')}</strong> distributed</span><span><strong>{value('digestMatchedPolicies')}</strong> digest verified</span><span><strong>{value('rolloutPendingTenants')}</strong> tenant jobs pending</span></section>;
 }
 
-function CertificationLedger({ readiness, loading, failed }: { readiness?: AiGridPhase1CertificationReadiness; loading: boolean; failed: boolean }) {
-  const queryClient = useQueryClient();
-  const corpusQuery = useQuery({ queryKey: ['platform-ai-grid-phase-1-corpus'], queryFn: api.getPlatformAiGridPhase1CorpusReadiness });
-  const [engineeringOwner, setEngineeringOwner] = React.useState('');
-  const [securityReviewer, setSecurityReviewer] = React.useState('');
-  const [reviewDueAt, setReviewDueAt] = React.useState('');
-  const bootstrap = useMutation({
-    mutationFn: () => api.bootstrapPlatformAiGridPhase1CertificationCorpus({
-      engineeringOwner, securityReviewer, reviewDueAt: new Date(reviewDueAt).toISOString(),
-    }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['platform-ai-grid-phase-1-certification'] });
-      void queryClient.invalidateQueries({ queryKey: ['platform-ai-grid-phase-1-corpus'] });
-    },
-  });
-  const certify = useMutation({
-    mutationFn: api.certifyPlatformAiGridPhase1Corpus,
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['platform-ai-grid-phase-1-certification'] });
-      void queryClient.invalidateQueries({ queryKey: ['platform-ai-grid-phase-1-corpus'] });
-    },
-  });
-  const canBootstrap = engineeringOwner.trim().length > 0 && securityReviewer.trim().length > 0
-    && engineeringOwner.trim().toLowerCase() !== securityReviewer.trim().toLowerCase() && reviewDueAt.length > 0;
-  return <section className="panel"><h3>Phase 1 certification ledger</h3>
-    <p>Answer-key and precision evidence are tracked separately. Draft cases are not certified evidence.</p>
-    {loading ? <p>Loading certification readiness…</p> : failed ? <div className="notice error">Certification readiness could not be loaded.</div> : readiness ? <>
-      <div className="summary-strip" aria-label="Phase 1 certification summary"><span><strong>{readiness.totalPolicies}</strong> policies</span><span><strong>{readiness.answerKeyReadyPolicies}</strong> answer-key ready</span><span><strong>{readiness.precisionReadyPolicies}</strong> precision ready</span><span><strong>{readiness.releaseReadyPolicies}</strong> release ready</span><span><strong>{readiness.pendingPolicies}</strong> pending</span></div>
-      <details><summary>View policies still awaiting evidence</summary><table className="data-table"><thead><tr><th>Policy</th><th>Answer key</th><th>Precision</th><th>Release</th><th>Blockers</th></tr></thead><tbody>{readiness.policies.filter((policy) => !policy.releaseReady).map((policy) => <tr key={`${policy.policyId}@${policy.version}`}><td>{policy.policyId} v{policy.version}</td><td>{policy.answerKeyReady ? 'Ready' : 'Pending'}</td><td>{policy.precisionReady ? 'Ready' : 'Pending'}</td><td>{policy.releaseReady ? 'Ready' : 'Blocked'}</td><td>{policy.blockers.join(', ')}</td></tr>)}</tbody></table></details>
-    </> : null}
-    <div className="connect-filter-bar connect-filter-bar--standalone"><input aria-label="Certification engineering owner" placeholder="Engineering owner" value={engineeringOwner} onChange={(event) => setEngineeringOwner(event.target.value)} /><input aria-label="Certification security reviewer" placeholder="Independent security reviewer" value={securityReviewer} onChange={(event) => setSecurityReviewer(event.target.value)} /><input aria-label="Certification review due date" type="datetime-local" value={reviewDueAt} onChange={(event) => setReviewDueAt(event.target.value)} /><button type="button" className="btn btn-secondary" disabled={!canBootstrap || bootstrap.isPending} onClick={() => bootstrap.mutate()}>{bootstrap.isPending ? 'Creating drafts…' : 'Bootstrap draft corpus'}</button></div>
-    <CorpusCertification readiness={corpusQuery.data} loading={corpusQuery.isLoading} failed={corpusQuery.isError} certifying={certify.isPending} onCertify={() => certify.mutate()} />
-    {bootstrap.isSuccess ? <p className="notice success">Draft corpus synchronized: {bootstrap.data.environmentsCreated} environments and {bootstrap.data.casesCreated} cases created. Platform-run evidence and independent precision review are still required.</p> : null}
-    {certify.isSuccess ? <p className="notice success">Corpus certification completed for {certify.data.environmentsCertified} draft environments. This still does not create answer-key run evidence or precision labels.</p> : null}
-    {bootstrap.isError ? <p className="notice error">Draft corpus could not be bootstrapped. Check independent owner/reviewer values and the review due date.</p> : null}
-  </section>;
-}
-
-function CorpusCertification({ readiness, loading, failed, certifying, onCertify }: { readiness?: AiGridPhase1CorpusReadiness; loading: boolean; failed: boolean; certifying: boolean; onCertify: () => void }) {
-  if (loading) return <p>Loading corpus certification state…</p>;
-  if (failed) return <p className="notice error">Corpus certification state could not be loaded.</p>;
-  if (!readiness) return null;
-  const readyDrafts = readiness.draftEnvironments - readiness.blockedEnvironments;
-  return <div className="panel"><h4>Answer-key corpus status</h4>
-    <div className="summary-strip"><span><strong>{readiness.certifiedEnvironments}</strong> certified</span><span><strong>{readiness.draftEnvironments}</strong> drafts</span><span><strong>{readiness.missingEnvironments}</strong> missing</span><span><strong>{readiness.blockedEnvironments}</strong> blocked</span></div>
-    <p>Certification confirms that the corpus shape is complete; it is not a platform-run result. {readyDrafts > 0 ? `${readyDrafts} draft environment(s) can be certified.` : 'No draft environments are ready to certify.'}</p>
-    <button type="button" className="btn btn-secondary" disabled={readyDrafts <= 0 || certifying} onClick={onCertify}>{certifying ? 'Certifying corpus…' : 'Certify complete corpus drafts'}</button>
-    {readiness.blockedEnvironments > 0 ? <details><summary>View blocked environments</summary><ul>{readiness.environments.filter((environment) => environment.certificationBlockers.length > 0).map((environment) => <li key={environment.policyId}>{environment.policyId}: {environment.certificationBlockers.join(', ')}</li>)}</ul></details> : null}
-  </div>;
-}
-
-function PolicyPortfolio({ coverage, candidates }: { coverage: AiGridControlCoverage[]; candidates: AiGridPolicyCandidate[] }) {
-  const queryClient = useQueryClient();
-  const [title, setTitle] = React.useState('');
-  const [rationale, setRationale] = React.useState('');
-  const [sourceType, setSourceType] = React.useState('COVERAGE_GAP');
-  const create = useMutation({ mutationFn: () => api.createPlatformAiGridPolicyCandidate({ title, rationale, sourceType, status: 'INTAKE', frameworkMappings: {}, riskScore: 3, reachScore: 3, evidenceMaturity: 3, remediationClarity: 3 }), onSuccess: () => { setTitle(''); setRationale(''); void queryClient.invalidateQueries({ queryKey: ['platform-ai-grid-policy-candidates'] }); } });
-  return <section className="panel"><h3>Policy portfolio</h3><p>Prioritize new controls by customer risk, expected reach, evidence maturity, and remediation clarity.</p>
-    <FrameworkCoveragePanel coverage={coverage} />
-    <div className="connect-filter-bar connect-filter-bar--standalone"><input aria-label="Candidate policy title" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Candidate policy title" /><select aria-label="Candidate source" value={sourceType} onChange={(event) => setSourceType(event.target.value)}><option>COVERAGE_GAP</option><option>CONNECTOR_CAPABILITY</option><option>THREAT_RESEARCH</option><option>CUSTOMER_REQUEST</option><option>INCIDENT</option><option>COMPLIANCE_FRAMEWORK</option><option>DESIGN_PARTNER</option></select><input aria-label="Candidate rationale" value={rationale} onChange={(event) => setRationale(event.target.value)} placeholder="Why this control matters" /><button type="button" className="btn btn-secondary" disabled={!title.trim() || !rationale.trim() || create.isPending} onClick={() => create.mutate()}>Add candidate</button></div>
-    {candidates.length > 0 ? <table className="data-table"><thead><tr><th>Candidate</th><th>Source</th><th>Status</th><th>Evidence</th><th>Priority</th></tr></thead><tbody>{candidates.map((candidate) => <tr key={candidate.id}><td>{candidate.title}</td><td>{candidate.sourceType}</td><td>{candidate.status}</td><td>{candidate.evidenceMaturity}/5</td><td>{candidate.priorityScore}</td></tr>)}</tbody></table> : <p>No policy candidates have been recorded yet.</p>}
-  </section>;
-}
-
-function FrameworkCoveragePanel({ coverage }: { coverage: AiGridControlCoverage[] }) {
-  return <div className="panel"><h4>OWASP GenAI LLM Top 10 (2026) coverage</h4>
-    <p>Independently authored mappings that communicate risk alignment — not framework certification or complete runtime protection. Coverage status reflects the evidence Phase 1 can actually decide.</p>
-    {coverage.length === 0 ? <p>No framework coverage is available yet.</p> : <table className="data-table"><thead><tr><th>Control</th><th>Coverage status</th><th>Mapped policies</th></tr></thead>
-      <tbody>{coverage.map((control) => <tr key={control.controlId}>
-        <td><strong>{control.controlId}</strong></td>
-        <td><span className={`coverage-status coverage-status--${control.coverageStatus.toLowerCase()}`}>{COVERAGE_STATUS_LABELS[control.coverageStatus] ?? control.coverageStatus}</span></td>
-        <td>{control.policies.length === 0 ? <em>No mapped policy</em> : <ul className="coverage-mapping-list">{control.policies.map((policy) => <li key={policy.policyId}><strong>{policy.policyId}</strong> <span className="coverage-mapping-type">{policy.mappingType}</span>{policy.conditional ? <span className="coverage-conditional"> · conditional</span> : null}<br /><small>{policy.rationale}</small></li>)}</ul>}</td>
-      </tr>)}</tbody></table>}
-  </div>;
-}
-
-function PolicyRow({ policy, saving, tenantId, onPreview, onSave }: { policy: AiGridPolicyDistribution; saving: boolean; tenantId: string; onPreview: (preview: AiGridPolicyImpactPreview) => void; onSave: (patch: Partial<AiGridPolicyDistribution>, canaryTenantIds: string[]) => void }) {
-  const [draft, setDraft] = React.useState<Partial<AiGridPolicyDistribution>>({});
-  const [canaryTenantIds, setCanaryTenantIds] = React.useState<string[]>(() => JSON.parse(policy.canaryTenantIdsJson || '[]'));
-  const [showDetail, setShowDetail] = React.useState(false);
-  const value = <K extends keyof AiGridPolicyDistribution>(key: K) => draft[key] ?? policy[key];
-  return <React.Fragment><tr><td><strong>{policy.name}</strong><br /><small>{policy.policyId} · {policy.severity}</small></td><td>{policy.provider === 'MULTI_CLOUD' ? 'Multi-resource' : policy.provider}</td><td>{policy.version}</td><td>{policy.lifecycle}</td>
-    <td>{policy.lifecycle === 'PUBLISHED' ? 'Release-qualified' : 'Governed · certification pending'}</td>
-    <td><label><input aria-label={`${policy.name} availability`} type="checkbox" checked={value('available')} onChange={(event) => setDraft((current) => ({ ...current, available: event.target.checked }))} /> {value('available') ? 'Available' : 'Unavailable'}</label></td>
-    <td><select aria-label={`${policy.name} tenant default`} value={String(value('defaultSelection'))} onChange={(event) => setDraft((current) => ({ ...current, defaultSelection: event.target.value as AiGridPolicySelection }))}>{SELECTIONS.map((option) => <option key={option}>{option}</option>)}</select></td>
-    <td><select aria-label={`${policy.name} rollout`} value={String(value('rolloutStage'))} onChange={(event) => setDraft((current) => ({ ...current, rolloutStage: event.target.value as AiGridPolicyDistribution['rolloutStage'] }))}>{STAGES.map((option) => <option key={option}>{option}</option>)}</select></td>
-    <td>{String(value('rolloutStage')) === 'CANARY' ? <span><button type="button" className="btn btn-link" disabled={!tenantId || canaryTenantIds.includes(tenantId)} onClick={() => setCanaryTenantIds((current) => [...current, tenantId])}>Add selected tenant</button><small>{canaryTenantIds.length} tenant(s) in cohort</small></span> : null}
-      <button type="button" className="btn btn-secondary" disabled={saving || (Object.keys(draft).length === 0 && JSON.stringify(canaryTenantIds) === policy.canaryTenantIdsJson)} onClick={() => { onSave(draft, canaryTenantIds); setDraft({}); }}>Save</button>
-      <button type="button" className="btn btn-link" aria-expanded={showDetail} onClick={() => setShowDetail((current) => !current)}>{showDetail ? 'Hide details' : 'View details'}</button>
-      <PreviewButton policy={policy} tenantId={tenantId} onPreview={onPreview} /> <ReleaseButton policy={policy} /></td></tr>
-    {showDetail ? <tr><td colSpan={9}><PolicyPackageDetail policy={policy} /></td></tr> : null}</React.Fragment>;
-}
-
-function PolicyPackageDetail({ policy }: { policy: AiGridPolicyDistribution }) {
-  const query = useQuery({
-    queryKey: ['platform-ai-grid-policy-detail', policy.policyId, policy.version],
-    queryFn: () => api.getPlatformAiGridPolicyDetail(policy.policyId, policy.version),
-  });
-  if (query.isLoading) return <p>Loading governed package metadata…</p>;
-  if (query.isError || !query.data) return <p className="notice error">Package metadata could not be loaded.</p>;
-  const detail: AiGridPlatformPolicyDetail = query.data;
-  return <section aria-label={`${policy.policyId} package details`}>
-    <p><strong>{detail.controlObjectiveId}</strong> — {detail.objectiveName ?? detail.name}</p>
-    <p>{detail.description}</p>
-    <dl className="ai-policy-detail-grid">
-      <div><dt>Evaluation</dt><dd>{detail.evaluationMode}</dd></div>
-      <div><dt>Evidence tiers</dt><dd>{jsonLabel(detail.baseEvidenceTiers)}</dd></div>
-      <div><dt>Required capabilities</dt><dd>{jsonLabel(detail.requiredCapabilities)}</dd></div>
-      <div><dt>Conditional capabilities</dt><dd>{jsonLabel(detail.conditionalCapabilities)}</dd></div>
-      <div><dt>Native/resource binding</dt><dd>{jsonLabel(detail.nativeKinds)}{Array.isArray(detail.requiredResourceFamilies) && detail.requiredResourceFamilies.length > 0 ? ` · ${jsonLabel(detail.requiredResourceFamilies)}` : ''}</dd></div>
-      <div><dt>Package digest</dt><dd><code>{detail.packageDigest}</code></dd></div>
-      <div><dt>Source</dt><dd><code>{detail.packageSourceRef}</code></dd></div>
-      <div><dt>Release</dt><dd>{detail.releaseFamily} · {detail.releaseWave}</dd></div>
-    </dl>
-    <details><summary>Evidence contract and framework mappings</summary><pre>{JSON.stringify({ requiredFacts: detail.requiredFacts, requiredRelationships: detail.requiredRelationships, evaluationDefinition: detail.evaluationDefinition, frameworkMappings: detail.frameworkMappings }, null, 2)}</pre></details>
-  </section>;
-}
-
-function jsonLabel(value: unknown) {
-  if (Array.isArray(value)) return value.length > 0 ? value.join(', ') : 'None';
-  return value == null ? 'None' : JSON.stringify(value);
-}
-
-function LegacyPolicyCatalog({ policies }: { policies: AiGridPolicyDistribution[] }) {
-  return <section className="panel" aria-label="Legacy policy replacement catalog">
-    <h3>Legacy and replacement view</h3>
-    <p>These fallback policies are not part of the 76-policy AGCF Phase 1 catalog. They remain separately labelled until governed cutover and finding reconciliation complete.</p>
-    <details><summary>{policies.length} legacy/fallback policies</summary>
-      {policies.length > 0 ? <table className="data-table"><thead><tr><th>Policy</th><th>Lifecycle</th><th>Availability</th><th>Rollout</th></tr></thead><tbody>{policies.map((policy) => <tr key={policy.policyId}><td>{policy.name}<br /><small>{policy.policyId}</small></td><td>{policy.lifecycle}</td><td>{policy.available ? 'Available' : 'Unavailable'}</td><td>{policy.rolloutStage}</td></tr>)}</tbody></table> : <p>No legacy policies are currently distributed.</p>}
-    </details>
-  </section>;
-}
-
-function PreviewButton({ policy, tenantId, onPreview }: { policy: AiGridPolicyDistribution; tenantId: string; onPreview: (preview: AiGridPolicyImpactPreview) => void }) {
-  const previewMutation = useMutation({ mutationFn: () => api.getPlatformAiGridPolicyImpactPreview(policy.policyId, policy.version, tenantId), onSuccess: onPreview });
-  return <button type="button" className="btn btn-link" disabled={!tenantId || previewMutation.isPending} onClick={() => previewMutation.mutate()}>{previewMutation.isPending ? 'Previewing…' : 'Preview impact'}</button>;
-}
-
-function ImpactPreview({ preview }: { preview: AiGridPolicyImpactPreview }) {
-  const missing = Object.entries(preview.missingFacts).sort((left, right) => right[1] - left[1]);
-  return <section className="panel"><h3>Impact preview</h3><p>{preview.policyId} v{preview.version} against the selected tenant’s latest collected facts. This preview does not create findings.</p>
-    <div className="summary-strip"><span><strong>{preview.applicableArtifacts}</strong> candidates</span><span><strong>{preview.expectedFail}</strong> expected fail</span><span><strong>{preview.expectedPass}</strong> expected pass</span><span><strong>{preview.expectedNoDecision}</strong> no decision</span><span><strong>{preview.expectedNotApplicable}</strong> not applicable</span></div>
-    {missing.length > 0 ? <p><strong>Missing evidence:</strong> {missing.map(([fact, count]) => `${fact} (${count})`).join(' · ')}</p> : <p>All applicable artifacts have the candidate’s required facts.</p>}
-  </section>;
-}
-
-function ReleaseButton({ policy }: { policy: AiGridPolicyDistribution }) {
-  const [readiness, setReadiness] = React.useState<AiGridPolicyReleaseReadiness | null>(null);
-  const readinessMutation = useMutation({ mutationFn: () => api.getPlatformAiGridPolicyReleaseReadiness(policy.policyId, policy.version), onSuccess: setReadiness });
-  const publishMutation = useMutation({ mutationFn: () => api.publishPlatformAiGridPolicy(policy.policyId, policy.version), onSuccess: () => void readinessMutation.mutate() });
-  return <span><button type="button" className="btn btn-link" disabled={readinessMutation.isPending} onClick={() => readinessMutation.mutate()}>Release gate</button>
-    {readiness ? <span title={readiness.blockers.join(' · ')}>{readiness.ready ? <button type="button" className="btn btn-link" disabled={publishMutation.isPending} onClick={() => publishMutation.mutate()}>Publish</button> : <small>Blocked: {readiness.blockers.join(', ')}</small>}</span> : null}</span>;
+function PolicyConfigurationPanel({ policy, tenantIds, saving, onClose, onSave }: { policy: AiGridPolicyDistribution | null; tenantIds: string[]; saving: boolean; onClose: () => void; onSave: (policy: AiGridPolicyDistribution, patch: Partial<AiGridPolicyDistribution>, cohort: string[]) => void }) {
+  const [available, setAvailable] = React.useState(policy?.available ?? true);
+  const [defaultSelection, setDefaultSelection] = React.useState<AiGridPolicySelection>(policy?.defaultSelection ?? 'ENABLED');
+  const [rolloutStage, setRolloutStage] = React.useState<AiGridPolicyDistribution['rolloutStage']>(policy?.rolloutStage ?? 'GENERAL_AVAILABILITY');
+  const [cohort, setCohort] = React.useState<string[]>(() => policy ? parseCohort(policy.canaryTenantIdsJson) : []);
+  const detail = useQuery({ queryKey: ['platform-ai-grid-policy-detail', policy?.policyId, policy?.version], queryFn: () => api.getPlatformAiGridPolicyDetail(policy!.policyId, policy!.version), enabled: policy != null });
+  if (!policy) return <aside className="policy-configuration-empty"><span className="ai-security-kicker">Configuration</span><h4>Select a policy</h4><p>Choose <strong>Manage</strong> beside a policy to review its rollout and make a single, intentional update.</p></aside>;
+  const hasCanaryCohort = rolloutStage !== 'CANARY' || cohort.length > 0;
+  return <aside className="policy-configuration-panel" aria-label={`${policy.name} configuration`}><div className="policy-configuration-heading"><div><span className="ai-security-kicker">Configuration</span><h4>{policy.name}</h4><p>{policy.policyId} · v{policy.version}</p></div><button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>Close</button></div>
+    <div className="policy-detail-summary"><span className={statusClass(policy.severity)}>{policy.severity}</span><span>{detail.data?.description ?? 'Loading policy intent…'}</span></div>
+    <div className="policy-config-fields"><label className="policy-toggle"><input type="checkbox" checked={available} onChange={(event) => setAvailable(event.target.checked)} /><span><strong>Available to tenants</strong><small>Tenants can only select policies that are available.</small></span></label>
+      <label>Tenant default<select value={defaultSelection} onChange={(event) => setDefaultSelection(event.target.value as AiGridPolicySelection)}>{DEFAULTS.map((value) => <option key={value}>{value}</option>)}</select></label>
+      <label>Rollout stage<select value={rolloutStage} onChange={(event) => setRolloutStage(event.target.value as AiGridPolicyDistribution['rolloutStage'])}>{ROLLOUTS.map((value) => <option key={value} value={value}>{rolloutLabel(value)}</option>)}</select></label>
+      {rolloutStage === 'CANARY' ? <label>Canary tenants<select multiple value={cohort} aria-label={`${policy.policyId} canary tenants`} onChange={(event) => setCohort(Array.from(event.target.selectedOptions, (option) => option.value))}>{tenantIds.map((id) => <option key={id} value={id}>{id}</option>)}</select><small>Select at least one active tenant for a canary rollout.</small></label> : null}
+    </div>
+    {rolloutStage === 'CANARY' && !hasCanaryCohort ? <p className="notice error">Choose at least one tenant before saving this canary rollout.</p> : null}
+    <div className="button-row"><button type="button" className="btn btn-primary" disabled={saving || !hasCanaryCohort} onClick={() => onSave(policy, { available, defaultSelection, rolloutStage, pinnedVersion: policy.version }, cohort)}>{saving ? 'Saving…' : 'Save policy settings'}</button><button type="button" className="btn btn-secondary" disabled={saving} onClick={() => { const next = rolloutStage === 'PAUSED' ? 'GENERAL_AVAILABILITY' : 'PAUSED'; setRolloutStage(next); onSave(policy, { rolloutStage: next }, cohort); }}>{rolloutStage === 'PAUSED' ? 'Resume rollout' : 'Pause rollout'}</button></div>
+    <details className="policy-technical-details"><summary>Policy implementation details</summary><dl><dt>Control objective</dt><dd>{detail.data?.controlObjectiveId ?? policy.controlObjectiveId ?? '—'}</dd><dt>Evaluation mode</dt><dd>{detail.data?.evaluationMode ?? policy.evaluationMode ?? '—'}</dd><dt>Source</dt><dd>{detail.data?.packageSourceRef ?? 'Loading…'}</dd></dl></details>
+  </aside>;
 }

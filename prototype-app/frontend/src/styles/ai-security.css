@@ -936,6 +936,94 @@
   }
 }
 
+/* Platform policy distribution workspace */
+.platform-ai-policy-studio {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.policy-studio-hero {
+  align-items: center;
+}
+
+.policy-shipping-state {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 4px;
+  min-width: 156px;
+  padding: 13px 15px;
+  border: 1px solid color-mix(in srgb, #16a34a 42%, var(--border));
+  border-radius: 12px;
+  background: color-mix(in srgb, #16a34a 10%, var(--panel-solid));
+}
+
+.policy-shipping-state span,
+.policy-shipping-state strong { color: var(--title); }
+.policy-shipping-state span { font-size: 0.77rem; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 750; }
+.policy-shipping-state strong { font: 700 1rem var(--font-display); }
+.policy-shipping-state--blocked { border-color: color-mix(in srgb, var(--critical) 55%, var(--border)); background: color-mix(in srgb, var(--critical) 10%, var(--panel-solid)); }
+
+.policy-shipping-summary { margin: 0; }
+.policy-catalog-panel, .policy-rollout-panel { display: grid; gap: 16px; }
+.policy-catalog-header { align-items: start; }
+.policy-results-count { flex: 0 0 auto; color: var(--muted); font-size: 0.82rem; font-weight: 700; white-space: nowrap; }
+
+.policy-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-muted);
+}
+
+.policy-filter-bar label, .policy-config-fields > label { display: grid; gap: 5px; color: var(--muted); font-size: 0.76rem; font-weight: 700; }
+.policy-filter-bar select, .policy-filter-bar input, .policy-config-fields select { min-height: 34px; }
+.policy-search { min-width: min(100%, 280px); flex: 1 1 280px; }
+.policy-filter-bar > .btn { margin-left: auto; }
+
+.policy-management-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(290px, 360px); gap: 16px; align-items: start; }
+.policy-catalog-table { margin: 0; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.policy-catalog-table .data-table { min-width: 880px; }
+.policy-catalog-row { transition: background 140ms ease; }
+.policy-catalog-row:hover, .policy-catalog-row.active { background: color-mix(in srgb, var(--accent) 7%, var(--panel-solid)); }
+.policy-catalog-row small { color: var(--muted); font-size: 0.74rem; }
+.policy-empty-cell { padding: 30px; text-align: center; color: var(--muted); }
+
+.policy-status { display: inline-flex; align-items: center; width: fit-content; border: 1px solid var(--border); border-radius: 999px; padding: 3px 8px; color: var(--text); background: var(--panel-muted); font-size: 0.72rem; font-weight: 750; white-space: nowrap; }
+.policy-status--available, .policy-status--general-availability, .policy-status--completed { border-color: color-mix(in srgb, #16a34a 42%, var(--border)); color: color-mix(in srgb, #16a34a 76%, var(--title)); }
+.policy-status--unavailable, .policy-status--retired, .policy-status--failed, .policy-status--critical { border-color: color-mix(in srgb, var(--critical) 45%, var(--border)); color: var(--critical); }
+.policy-status--canary, .policy-status--pending, .policy-status--high { border-color: color-mix(in srgb, var(--warn) 48%, var(--border)); color: color-mix(in srgb, var(--warn) 78%, var(--title)); }
+.policy-status--paused, .policy-status--disabled { color: var(--muted); }
+.policy-status--required { border-color: color-mix(in srgb, var(--accent) 48%, var(--border)); color: var(--accent); }
+
+.policy-configuration-panel, .policy-configuration-empty { position: sticky; top: 18px; display: grid; gap: 15px; padding: 17px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--panel-muted); }
+.policy-configuration-empty { min-height: 240px; align-content: center; }
+.policy-configuration-empty h4, .policy-configuration-panel h4 { margin: 0; color: var(--title); font: 700 1.08rem/1.25 var(--font-display); }
+.policy-configuration-empty p, .policy-configuration-heading p { margin: 0; color: var(--muted); font-size: 0.82rem; line-height: 1.45; }
+.policy-configuration-heading { display: flex; justify-content: space-between; gap: 12px; }
+.policy-detail-summary { display: grid; gap: 8px; padding: 11px 0; border-block: 1px solid var(--border); color: var(--text); font-size: 0.82rem; line-height: 1.45; }
+.policy-config-fields { display: grid; gap: 13px; }
+.policy-config-fields select { width: 100%; }
+.policy-config-fields select[multiple] { min-height: 104px; }
+.policy-config-fields small { color: var(--muted); font-weight: 500; line-height: 1.35; }
+.policy-toggle { grid-template-columns: auto 1fr; align-items: start; padding: 11px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-solid); }
+.policy-toggle input { margin-top: 3px; }
+.policy-toggle span { display: grid; gap: 3px; color: var(--text); }
+.policy-toggle small { color: var(--muted); font-weight: 500; }
+.policy-technical-details { padding-top: 12px; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.8rem; }
+.policy-technical-details summary { cursor: pointer; color: var(--text); font-weight: 700; }
+.policy-technical-details dl { display: grid; grid-template-columns: 115px 1fr; gap: 8px 10px; margin: 12px 0 0; }
+.policy-technical-details dt { color: var(--muted); }
+.policy-technical-details dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+
+@media (max-width: 1120px) {
+  .policy-management-layout { grid-template-columns: 1fr; }
+  .policy-configuration-panel, .policy-configuration-empty { position: static; }
+}
+
 @media (max-width: 1050px) {
   .platform-ai-policy-studio {
     grid-template-columns: 1fr;
@@ -968,6 +1056,8 @@
   .ai-overview-strip {
     grid-template-columns: repeat(3, 1fr);
   }
+
+  .policy-filter-bar > .btn { margin-left: 0; }
 }
 
 @media (max-width: 720px) {
@@ -980,6 +1070,10 @@
     flex-direction: column;
     padding: 21px;
   }
+
+  .policy-shipping-state { width: 100%; }
+  .policy-catalog-header { align-items: start; }
+  .policy-results-count { white-space: normal; }
 
   .ai-security-hero-metrics {
     display: grid;

@@ -22,7 +22,7 @@ import org.springframework.web.server.ResponseStatusException;
 /** Platform-only import and distribution boundary for reviewed policy packages. */
 @Service
 public class AiGridPolicyCatalogService {
-    private static final List<String> SELECTIONS = List.of("REQUIRED", "ENABLED", "PREVIEW", "DISABLED");
+    private static final List<String> SELECTIONS = List.of("REQUIRED", "ENABLED", "DISABLED");
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper mapper;
     private final AiGridPredicateEngine predicates;
@@ -129,18 +129,6 @@ public class AiGridPolicyCatalogService {
             if (!List.of("GENERAL_AVAILABILITY", "CANARY", "PAUSED", "RETIRED").contains(command.rolloutStage())) bad("Invalid rolloutStage");
             Integer policy = jdbc.queryForObject("select count(*) from platform.ai_grid_policy_versions where policy_id=:id and lifecycle='PUBLISHED'", Map.of("id", policyId), Integer.class);
             if (policy == null || policy == 0) notFound("Published policy not found");
-            if ("GENERAL_AVAILABILITY".equals(command.rolloutStage())) {
-                Integer approved = jdbc.queryForObject("""
-                        select count(*) from platform.ai_grid_policy_versions p
-                         where p.policy_id = :id and p.release_family = 'AGCF_PHASE_1'
-                           and not exists (select 1 from platform.ai_grid_policy_release_decisions d
-                                            where d.policy_id = p.policy_id and d.policy_version = p.version
-                                              and d.decision = 'APPROVED')
-                        """, Map.of("id", policyId), Integer.class);
-                if (approved != null && approved > 0) {
-                    conflict("Phase 1 policy requires a governed APPROVED release decision before GENERAL_AVAILABILITY");
-                }
-            }
             List<String> cohort = command.canaryTenantIds() == null ? List.of() : command.canaryTenantIds();
             if (new HashSet<>(cohort).size() != cohort.size()) bad("CANARY cohort contains duplicate tenant IDs");
             List<UUID> tenantIds = new java.util.ArrayList<>();
@@ -208,10 +196,9 @@ public class AiGridPolicyCatalogService {
                    p.version,p.name,p.severity,p.lifecycle,p.control_objective_id,p.provider,p.evaluation_mode,
                    p.base_evidence_tiers_json::text,p.conditional_capabilities_json::text,p.framework_mappings_json::text,
                    p.release_family,p.release_wave
-              from platform.ai_grid_policy_distribution d join lateral (
-                  select * from platform.ai_grid_policy_versions p where p.policy_id=d.policy_id
-                  order by p.published_at desc nulls last,p.version desc limit 1) p on true
-             where true
+              from platform.ai_grid_policy_distribution d join platform.ai_grid_policy_versions p
+                on p.policy_id=d.policy_id and p.version=d.pinned_version
+             where p.package_source_ref like 'policy-packages/agcf/%'
             """ + filters + " order by p.provider,p.policy_id", parameters,
                 (rs, n) -> new Distribution(rs.getString(1),rs.getBoolean(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7),rs.getTimestamp(8).toInstant(),rs.getString(9),rs.getString(10),rs.getString(11),rs.getString(12),rs.getString(13),rs.getString(14),rs.getString(15),rs.getString(16),rs.getString(17),rs.getString(18),rs.getString(19),rs.getString(20))));
     }

@@ -15,6 +15,7 @@ import { PlatformAiPolicyStudio } from './PlatformAiPolicyStudio';
 const PLATFORM_TABS: Array<{ key: PlatformRouteView; label: string; helper: string }> = [
   { key: 'tenants', label: 'Tenants', helper: 'Lifecycle and workspace metadata' },
   { key: 'operations', label: 'Operations', helper: 'Tenant experience operations ownerspace and frustration signals' },
+  { key: 'ai-policies', label: 'Policies', helper: 'Catalog distribution, tenant defaults, and rollout control' },
   { key: 'users', label: 'Users', helper: 'Provision and manage platform-owner identities' },
   { key: 'platform-audit', label: 'Platform Audit', helper: 'Review platform-user identity changes and setup history' },
   { key: 'demo-requests', label: 'Demo Requests', helper: 'Review, provision, and invite customer demo tenants' },
@@ -125,7 +126,7 @@ export function PlatformConsolePage({ selectedView }: PlatformConsolePageProps) 
   const platformMessage = typeof location.state === 'object' && location.state && 'platformMessage' in location.state
     ? String((location.state as { platformMessage?: string }).platformMessage ?? '')
     : '';
-  const hideSidebar = selectedView === 'eol' || selectedView === 'operations' || selectedView === 'vuln-intel' || selectedView === 'ai-policies';
+  const hideSidebar = selectedView === 'eol' || selectedView === 'vuln-intel' || selectedView === 'operations' || selectedView === 'ai-policies';
   const visibleTabGroups = PLATFORM_TAB_GROUPS.map((group) => ({
     ...group,
     tabs: group.tabs
@@ -146,7 +147,7 @@ export function PlatformConsolePage({ selectedView }: PlatformConsolePageProps) 
         {!hideSidebar && (
           <aside className="platform-console-sidebar" aria-label="Platform views">
             <div className="platform-console-sidebar-header">
-              <h3>Tenant Management</h3>
+              <h3>Platform workspace</h3>
             </div>
             <div className="platform-console-nav-groups">
               {visibleTabGroups.map((group) => (
@@ -384,6 +385,7 @@ function PlatformOperationsOwnerspace({
   selectedSubView: PlatformOperationsSubView;
   onSelectSubView: (nextView: PlatformOperationsSubView) => void;
 }) {
+  const navigate = useNavigate();
   const overviewQuery = useQuery({
     queryKey: ['platform-operations-overview'],
     queryFn: api.getOperationalOverview
@@ -622,9 +624,9 @@ function PlatformOperationsOwnerspace({
             <div className="platform-ops-metric-scope">All tenants</div>
           </div>
           <div className="noise-summary-item">
-            <div className="noise-summary-label"><MetricLabel label="Trust-Critical Quality Issues" description={TENANT_EXPERIENCE_METRIC_HELP['Trust-Critical Quality Issues']} /></div>
-            <div className="noise-summary-value">{formatInteger(quality?.criticalIssues)}</div>
-            <div className="platform-ops-metric-scope">Default workspace</div>
+            <div className="noise-summary-label"><MetricLabel label="Tenants Needing Attention" description="Tenants with a lifecycle or connector condition that needs a platform-owner response." /></div>
+            <div className="noise-summary-value">{formatInteger(tenantAttentionRows.length)}</div>
+            <div className="platform-ops-metric-scope">All tenants</div>
           </div>
         </div>
       </section>
@@ -646,9 +648,10 @@ function PlatformOperationsOwnerspace({
       {selectedSubView === 'overview' && (
         <div className="page-grid">
           <section className="panel">
-            <div className="panel-header">
-              <h3>Tenant Attention Queue</h3>
-              <span className="panel-caption">Every tenant currently needing platform-owner attention, with the reason surfaced inline.</span>
+            <div className="panel-header platform-ops-action-header">
+              <div><h3>Tenant Attention Queue</h3>
+              <span className="panel-caption">Every tenant currently needing platform-owner attention, with the reason and next step surfaced inline.</span></div>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => navigate(pathForPlatformView('tenants'))}>Open tenant management</button>
             </div>
             <div className="ops-table">
               <div className="ops-table-header">
@@ -657,6 +660,7 @@ function PlatformOperationsOwnerspace({
                 <span><MetricLabel label="Why Attention" description={TENANT_EXPERIENCE_METRIC_HELP['Why Attention']} /></span>
                 <span><MetricLabel label="Affected Connectors" description={TENANT_EXPERIENCE_METRIC_HELP['Affected Connectors']} /></span>
                 <span><MetricLabel label="Last Sync" description={TENANT_EXPERIENCE_METRIC_HELP['Last Sync']} /></span>
+                <span>Next step</span>
               </div>
               {tenantAttentionRows.length === 0 ? (
                 <div className="ops-table-row">
@@ -665,40 +669,46 @@ function PlatformOperationsOwnerspace({
                   <span>No tenant currently requires attention</span>
                   <span>-</span>
                   <span>-</span>
+                  <span>-</span>
                 </div>
               ) : tenantAttentionRows.map((row) => (
-                <div key={row.tenantId} className="ops-table-row ops-table-row-wide">
+                <div key={row.tenantId} className="ops-table-row">
                   <span>{row.tenantName}</span>
-                  <span>{row.tenantStatus}</span>
+                  <span><span className={`platform-ops-row-status platform-ops-row-status--${row.tenantStatus.toLowerCase()}`}>{row.tenantStatus}</span></span>
                   <span>{row.reasons.map(formatAttentionReason).join(', ')}</span>
                   <span>{row.affectedConnectors.length > 0 ? row.affectedConnectors.join(', ') : '-'}</span>
                   <span>{formatDateTime(row.latestRelevantSyncAt)}</span>
+                  <span><button type="button" className="btn btn-secondary btn-sm" onClick={() => navigate(pathForPlatformView('tenants'))}>Review tenant</button></span>
                 </div>
               ))}
             </div>
           </section>
           <section className="panel">
-            <div className="panel-header">
-              <h3>Connector Issues</h3>
-              <span className="panel-caption">If a specific connector breaks, see exactly which tenants are affected.</span>
+            <div className="panel-header platform-ops-action-header">
+              <div><h3>Connector Issues</h3>
+              <span className="panel-caption">If a specific connector breaks, see exactly which tenants are affected.</span></div>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => navigate('/connect/connectors')}>Open connectors</button>
             </div>
             <div className="ops-table">
               <div className="ops-table-header">
                 <span><MetricLabel label="Connector" description={TENANT_EXPERIENCE_METRIC_HELP.Connector} /></span>
                 <span><MetricLabel label="Tenant Count" description={TENANT_EXPERIENCE_METRIC_HELP['Tenant Count']} /></span>
                 <span><MetricLabel label="Affected Tenants" description={TENANT_EXPERIENCE_METRIC_HELP['Affected Tenants']} /></span>
+                <span>Next step</span>
               </div>
               {connectorIssueGroups.length === 0 ? (
                 <div className="ops-table-row">
                   <span>No connector</span>
                   <span>0</span>
                   <span>No tenants currently impacted</span>
+                  <span>-</span>
                 </div>
               ) : connectorIssueGroups.map((group) => (
                 <div key={group.connectorKey} className="ops-table-row ops-table-row-wide">
                   <span>{group.connectorKey}</span>
                   <span>{formatInteger(group.affectedTenantCount)}</span>
                   <span>{group.affectedTenants.join(', ')}</span>
+                  <span><button type="button" className="btn btn-secondary btn-sm" onClick={() => navigate('/connect/connectors')}>Review connector</button></span>
                 </div>
               ))}
             </div>
