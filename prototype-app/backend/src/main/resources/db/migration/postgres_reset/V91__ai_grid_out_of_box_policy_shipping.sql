@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS platform.ai_grid_policy_rollout_tasks (
 CREATE INDEX IF NOT EXISTS idx_ai_grid_policy_rollout_tasks_claim
     ON platform.ai_grid_policy_rollout_tasks (status, next_retry_at, created_at);
 
--- Promote every bundled AGCF package. V76/V88/V89 remain immutable; V90 is the
+-- Promote every bundled AGCF package. V76/V88/V89 remain immutable; V91 is the
 -- reviewed forward-only shipping decision and pins distribution to its digest.
 UPDATE platform.ai_grid_policy_versions
    SET lifecycle = 'PUBLISHED',

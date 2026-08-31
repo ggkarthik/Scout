@@ -17,7 +17,7 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 @EnabledIfSystemProperty(named = "run.postgres.it", matches = "true")
 class SchemaUpgradePathPostgresIntegrationTest {
 
-    private static final String CURRENT_SCHEMA_VERSION = "90";
+    private static final String CURRENT_SCHEMA_VERSION = "91";
     private static final LocalPostgresTestDatabase.DatabaseConfig DATABASE =
             LocalPostgresTestDatabase.provision("schema_upgrade_path");
     private static final LocalPostgresTestDatabase.DatabaseConfig UPGRADE_DATABASE =
@@ -83,7 +83,7 @@ class SchemaUpgradePathPostgresIntegrationTest {
         assertEquals(26, queryForInt(database, "select count(*) from platform.ai_grid_policy_distribution d join platform.ai_grid_policy_versions p on p.policy_id=d.policy_id and p.release_family='AGCF_PHASE_1' where d.default_selection='REQUIRED'"));
         assertEquals(24, queryForInt(database, "select count(*) from platform.ai_grid_policy_distribution d join platform.ai_grid_policy_versions p on p.policy_id=d.policy_id and p.release_family='AGCF_PHASE_1' where d.default_selection='ENABLED'"));
         assertEquals(26, queryForInt(database, "select count(*) from platform.ai_grid_policy_distribution d join platform.ai_grid_policy_versions p on p.policy_id=d.policy_id and p.release_family='AGCF_PHASE_1' where d.default_selection='DISABLED'"));
-        assertEquals(76, queryForInt(database, "select count(*) from platform.ai_grid_policy_distribution d join platform.ai_grid_policy_versions p on p.policy_id=d.policy_id and p.release_family='AGCF_PHASE_1' where p.lifecycle='VALIDATED' and d.rollout_stage='PAUSED' and d.available=false"));
+        assertEquals(76, queryForInt(database, "select count(*) from platform.ai_grid_policy_distribution d join platform.ai_grid_policy_versions p on p.policy_id=d.policy_id and p.release_family='AGCF_PHASE_1' where p.lifecycle='PUBLISHED' and d.rollout_stage='GENERAL_AVAILABILITY' and d.available=true"));
         assertEquals(1, queryForInt(database, "select count(*) from platform.ai_grid_policy_versions where policy_id='AGCF-AWS-033' and required_facts_json->0->>'valueType'='STRING'"));
         assertEquals(6, queryForInt(database, "select count(*) from platform.ai_grid_policy_versions where policy_id like 'AGCF-XSP-%' and required_facts_json='[]'::jsonb"));
     }
