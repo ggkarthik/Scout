@@ -243,7 +243,7 @@ function FeatureList({ items }: { items: Array<{ title: string; body: string }> 
   );
 }
 
-function LegacyDemoLandingPage() {
+function _LegacyDemoLandingPage() {
   return (
     <PublicDemoShell>
       <section className="scout-hero">

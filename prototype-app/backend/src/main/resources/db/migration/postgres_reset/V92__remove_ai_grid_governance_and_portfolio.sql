@@ -1,5 +1,5 @@
 -- migration-guard: platform-only
--- Cleanup stage after V90 stopped all governance, portfolio, and manual
+-- Cleanup stage after V91 stopped all governance, portfolio, and manual
 -- migration traffic. Runtime provenance, digests, lifecycle, distribution,
 -- framework mappings, and automatic rollout tables remain intact.
 

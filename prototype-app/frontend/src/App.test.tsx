@@ -190,7 +190,7 @@ describe('App test persona switcher', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Policies' }));
 
-    expect(await screen.findByRole('heading', { name: 'AI Policy Studio' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Policy distribution' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Policies' })).toHaveClass('active');
     expect(screen.queryByLabelText('Platform views')).not.toBeInTheDocument();
   });

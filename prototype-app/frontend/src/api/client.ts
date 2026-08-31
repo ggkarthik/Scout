@@ -525,7 +525,6 @@ import type {
   AiGridShippingStatus,
   AiGridPolicyRollout,
   AiGridPlatformPolicyDetail,
-  AiGridPolicyImpactPreview,
   AiGridPolicyReleaseReadiness,
   AiGridPhase1CertificationReadiness,
   AiGridPhase1CorpusBootstrap,
