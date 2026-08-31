@@ -1364,12 +1364,16 @@ export const api = {
   getAiGridCoverage: () => request<AiGridCoverage>('/ai-coverage'),
   getAiGridCoverageDimensions: () => request<AiGridCoverageDimension[]>('/ai-coverage/dimensions'),
   listAiGridPolicies: () => request<AiGridPolicy[]>('/ai-policies'),
-  listPlatformAiGridPolicies: (filters?: { releaseFamily?: string; lifecycle?: string }) => {
+  listPlatformAiGridPolicies: async (filters?: { releaseFamily?: string; lifecycle?: string }) => {
     const params = new URLSearchParams();
     if (filters?.releaseFamily) params.set('releaseFamily', filters.releaseFamily);
     if (filters?.lifecycle) params.set('lifecycle', filters.lifecycle);
     const query = params.size > 0 ? `?${params.toString()}` : '';
-    return request<AiGridPolicyDistribution[]>(`/platform/ai-grid/policies${query}`);
+    const response = await request<AiGridPolicyDistribution[]>(`/platform/ai-grid/policies${query}`);
+    if (!Array.isArray(response)) {
+      throw new Error('The governed policy catalog returned an invalid response.');
+    }
+    return response;
   },
   getPlatformAiGridPolicyDetail: (policyId: string, version: string) => request<AiGridPlatformPolicyDetail>(
     `/platform/ai-grid/policies/${encodeURIComponent(policyId)}/versions/${encodeURIComponent(version)}`,

@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../api/client';
 import type { AiGridControlCoverage, AiGridPolicyDistribution, AiGridPolicySelection } from '../features/ai-security/types';
@@ -25,6 +25,60 @@ describe('PlatformAiPolicyStudio framework coverage', () => {
     localStorage.clear();
   });
 
+  it('provides three focused Policy Studio workspaces with keyboard tab navigation', () => {
+    stubBaselineQueries();
+    vi.spyOn(api, 'getPlatformAiGridFrameworkCoverage').mockResolvedValue([]);
+
+    renderWithProviders(<PlatformAiPolicyStudio />);
+
+    const navigation = screen.getByRole('tablist', { name: 'AI Policy Studio sections' });
+    const overview = within(navigation).getByRole('tab', { name: /^Overview/i });
+    expect(overview).toHaveAttribute('aria-selected', 'true');
+    expect(within(navigation).getByRole('tab', { name: /^Policies/i })).toBeInTheDocument();
+    expect(within(navigation).getByRole('tab', { name: /^Governance/i })).toBeInTheDocument();
+    expect(within(navigation).queryByRole('tab', { name: /^Catalog/i })).not.toBeInTheDocument();
+
+    fireEvent.keyDown(overview, { key: 'ArrowRight' });
+    expect(within(navigation).getByRole('tab', { name: /^Policies/i })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('heading', { name: 'Policies' })).toBeVisible();
+  });
+
+  it('routes Overview attention cards to the matching workspace', async () => {
+    stubBaselineQueries();
+    vi.spyOn(api, 'getPlatformAiGridFrameworkCoverage').mockResolvedValue([{ controlId: 'LLM08', coverageStatus: 'NOT_COVERED', policies: [] }]);
+
+    renderWithProviders(<PlatformAiPolicyStudio />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /framework coverage gaps/i }));
+    expect(screen.getByRole('tab', { name: /^Governance/i })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('heading', { name: /OWASP GenAI LLM Top 10/i })).toBeVisible();
+
+    fireEvent.click(screen.getByRole('tab', { name: /^Overview/i }));
+    fireEvent.click(screen.getByRole('button', { name: /policies in canary/i }));
+    expect(screen.getByRole('tab', { name: /^Policies/i })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('does not misreport a request failure as a zero-policy catalog mismatch and can retry', async () => {
+    stubBaselineQueries();
+    vi.spyOn(api, 'getPlatformAiGridFrameworkCoverage').mockResolvedValue([]);
+    vi.mocked(api.listPlatformAiGridPolicies)
+      .mockRejectedValueOnce(new Error('Request failed (500)'))
+      .mockResolvedValueOnce([]);
+
+    renderWithProviders(<PlatformAiPolicyStudio />);
+    fireEvent.click(screen.getByRole('tab', { name: /^Policies/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The governed policy catalog could not be loaded.');
+    expect(screen.queryByText(/Catalog mismatch: expected 76.*received 0/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('No Phase 1 policies match these filters.')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry catalog' }));
+
+    await waitFor(() => expect(api.listPlatformAiGridPolicies).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText(/Catalog mismatch: expected 76.*received 0/i)).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('renders coverage classification, mapped policy, mapping type and rationale', async () => {
     stubBaselineQueries();
     const coverage: AiGridControlCoverage[] = [
@@ -37,6 +91,7 @@ describe('PlatformAiPolicyStudio framework coverage', () => {
     vi.spyOn(api, 'getPlatformAiGridFrameworkCoverage').mockResolvedValue(coverage);
 
     renderWithProviders(<PlatformAiPolicyStudio />);
+    fireEvent.click(screen.getByRole('tab', { name: /^Governance/i }));
 
     // Coverage-classification enum is surfaced (not a raw policy count).
     expect(await screen.findByText('Conditional (needs connector capability)')).toBeInTheDocument();
@@ -54,6 +109,7 @@ describe('PlatformAiPolicyStudio framework coverage', () => {
     vi.spyOn(api, 'getPlatformAiGridFrameworkCoverage').mockResolvedValue([]);
 
     renderWithProviders(<PlatformAiPolicyStudio />);
+    fireEvent.click(screen.getByRole('tab', { name: /^Governance/i }));
 
     const panel = (await screen.findByText(/OWASP GenAI LLM Top 10 \(2026\) coverage/)).closest('div');
     expect(panel).not.toBeNull();
@@ -84,12 +140,11 @@ describe('PlatformAiPolicyStudio framework coverage', () => {
     vi.spyOn(api, 'getPlatformAiGridFrameworkCoverage').mockResolvedValue([]);
 
     renderWithProviders(<PlatformAiPolicyStudio />);
+    fireEvent.click(screen.getByRole('tab', { name: /^Policies/i }));
 
     const summary = await screen.findByRole('region', { name: 'Phase 1 out-of-box catalog summary' });
-    expect(await within(summary).findAllByText('76')).toHaveLength(3);
-    expect(within(summary).getByText('38')).toBeInTheDocument();
-    expect(within(summary).getByText('32')).toBeInTheDocument();
-    expect(within(summary).getByText('24')).toBeInTheDocument();
+    expect(await within(summary).findAllByText('76')).toHaveLength(2);
+    expect(within(summary).getByText('0')).toBeInTheDocument();
     expect(screen.getAllByText(/AGCF-AWS-001/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/AGCF-AZR-001/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/AGCF-XSP-001/).length).toBeGreaterThan(0);

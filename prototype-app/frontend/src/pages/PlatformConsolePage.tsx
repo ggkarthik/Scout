@@ -20,7 +20,6 @@ const PLATFORM_TABS: Array<{ key: PlatformRouteView; label: string; helper: stri
   { key: 'demo-requests', label: 'Demo Requests', helper: 'Review, provision, and invite customer demo tenants' },
   { key: 'vuln-intel', label: 'Vulnerability Intelligence', helper: 'Platform-owned NVD, KEV, GHSA, CSAF/VEX, advisory, EOL, EUVD, and JVN feed configuration' },
   { key: 'eol', label: 'EOL', helper: 'Platform-owned end-of-life catalog and lifecycle coverage' }
-  ,{ key: 'ai-policies', label: 'AI Policy Studio', helper: 'Release and distribute governed AI policies' }
 ];
 
 function PlatformVulnIntelSection() {

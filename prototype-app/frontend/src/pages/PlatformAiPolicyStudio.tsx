@@ -13,8 +13,21 @@ const COVERAGE_STATUS_LABELS: Record<AiGridCoverageStatus, string> = {
   NOT_COVERED: 'Not covered',
 };
 
+type PolicyStudioWorkspace = 'overview' | 'policies' | 'governance';
+type PolicyStudioFocusTarget = PolicyStudioWorkspace | 'certification' | 'migration' | 'portfolio';
+
+const POLICY_STUDIO_NAV_ITEMS: Array<{ id: PolicyStudioWorkspace; label: string; helper: string }> = [
+  { id: 'overview', label: 'Overview', helper: 'What needs your attention' },
+  { id: 'policies', label: 'Policies', helper: 'Manage governed controls and rollout' },
+  { id: 'governance', label: 'Governance', helper: 'Certification, migration, and coverage' },
+];
+
 export function PlatformAiPolicyStudio() {
   const queryClient = useQueryClient();
+  const [activeWorkspace, setActiveWorkspace] = React.useState<PolicyStudioWorkspace>('overview');
+  const [focusTarget, setFocusTarget] = React.useState<PolicyStudioFocusTarget | null>(null);
+  const tabRefs = React.useRef<Record<PolicyStudioWorkspace, HTMLButtonElement | null>>({ overview: null, policies: null, governance: null });
+  const sectionRefs = React.useRef<Record<PolicyStudioFocusTarget, HTMLElement | null>>({ overview: null, policies: null, governance: null, certification: null, migration: null, portfolio: null });
   const catalogQuery = useQuery({ queryKey: ['platform-ai-grid-policies'], queryFn: () => api.listPlatformAiGridPolicies() });
   const tenantsQuery = useQuery({ queryKey: ['platform-policy-preview-tenants'], queryFn: api.listTenants });
   const [tenantId, setTenantId] = React.useState('');
@@ -38,6 +51,7 @@ export function PlatformAiPolicyStudio() {
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['platform-ai-grid-policies'] }),
   });
   const catalog = catalogQuery.data ?? [];
+  const catalogLoaded = Array.isArray(catalogQuery.data);
   const phase1Policies = catalog.filter((policy) => policy.releaseFamily === 'AGCF_PHASE_1');
   const legacyPolicies = catalog.filter((policy) => policy.releaseFamily !== 'AGCF_PHASE_1');
   const policies = phase1Policies.filter((policy) =>
@@ -45,59 +59,120 @@ export function PlatformAiPolicyStudio() {
     && (lifecycleFilter === 'ALL' || policy.lifecycle === lifecycleFilter));
   const count = (value: string, field: 'provider' | 'defaultSelection' | 'lifecycle' | 'rolloutStage') =>
     phase1Policies.filter((policy) => policy[field] === value).length;
+  const pendingPolicies = certificationQuery.data?.pendingPolicies ?? 0;
+  const canaryPolicies = count('CANARY', 'rolloutStage');
+  const coverageGaps = (frameworkCoverageQuery.data ?? []).filter((control) => control.coverageStatus === 'NOT_COVERED').length;
+
+  React.useEffect(() => {
+    if (!focusTarget) return;
+    sectionRefs.current[focusTarget]?.focus();
+    setFocusTarget(null);
+  }, [activeWorkspace, focusTarget]);
+
+  const activateWorkspace = (workspace: PolicyStudioWorkspace, target: PolicyStudioFocusTarget) => {
+    setActiveWorkspace(workspace);
+    setFocusTarget(target);
+  };
+
+  const handleWorkspaceKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, workspace: PolicyStudioWorkspace) => {
+    const currentIndex = POLICY_STUDIO_NAV_ITEMS.findIndex((item) => item.id === workspace);
+    let nextIndex: number | null = null;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % POLICY_STUDIO_NAV_ITEMS.length;
+    if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + POLICY_STUDIO_NAV_ITEMS.length) % POLICY_STUDIO_NAV_ITEMS.length;
+    if (event.key === 'Home') nextIndex = 0;
+    if (event.key === 'End') nextIndex = POLICY_STUDIO_NAV_ITEMS.length - 1;
+    if (nextIndex == null) return;
+    event.preventDefault();
+    const next = POLICY_STUDIO_NAV_ITEMS[nextIndex].id;
+    activateWorkspace(next, next);
+    tabRefs.current[next]?.focus();
+  };
 
   return (
     <section className="platform-ai-policy-studio">
-      <header className="ai-security-hero policies">
-        <div><span className="ai-security-kicker">Platform-owned, versioned controls</span><h2>AI Policy Studio</h2>
-          <p>Review catalog distribution and release state. New definitions are imported from reviewed Git policy packages.</p></div>
-      </header>
-      <section className="panel" aria-label="Phase 1 out-of-box catalog summary">
-        <h3>Phase 1 out-of-box catalog</h3>
-        <div className="summary-strip">
-          <span><strong>{phase1Policies.length}</strong> total</span>
-          <span><strong>{count('AWS', 'provider')}</strong> AWS</span>
-          <span><strong>{count('AZURE', 'provider')}</strong> Azure</span>
-          <span><strong>{count('MULTI_CLOUD', 'provider')}</strong> multi-resource</span>
-          <span><strong>{count('REQUIRED', 'defaultSelection')}</strong> required</span>
-          <span><strong>{count('ENABLED', 'defaultSelection')}</strong> enabled</span>
-          <span><strong>{count('DISABLED', 'defaultSelection')}</strong> disabled</span>
+      <aside className="platform-ai-policy-studio-sidebar">
+        <div className="platform-ai-policy-studio-sidebar-header">
+          <span className="ai-security-kicker">Platform controls</span>
+          <h3>Policy Studio</h3>
         </div>
-        <div className="summary-strip" aria-label="Phase 1 lifecycle and rollout summary">
-          <span><strong>{count('VALIDATED', 'lifecycle')}</strong> validated</span>
-          <span><strong>{count('PUBLISHED', 'lifecycle')}</strong> published</span>
-          <span><strong>{count('PAUSED', 'rolloutStage')}</strong> paused</span>
-          <span><strong>{count('CANARY', 'rolloutStage')}</strong> canary</span>
-          <span><strong>{count('GENERAL_AVAILABILITY', 'rolloutStage')}</strong> GA</span>
+        <nav className="platform-ai-policy-studio-nav" aria-label="AI Policy Studio sections" role="tablist" aria-orientation="vertical">
+          {POLICY_STUDIO_NAV_ITEMS.map((item) => (
+            <button key={item.id} ref={(element) => { tabRefs.current[item.id] = element; }} type="button" role="tab"
+              id={`policy-studio-tab-${item.id}`} aria-controls={`policy-studio-panel-${item.id}`} aria-selected={activeWorkspace === item.id}
+              tabIndex={activeWorkspace === item.id ? 0 : -1} className="platform-ai-policy-studio-nav-link"
+              onClick={() => activateWorkspace(item.id, item.id)} onKeyDown={(event) => handleWorkspaceKeyDown(event, item.id)}>
+              <span>{item.label}</span>
+              <small>{item.helper}</small>
+            </button>
+          ))}
+        </nav>
+      </aside>
+
+      <div className="platform-ai-policy-studio-content">
+        <section id="policy-studio-panel-overview" role="tabpanel" aria-labelledby="policy-studio-tab-overview" hidden={activeWorkspace !== 'overview'} className="platform-ai-policy-studio-workspace">
+        <header ref={(element) => { sectionRefs.current.overview = element; }} tabIndex={-1} className="ai-security-hero policies">
+          <div><span className="ai-security-kicker">Platform-owned, versioned controls</span><h2>AI Policy Studio</h2>
+            <p>Start with the controls and governance work that need your attention.</p></div>
+        </header>
+        <section className="panel"><h3>Attention required</h3>
+          <div className="policy-studio-attention-grid">
+            <button type="button" className="policy-studio-attention-card" onClick={() => activateWorkspace('governance', 'certification')}><strong>{pendingPolicies}</strong><span>policies awaiting release evidence</span><small>Review certification blockers</small></button>
+            <button type="button" className="policy-studio-attention-card" onClick={() => activateWorkspace('policies', 'policies')}><strong>{canaryPolicies}</strong><span>policies in canary</span><small>Review rollout cohorts</small></button>
+            <button type="button" className="policy-studio-attention-card" onClick={() => activateWorkspace('governance', 'portfolio')}><strong>{coverageGaps}</strong><span>framework coverage gaps</span><small>Review coverage and intake</small></button>
+            <button type="button" className="policy-studio-attention-card" onClick={() => activateWorkspace('governance', 'migration')}><strong>→</strong><span>tenant migration</span><small>Review an approved tenant migration</small></button>
+          </div>
+        </section>
+        </section>
+
+        <section id="policy-studio-panel-policies" role="tabpanel" aria-labelledby="policy-studio-tab-policies" hidden={activeWorkspace !== 'policies'} className="platform-ai-policy-studio-workspace">
+        <section ref={(element) => { sectionRefs.current.policies = element; }} tabIndex={-1} className="panel" aria-label="Phase 1 out-of-box catalog summary">
+          <h2>Policies</h2>
+          <p>Manage the governed policy catalog, tenant defaults, rollout, and expected tenant impact.</p>
+          {catalogQuery.isLoading ? <p role="status">Loading governed policy catalog…</p> : null}
+          {catalogQuery.isError ? (
+            <div className="notice error" role="alert">
+              <p>The governed policy catalog could not be loaded.</p>
+              <button type="button" className="btn btn-secondary" onClick={() => void catalogQuery.refetch()} disabled={catalogQuery.isFetching}>
+                {catalogQuery.isFetching ? 'Retrying…' : 'Retry catalog'}
+              </button>
+            </div>
+          ) : null}
+          <div className="summary-strip" aria-label="Phase 1 catalog summary"><span><strong>{catalogLoaded ? phase1Policies.length : '—'}</strong> total</span><span><strong>{catalogLoaded ? canaryPolicies : '—'}</strong> canary</span><span><strong>{catalogLoaded ? count('PAUSED', 'rolloutStage') : '—'}</strong> paused</span></div>
+          {catalogLoaded && phase1Policies.length !== 76 ? <p className="notice error">Catalog mismatch: expected 76 AGCF Phase 1 policies, received {phase1Policies.length}. Check migrations V75–V89 and the deployment smoke check.</p> : null}
+        </section>
+        <div className="connect-filter-bar connect-filter-bar--standalone" aria-label="Phase 1 catalog filters">
+          <label htmlFor="phase1-provider-filter">Provider</label>
+          <select id="phase1-provider-filter" value={providerFilter} onChange={(event) => setProviderFilter(event.target.value)}><option value="ALL">All providers</option><option value="AWS">AWS</option><option value="AZURE">Azure</option><option value="MULTI_CLOUD">Multi-resource</option></select>
+          <label htmlFor="phase1-lifecycle-filter">Lifecycle</label>
+          <select id="phase1-lifecycle-filter" value={lifecycleFilter} onChange={(event) => setLifecycleFilter(event.target.value)}><option value="ALL">All lifecycles</option><option value="VALIDATED">Validated</option><option value="PUBLISHED">Published</option><option value="RETIRED">Retired</option></select>
         </div>
-        {phase1Policies.length !== 76 ? <p className="notice error">Catalog mismatch: expected 76 AGCF Phase 1 policies, received {phase1Policies.length}. Check migrations V75–V87 and the deployment smoke check.</p> : null}
-      </section>
-      <div className="connect-filter-bar connect-filter-bar--standalone" aria-label="Phase 1 catalog filters">
-        <label htmlFor="phase1-provider-filter">Provider</label>
-        <select id="phase1-provider-filter" value={providerFilter} onChange={(event) => setProviderFilter(event.target.value)}><option value="ALL">All providers</option><option value="AWS">AWS</option><option value="AZURE">Azure</option><option value="MULTI_CLOUD">Multi-resource</option></select>
-        <label htmlFor="phase1-lifecycle-filter">Lifecycle</label>
-        <select id="phase1-lifecycle-filter" value={lifecycleFilter} onChange={(event) => setLifecycleFilter(event.target.value)}><option value="ALL">All lifecycles</option><option value="VALIDATED">Validated</option><option value="PUBLISHED">Published</option><option value="RETIRED">Retired</option></select>
+        <div className="panel ai-security-table-panel">
+          <h3>AGCF Phase 1 governed policies</h3>
+          <p>Catalog readiness and tenant distribution are separate. VALIDATED/PAUSED rows remain visible here while tenant APIs continue to exclude them.</p>
+          <table className="data-table"><thead><tr><th>Policy</th><th>Provider</th><th>Version</th><th>Lifecycle</th><th>Readiness</th><th>Tenant distribution</th><th>Tenant default</th><th>Rollout</th><th>Actions</th></tr></thead>
+            <tbody>{policies.map((policy) => <PolicyRow key={policy.policyId} policy={policy} saving={mutation.isPending} tenantId={tenantId} onPreview={setPreview} onSave={(patch, canaryTenantIds) => mutation.mutate({ policy, patch, canaryTenantIds })} />)}</tbody>
+          </table>
+          {catalogLoaded && policies.length === 0 ? <div className="empty-state"><p>No Phase 1 policies match these filters.</p></div> : null}
+        </div>
+        {preview ? <ImpactPreview preview={preview} /> : null}
+        </section>
+
+        <section ref={(element) => { sectionRefs.current.governance = element; }} tabIndex={-1} id="policy-studio-panel-governance" role="tabpanel" aria-labelledby="policy-studio-tab-governance" hidden={activeWorkspace !== 'governance'} className="platform-ai-policy-studio-workspace">
+          <section ref={(element) => { sectionRefs.current.certification = element; }} tabIndex={-1}><CertificationLedger readiness={certificationQuery.data} loading={certificationQuery.isLoading} failed={certificationQuery.isError} /></section>
+          <section ref={(element) => { sectionRefs.current.migration = element; }} tabIndex={-1} className="platform-ai-policy-studio-governance-section">
+            <h2>Tenant migration</h2>
+            <div className="connect-filter-bar connect-filter-bar--standalone">
+              <label htmlFor="policy-preview-tenant">Impact-preview tenant</label>
+              <select id="policy-preview-tenant" value={tenantId} onChange={(event) => { setTenantId(event.target.value); setPreview(null); }}>
+                <option value="">Select tenant</option>{(tenantsQuery.data ?? []).map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}
+              </select>
+            </div>
+            <Phase1TenantMigration tenantId={tenantId} tenantName={(tenantsQuery.data ?? []).find((tenant) => tenant.id === tenantId)?.name} />
+            {legacyPolicies.length > 0 ? <LegacyPolicyCatalog policies={legacyPolicies} /> : null}
+          </section>
+          <section ref={(element) => { sectionRefs.current.portfolio = element; }} tabIndex={-1}><PolicyPortfolio coverage={frameworkCoverageQuery.data ?? []} candidates={candidatesQuery.data ?? []} /></section>
+        </section>
       </div>
-      <CertificationLedger readiness={certificationQuery.data} loading={certificationQuery.isLoading} failed={certificationQuery.isError} />
-      <div className="connect-filter-bar connect-filter-bar--standalone">
-        <label htmlFor="policy-preview-tenant">Impact-preview tenant</label>
-        <select id="policy-preview-tenant" value={tenantId} onChange={(event) => { setTenantId(event.target.value); setPreview(null); }}>
-          <option value="">Select tenant</option>{(tenantsQuery.data ?? []).map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.name}</option>)}
-        </select>
-      </div>
-      <Phase1TenantMigration tenantId={tenantId} tenantName={(tenantsQuery.data ?? []).find((tenant) => tenant.id === tenantId)?.name} />
-      {catalogQuery.isError ? <div className="notice error">The governed policy catalog could not be loaded.</div> : null}
-      <div className="panel ai-security-table-panel">
-        <h3>AGCF Phase 1 governed policies</h3>
-        <p>Catalog readiness and tenant distribution are separate. VALIDATED/PAUSED rows remain visible here while tenant APIs continue to exclude them.</p>
-        <table className="data-table"><thead><tr><th>Policy</th><th>Provider</th><th>Version</th><th>Lifecycle</th><th>Readiness</th><th>Tenant distribution</th><th>Tenant default</th><th>Rollout</th><th>Actions</th></tr></thead>
-          <tbody>{policies.map((policy) => <PolicyRow key={policy.policyId} policy={policy} saving={mutation.isPending} tenantId={tenantId} onPreview={setPreview} onSave={(patch, canaryTenantIds) => mutation.mutate({ policy, patch, canaryTenantIds })} />)}</tbody>
-        </table>
-        {!catalogQuery.isLoading && policies.length === 0 ? <div className="empty-state"><p>No Phase 1 policies match these filters.</p></div> : null}
-      </div>
-      <LegacyPolicyCatalog policies={legacyPolicies} />
-      {preview ? <ImpactPreview preview={preview} /> : null}
-      <PolicyPortfolio coverage={frameworkCoverageQuery.data ?? []} candidates={candidatesQuery.data ?? []} />
     </section>
   );
 }

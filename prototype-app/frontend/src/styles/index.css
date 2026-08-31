@@ -6,3 +6,16 @@
 @import "./vuln-repo.css";
 @import "./user-management.css";
 @import "./exposure-dashboard.css";
+/* The public landing page is self-contained and rendered in an isolated frame
+ * to keep its visual system independent from the authenticated application. */
+.public-landing-embed {
+  min-height: 100vh;
+  background: #fff;
+}
+
+.public-landing-embed__frame {
+  display: block;
+  width: 100%;
+  min-height: 100vh;
+  border: 0;
+}

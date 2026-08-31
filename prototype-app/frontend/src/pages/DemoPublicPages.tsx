@@ -243,7 +243,7 @@ function FeatureList({ items }: { items: Array<{ title: string; body: string }> 
   );
 }
 
-export function DemoLandingPage() {
+function LegacyDemoLandingPage() {
   return (
     <PublicDemoShell>
       <section className="scout-hero">
@@ -706,6 +706,22 @@ export function DemoLandingPage() {
         </div>
       </footer>
     </PublicDemoShell>
+  );
+}
+
+/**
+ * The public site is supplied as a self-contained artifact so its imagery,
+ * typography, and responsive layout remain exactly as designed.
+ */
+export function DemoLandingPage() {
+  return (
+    <main className="public-landing-embed">
+      <iframe
+        className="public-landing-embed__frame"
+        src="/scoutgrid-landing.html"
+        title="ScoutGrid — exposure and BOM management"
+      />
+    </main>
   );
 }
 

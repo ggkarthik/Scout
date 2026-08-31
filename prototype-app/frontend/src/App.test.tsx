@@ -50,6 +50,17 @@ describe('App test persona switcher', () => {
     window.localStorage.clear();
   });
 
+  it('shows the public landing page immediately while the root session check is pending', async () => {
+    const auth = await import('./features/auth/api');
+    vi.spyOn(auth.authApi, 'getActorContext').mockImplementation(() => new Promise<ActorContext>(() => undefined));
+
+    const { default: App } = await import('./App');
+    renderWithProviders(<App />, { route: '/' });
+
+    expect(screen.getByTitle('ScoutGrid — exposure and BOM management')).toBeInTheDocument();
+    expect(screen.queryByText('Loading page...')).not.toBeInTheDocument();
+  });
+
   it('shows non-production personas from the gear menu and supports UI preview mode', async () => {
     vi.stubEnv('VITE_ENABLE_TEST_PERSONAS', 'true');
     const auth = await import('./features/auth/api');
@@ -159,13 +170,29 @@ describe('App test persona switcher', () => {
     expect(await screen.findByRole('button', { name: 'Tenant Management' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Tenant context switcher')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'End-of-Life' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Policies' })).toBeInTheDocument();
     const platformViews = await screen.findByLabelText('Platform views');
     expect(within(platformViews).getByLabelText('Tenant Management')).toBeInTheDocument();
+    expect(within(platformViews).queryByText('AI Policy Studio')).not.toBeInTheDocument();
     expect(within(platformViews).queryByLabelText('Operations')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Operations' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText('Open settings menu'));
     expect(screen.queryByText('Tenant Administration')).not.toBeInTheDocument();
+  });
+
+  it('opens platform policies from its top-level navigation item', async () => {
+    const auth = await import('./features/auth/api');
+    vi.spyOn(auth.authApi, 'getActorContext').mockResolvedValue(PLATFORM_OWNER_PLATFORM_SCOPE);
+
+    const { default: App } = await import('./App');
+    renderWithProviders(<App />, { route: '/platform/tenants' });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Policies' }));
+
+    expect(await screen.findByRole('heading', { name: 'AI Policy Studio' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Policies' })).toHaveClass('active');
+    expect(screen.queryByLabelText('Platform views')).not.toBeInTheDocument();
   });
 
   it('redirects platform-scope owners away from operations into platform EOL', async () => {
