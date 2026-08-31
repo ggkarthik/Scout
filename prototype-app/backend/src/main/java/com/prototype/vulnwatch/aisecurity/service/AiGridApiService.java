@@ -220,7 +220,8 @@ public class AiGridApiService {
                        where r.policy_id = p.policy_id and r.policy_version = p.version
                        order by r.computed_at desc, r.run_id desc limit 1
                   ) readiness on true
-                 where p.lifecycle = 'PUBLISHED' and d.available = true
+                 where p.release_family = 'AGCF_PHASE_1'
+                   and p.lifecycle in ('PUBLISHED', 'CANARY') and d.available = true
                    and (d.rollout_stage = 'GENERAL_AVAILABILITY'
                         or (d.rollout_stage = 'CANARY' and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
                  order by p.policy_id, p.published_at desc, p.version desc
@@ -244,7 +245,8 @@ public class AiGridApiService {
                   from platform.ai_grid_policy_versions p
                   left join ai_grid_policy_selections s on s.policy_id = p.policy_id
                  where p.policy_id = :policyId
-                   and p.lifecycle in ('PUBLISHED', 'RETIRED')
+                   and p.release_family = 'AGCF_PHASE_1'
+                   and p.lifecycle in ('PUBLISHED', 'CANARY', 'RETIRED')
                  order by p.published_at desc nulls last, p.version desc
                 """, Map.of("policyId", policyId), (rs, n) -> new PolicyView(rs.getString("policy_id"),
                 rs.getString("version"), rs.getString("name"), rs.getString("severity"),

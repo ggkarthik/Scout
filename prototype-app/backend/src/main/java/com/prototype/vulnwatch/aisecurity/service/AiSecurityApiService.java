@@ -754,14 +754,14 @@ public class AiSecurityApiService {
     private static final Set<String> VALID_OVERRIDES = Set.of(
             AiSecurityPolicyScopeMatcher.OVERRIDE_INCLUDED, AiSecurityPolicyScopeMatcher.OVERRIDE_EXCLUDED);
     public PolicyConfigurationResponse policyConfiguration(Tenant tenant, String policyId) {
-        PolicyDefinition definition = requirePolicy(policyId);
+        PolicyDefinition definition = requirePolicy(tenant, policyId);
         return tenantExecution.run(tenant, () -> buildConfiguration(definition));
     }
 
     public PolicyConfigurationResponse updatePolicyScope(
             Tenant tenant, String policyId, String rawMode, String rawConditionLogic,
             List<PolicyScopeConditionResponse> rawConditions, String actor) {
-        PolicyDefinition definition = requirePolicy(policyId);
+        PolicyDefinition definition = requirePolicy(tenant, policyId);
         String mode = rawMode == null ? null : rawMode.toUpperCase(Locale.ROOT);
         if (!VALID_SCOPE_MODES.contains(mode)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported scope mode");
@@ -802,7 +802,7 @@ public class AiSecurityApiService {
 
     public PolicyConfigurationResponse addPolicyException(
             Tenant tenant, String policyId, UUID artifactId, String rawOverride, String reason, String actor) {
-        PolicyDefinition definition = requirePolicy(policyId);
+        PolicyDefinition definition = requirePolicy(tenant, policyId);
         if (artifactId == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "An artifact is required");
         }
@@ -835,7 +835,7 @@ public class AiSecurityApiService {
 
     public PolicyConfigurationResponse removePolicyException(
             Tenant tenant, String policyId, UUID artifactId, String actor) {
-        PolicyDefinition definition = requirePolicy(policyId);
+        PolicyDefinition definition = requirePolicy(tenant, policyId);
         return tenantExecution.run(tenant, () -> transactionTemplate.execute(status -> {
             jdbc.update("""
                     delete from ai_grid_policy_artifact_overrides
@@ -850,7 +850,7 @@ public class AiSecurityApiService {
 
     public PolicyConfigurationResponse updatePolicyParameters(
             Tenant tenant, String policyId, Map<String, String> parameters, String actor) {
-        PolicyDefinition definition = requirePolicy(policyId);
+        PolicyDefinition definition = requirePolicy(tenant, policyId);
         List<PolicyParameterSpec> specs = policyParameterSpecs(policyId);
         Map<String, String> validated = new LinkedHashMap<>();
         for (PolicyParameterSpec spec : specs) {
@@ -886,7 +886,7 @@ public class AiSecurityApiService {
     }
 
     public PolicyAssistExplanationResponse explainPolicy(Tenant tenant, String policyId) {
-        PolicyDefinition definition = requirePolicy(policyId);
+        PolicyDefinition definition = requirePolicy(tenant, policyId);
         return tenantExecution.run(tenant, () -> {
             PolicyConfigurationResponse configuration = buildConfiguration(definition);
             long openOnMatched = count("""
@@ -929,8 +929,8 @@ public class AiSecurityApiService {
         });
     }
 
-    private PolicyDefinition requirePolicy(String policyId) {
-        return catalogDefinition(policyId)
+    private PolicyDefinition requirePolicy(Tenant tenant, String policyId) {
+        return catalogDefinition(tenant, policyId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "AI Security policy not found"));
     }
 
@@ -941,22 +941,24 @@ public class AiSecurityApiService {
                        p.required_resource_families_json::text,p.description,p.remediation,p.framework_mappings_json::text
                   from platform.ai_grid_policy_versions p
                   join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id and d.available=true
-                 where p.lifecycle='PUBLISHED'
+                 where p.lifecycle in ('PUBLISHED', 'CANARY')
                    and (d.rollout_stage='GENERAL_AVAILABILITY'
                         or (d.rollout_stage='CANARY' and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
                  order by p.policy_id,p.published_at desc nulls last,p.version desc
                 """, Map.of("tenantId", tenant.getId().toString()), (rs, n) -> catalogDefinition(rs));
     }
 
-    private java.util.Optional<PolicyDefinition> catalogDefinition(String policyId) {
+    private java.util.Optional<PolicyDefinition> catalogDefinition(Tenant tenant, String policyId) {
         List<PolicyDefinition> definitions = jdbc.query("""
                 select p.policy_id,p.version,p.name,p.severity,p.artifact_types_json::text,
                        p.required_resource_families_json::text,p.description,p.remediation,p.framework_mappings_json::text
                   from platform.ai_grid_policy_versions p
                   join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id and d.available=true
-                 where p.policy_id=:id and p.lifecycle='PUBLISHED'
+                 where p.policy_id=:id and p.lifecycle in ('PUBLISHED', 'CANARY')
+                   and (d.rollout_stage='GENERAL_AVAILABILITY'
+                        or (d.rollout_stage='CANARY' and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
                  order by p.published_at desc nulls last,p.version desc limit 1
-                """, Map.of("id", policyId), (rs, n) -> catalogDefinition(rs));
+                """, Map.of("id", policyId, "tenantId", tenant.getId().toString()), (rs, n) -> catalogDefinition(rs));
         return definitions.stream().findFirst();
     }
 
@@ -964,7 +966,7 @@ public class AiSecurityApiService {
     private List<PolicyParameterSpec> policyParameterSpecs(String policyId) {
         List<String> definitions = jdbc.query("""
                 select parameter_definitions_json::text from platform.ai_grid_policy_versions
-                 where policy_id=:id and lifecycle='PUBLISHED'
+                 where policy_id=:id and lifecycle in ('PUBLISHED', 'CANARY')
                  order by published_at desc nulls last, version desc limit 1
                 """, Map.of("id", policyId), (rs, n) -> rs.getString(1));
         List<PolicyParameterSpec> catalogSpecs = definitions.isEmpty() ? List.of() : parameterSpecs(definitions.get(0));

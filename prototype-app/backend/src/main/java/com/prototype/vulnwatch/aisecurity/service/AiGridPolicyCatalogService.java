@@ -196,8 +196,12 @@ public class AiGridPolicyCatalogService {
                    p.version,p.name,p.severity,p.lifecycle,p.control_objective_id,p.provider,p.evaluation_mode,
                    p.base_evidence_tiers_json::text,p.conditional_capabilities_json::text,p.framework_mappings_json::text,
                    p.release_family,p.release_wave
-              from platform.ai_grid_policy_distribution d join platform.ai_grid_policy_versions p
-                on p.policy_id=d.policy_id and p.version=d.pinned_version
+              from platform.ai_grid_policy_distribution d join lateral (
+                  select * from platform.ai_grid_policy_versions p
+                   where p.policy_id=d.policy_id
+                     and (d.pinned_version is null or p.version=d.pinned_version)
+                   order by (case when p.version=d.pinned_version then 0 else 1 end),
+                            p.published_at desc nulls last,p.version desc limit 1) p on true
              where p.package_source_ref like 'policy-packages/agcf/%'
             """ + filters + " order by p.provider,p.policy_id", parameters,
                 (rs, n) -> new Distribution(rs.getString(1),rs.getBoolean(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7),rs.getTimestamp(8).toInstant(),rs.getString(9),rs.getString(10),rs.getString(11),rs.getString(12),rs.getString(13),rs.getString(14),rs.getString(15),rs.getString(16),rs.getString(17),rs.getString(18),rs.getString(19),rs.getString(20))));

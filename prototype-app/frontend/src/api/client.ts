@@ -525,6 +525,19 @@ import type {
   AiGridShippingStatus,
   AiGridPolicyRollout,
   AiGridPlatformPolicyDetail,
+  AiGridPolicyImpactPreview,
+  AiGridPolicyReleaseReadiness,
+  AiGridPhase1CertificationReadiness,
+  AiGridPhase1CorpusBootstrap,
+  AiGridPhase1CorpusReadiness,
+  AiGridPhase1CorpusCertification,
+  AiGridPhase1MigrationPreview,
+  AiGridPhase1PreviewCertificationProfile,
+  AiGridPhase1PreviewStatus,
+  AiGridPhase1MigrationResult,
+  AiGridControlCoverage,
+  AiGridOwaspCoverage,
+  AiGridPolicyCandidate,
   AiGridPolicySelection,
   AiGridOwner,
   AiGridRunMetrics,
@@ -1381,6 +1394,51 @@ export const api = {
   retryPlatformAiGridPolicyRollout: (rolloutId: string) => request<void>(
     `/platform/ai-grid/policy-rollouts/${encodeURIComponent(rolloutId)}/retry`, { method: 'POST' },
   ),
+  getPlatformAiGridPolicyReleaseReadiness: (policyId: string, version: string) => request<AiGridPolicyReleaseReadiness>(
+    `/platform/ai-grid/policies/${encodeURIComponent(policyId)}/versions/${encodeURIComponent(version)}/release-readiness`,
+  ),
+  publishPlatformAiGridPolicy: (policyId: string, version: string) => request<{ published: boolean; reason: string }>(
+    `/platform/ai-grid/policies/${encodeURIComponent(policyId)}/versions/${encodeURIComponent(version)}/publish`, { method: 'POST' },
+  ),
+  getPlatformAiGridPhase1CertificationReadiness: () => request<AiGridPhase1CertificationReadiness>(
+    '/platform/ai-grid/validation/releases/phase-1/certification-readiness',
+  ),
+  getPlatformAiGridPhase1PreviewStatus: () => request<AiGridPhase1PreviewStatus>('/platform/ai-grid/releases/phase-1/preview'),
+  getPlatformAiGridPhase1PreviewProfile: () => request<AiGridPhase1PreviewCertificationProfile>('/platform/ai-grid/releases/phase-1/preview/profile'),
+  recordPlatformAiGridPhase1PreviewGate: (gateKey: string, payload: { status: 'PASSED' | 'FAILED'; evidenceReference: string; results?: Record<string, unknown> }) =>
+    request<AiGridPhase1PreviewStatus>(`/platform/ai-grid/releases/phase-1/preview/gates/${encodeURIComponent(gateKey)}`, { method: 'POST', body: JSON.stringify(payload) }),
+  promotePlatformAiGridPhase1Internal: (tenantId: string) =>
+    request<AiGridPhase1PreviewStatus>('/platform/ai-grid/releases/phase-1/preview/promote-internal', { method: 'POST', body: JSON.stringify({ tenantId }) }),
+  setPlatformAiGridPhase1PreviewCohort: (tenantIds: string[]) =>
+    request<AiGridPhase1PreviewStatus>('/platform/ai-grid/releases/phase-1/preview/cohort', { method: 'POST', body: JSON.stringify({ tenantIds }) }),
+  pausePlatformAiGridPhase1Preview: () => request<AiGridPhase1PreviewStatus>('/platform/ai-grid/releases/phase-1/preview/pause', { method: 'POST' }),
+  resumePlatformAiGridPhase1Preview: () => request<AiGridPhase1PreviewStatus>('/platform/ai-grid/releases/phase-1/preview/resume', { method: 'POST' }),
+  bootstrapPlatformAiGridPhase1CertificationCorpus: (payload: { engineeringOwner: string; securityReviewer: string; reviewDueAt: string }) =>
+    request<AiGridPhase1CorpusBootstrap>('/platform/ai-grid/validation/releases/phase-1/certification-corpus/bootstrap', {
+      method: 'POST', body: JSON.stringify(payload),
+    }),
+  getPlatformAiGridPhase1CorpusReadiness: () => request<AiGridPhase1CorpusReadiness>(
+    '/platform/ai-grid/validation/releases/phase-1/certification-corpus/readiness',
+  ),
+  certifyPlatformAiGridPhase1Corpus: () => request<AiGridPhase1CorpusCertification>(
+    '/platform/ai-grid/validation/releases/phase-1/certification-corpus/certify', { method: 'POST' },
+  ),
+  getPlatformAiGridPhase1MigrationPreview: (tenantId: string) => request<AiGridPhase1MigrationPreview>(
+    `/platform/ai-grid/migrations/phase-1/tenants/${encodeURIComponent(tenantId)}/preview`,
+  ),
+  applyPlatformAiGridPhase1Migration: (tenantId: string) => request<AiGridPhase1MigrationResult>(
+    `/platform/ai-grid/migrations/phase-1/tenants/${encodeURIComponent(tenantId)}/apply`, { method: 'POST' },
+  ),
+  /** @deprecated Retained for one release; use getPlatformAiGridFrameworkCoverage. */
+  getPlatformAiGridOwaspCoverage: () => request<AiGridOwaspCoverage[]>('/platform/ai-grid/policies/portfolio/owasp'),
+  getPlatformAiGridFrameworkCoverage: (framework = 'OWASP_GENAI_LLM_TOP_10', version = '2026') =>
+    request<AiGridControlCoverage[]>(`/platform/ai-grid/policies/portfolio/frameworks?framework=${encodeURIComponent(framework)}&version=${encodeURIComponent(version)}`),
+  getPlatformAiGridPolicyCandidates: () => request<AiGridPolicyCandidate[]>('/platform/ai-grid/policies/portfolio/candidates'),
+  createPlatformAiGridPolicyCandidate: (payload: {
+    title: string; sourceType: string; status: string; technologyId?: string; rationale: string;
+    frameworkMappings: Record<string, unknown>; riskScore: number; reachScore: number;
+    evidenceMaturity: number; remediationClarity: number; owner?: string;
+  }) => request<AiGridPolicyCandidate>('/platform/ai-grid/policies/portfolio/candidates', { method: 'POST', body: JSON.stringify(payload) }),
   updateAiGridPolicySelection: (policyId: string, selection: AiGridPolicySelection, reason?: string) =>
     request<AiGridPolicy[]>(`/ai-policies/${encodeURIComponent(policyId)}/selection`, {
       method: 'PUT',

@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 public class PlatformOwnerBootstrapProperties {
 
     private boolean enabled;
+    private String localPassword;
     private List<PlatformOwnerSeed> users = new ArrayList<>();
 
     public boolean isEnabled() {
@@ -18,6 +19,14 @@ public class PlatformOwnerBootstrapProperties {
 
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
+    }
+
+    public String getLocalPassword() {
+        return localPassword;
+    }
+
+    public void setLocalPassword(String localPassword) {
+        this.localPassword = localPassword;
     }
 
     public List<PlatformOwnerSeed> getUsers() {

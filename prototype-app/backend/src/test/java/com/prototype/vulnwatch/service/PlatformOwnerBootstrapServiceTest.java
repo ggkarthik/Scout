@@ -18,6 +18,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.DefaultApplicationArguments;
+import org.springframework.core.env.Environment;
+import org.springframework.security.crypto.bcrypt.BCrypt;
 
 @ExtendWith(MockitoExtension.class)
 class PlatformOwnerBootstrapServiceTest {
@@ -27,6 +29,9 @@ class PlatformOwnerBootstrapServiceTest {
 
     @Mock
     private AppUserGlobalRoleService appUserGlobalRoleService;
+
+    @Mock
+    private Environment environment;
 
     @Test
     void bootstrapsConfiguredPlatformOwnersUsingEmailAsFallbackSubject() throws Exception {
@@ -87,5 +92,34 @@ class PlatformOwnerBootstrapServiceTest {
                 "Platform owner bootstrap matched different users for subject owner-subject and email owner@example.com",
                 error.getMessage()
         );
+    }
+
+    @Test
+    void hashesLocalBootstrapPassword() throws Exception {
+        PlatformOwnerBootstrapProperties properties = new PlatformOwnerBootstrapProperties();
+        properties.setEnabled(true);
+        properties.setLocalPassword("local-test-password");
+        PlatformOwnerBootstrapProperties.PlatformOwnerSeed seed = new PlatformOwnerBootstrapProperties.PlatformOwnerSeed();
+        seed.setEmail("owner@example.com");
+        properties.setUsers(List.of(seed));
+
+        when(environment.matchesProfiles("local")).thenReturn(true);
+        when(userRepository.findByExternalSubject("owner@example.com")).thenReturn(Optional.empty());
+        when(userRepository.findByEmailIgnoreCase("owner@example.com")).thenReturn(Optional.empty());
+        when(userRepository.save(any(AppUser.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        PlatformOwnerBootstrapService service = new PlatformOwnerBootstrapService(
+                properties,
+                userRepository,
+                appUserGlobalRoleService,
+                environment
+        );
+
+        service.run(new DefaultApplicationArguments(new String[0]));
+
+        var savedUser = org.mockito.ArgumentCaptor.forClass(AppUser.class);
+        verify(userRepository).save(savedUser.capture());
+        assertEquals(true, BCrypt.checkpw("local-test-password", savedUser.getValue().getPasswordHash()));
+        assertEquals(true, savedUser.getValue().isPlatformOwner());
     }
 }

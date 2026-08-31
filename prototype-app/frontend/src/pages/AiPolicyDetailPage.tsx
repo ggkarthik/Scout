@@ -6,6 +6,7 @@ import { useActor } from '../features/auth/context';
 import { hasRole } from '../features/auth/roles';
 import { formatDate, formatLabel, severityClassName } from '../features/cve-workbench/formatting';
 import type {
+  AiGridPolicy,
   AiSecurityFinding,
   PolicyExceptionOverride,
   PolicyScopeCondition,
@@ -15,6 +16,25 @@ import { timeAgo } from '../lib/time';
 
 const SEVERITY_RANK: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 type PolicyDetailTab = 'overview' | 'configure' | 'findings' | 'artifacts';
+type FrameworkMapping = { framework?: string; frameworkVersion?: string; controlId?: string; mappingType?: string; rationale?: string };
+
+function parseJsonArray(json: string | undefined): string[] {
+  try {
+    const value = JSON.parse(json || '[]');
+    return Array.isArray(value) ? value.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseFrameworkMappings(json: string | undefined): FrameworkMapping[] {
+  try {
+    const value = JSON.parse(json || '[]');
+    return Array.isArray(value) ? value as FrameworkMapping[] : [];
+  } catch {
+    return [];
+  }
+}
 
 const SCOPE_FIELD_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'ARTIFACT_TYPE', label: 'Artifact type' },
@@ -76,6 +96,54 @@ function buildImpactedArtifacts(findings: AiSecurityFinding[]): ImpactedArtifact
     .sort((left, right) => (SEVERITY_RANK[left.worstSeverity.toUpperCase()] ?? 99) - (SEVERITY_RANK[right.worstSeverity.toUpperCase()] ?? 99));
 }
 
+function PolicyEvidenceMetadata({ policy }: { policy: AiGridPolicy }) {
+  const evidenceTiers = parseJsonArray(policy.baseEvidenceTiersJson);
+  const conditionalCapabilities = parseJsonArray(policy.conditionalCapabilitiesJson);
+  const mappings = parseFrameworkMappings(policy.frameworkMappingsJson);
+
+  return (
+    <div className="cvd2-panel">
+      <div className="cvd2-panel-hdr">Evidence &amp; Framework Mappings</div>
+      <div className="ai-policy-overview-metadata">
+        <div className="ai-policy-detail">
+        <p className="ai-policy-detail-evidence">
+          <strong>Evidence tiers:</strong> {evidenceTiers.length > 0 ? evidenceTiers.join(', ') : '—'}
+        </p>
+        <div className="ai-policy-detail-block">
+          <strong>Required connector capabilities</strong>
+          {conditionalCapabilities.length === 0 ? (
+            <p>None — decides from base connector evidence.</p>
+          ) : (
+            <ul className="ai-policy-setup-list">
+              {conditionalCapabilities.map((capability) => (
+                <li key={capability}>
+                  Enable <code>{formatLabel(capability)}</code> in the connector to make this policy decision-capable; without it the policy reports <em>NO_DECISION</em>.
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="ai-policy-detail-block">
+          <strong>Framework mappings</strong>
+          {mappings.length === 0 ? (
+            <p>No structured framework mappings.</p>
+          ) : (
+            <ul className="ai-policy-mapping-list">
+              {mappings.map((mapping, index) => (
+                <li key={`${mapping.framework}-${mapping.controlId}-${index}`}>
+                  <strong>{mapping.framework} {mapping.frameworkVersion}</strong> · {mapping.controlId} <span className="ai-policy-mapping-type">{mapping.mappingType}</span>
+                  {mapping.rationale ? <><br /><small>{mapping.rationale}</small></> : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function coverageStatusLabel(status: 'PASS' | 'FAIL' | 'NO_DATA'): string {
   if (status === 'NO_DATA') return 'Coverage not measured';
   return status === 'PASS' ? 'Pilot coverage gate passed' : 'Pilot coverage gate blocked';
@@ -99,6 +167,10 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
     queryKey: ['ai-security-policies'],
     queryFn: api.listAiGridPolicyDetails,
   });
+  const policyMetadataQuery = useQuery({
+    queryKey: ['ai-grid-policies'],
+    queryFn: api.listAiGridPolicies,
+  });
   const findingsQuery = useQuery({
     queryKey: ['ai-security-findings-for-policy', policyId],
     queryFn: () => api.listAiSecurityFindings(policyId, undefined, 0, 200),
@@ -109,6 +181,7 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
   });
 
   const policy = policiesQuery.data?.find((item) => item.id === policyId) ?? null;
+  const policyMetadata: AiGridPolicy | null = policyMetadataQuery.data?.find((item) => item.policyId === policyId) ?? null;
   const allFindings = React.useMemo(() => findingsQuery.data?.items ?? [], [findingsQuery.data?.items]);
   const visibleFindings = React.useMemo(() => (
     findingsStatusFilter ? allFindings.filter((finding) => finding.status === findingsStatusFilter) : allFindings
@@ -339,6 +412,10 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
                   </div>
                 </div>
               </div>
+
+              {policyMetadata && (
+                <PolicyEvidenceMetadata policy={policyMetadata} />
+              )}
 
               {Object.keys(policy.controlMappings).length > 0 && (
                 <div className="cvd2-panel">

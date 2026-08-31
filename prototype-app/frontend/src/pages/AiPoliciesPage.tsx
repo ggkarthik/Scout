@@ -11,13 +11,8 @@ import type { AiGridPolicy, AiGridPolicySelection } from '../features/ai-securit
 const SEVERITY_RANK: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 const PROVIDER_ORDER = ['AWS', 'AZURE', 'MULTI_CLOUD'];
 
-type FrameworkMapping = { framework?: string; frameworkVersion?: string; controlId?: string; mappingType?: string; rationale?: string };
-
 function parseStringArray(json: string): string[] {
   try { const value = JSON.parse(json || '[]'); return Array.isArray(value) ? value.map(String) : []; } catch { return []; }
-}
-function parseFrameworkMappings(json: string): FrameworkMapping[] {
-  try { const value = JSON.parse(json || '[]'); return Array.isArray(value) ? (value as FrameworkMapping[]) : []; } catch { return []; }
 }
 
 export function AiPoliciesPage() {
@@ -26,7 +21,6 @@ export function AiPoliciesPage() {
   const queryClient = useQueryClient();
   const [severityFilter, setSeverityFilter] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState('');
-  const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set());
   const policiesQuery = useQuery({
     queryKey: ['ai-grid-policies'],
     queryFn: api.listAiGridPolicies,
@@ -64,14 +58,6 @@ export function AiPoliciesPage() {
       return (li === -1 ? 99 : li) - (ri === -1 ? 99 : ri) || left.localeCompare(right);
     });
   }, [visiblePolicies]);
-  const toggleExpanded = React.useCallback((policyId: string) => {
-    setExpanded((current) => {
-      const next = new Set(current);
-      if (next.has(policyId)) next.delete(policyId); else next.add(policyId);
-      return next;
-    });
-  }, []);
-
   return (
     <div className="ai-security-page">
       <section className="ai-security-hero policies">
@@ -131,7 +117,6 @@ export function AiPoliciesPage() {
                   <table className="data-table">
                     <thead>
                       <tr>
-                        <th aria-label="Expand" />
                         <th>Policy</th>
                         <th>Severity</th>
                         <th>Objective</th>
@@ -145,10 +130,8 @@ export function AiPoliciesPage() {
                         <PolicyRows
                           key={policy.policyId}
                           policy={policy}
-                          expanded={expanded.has(policy.policyId)}
                           canManage={canManage}
                           saving={mutation.isPending && mutation.variables?.id === policy.policyId}
-                          onToggle={() => toggleExpanded(policy.policyId)}
                           onOpen={() => navigate(pathForPolicyDetail(policy.policyId))}
                           onSelect={(checked) => mutation.mutate({ id: policy.policyId, selection: checked ? 'ENABLED' : 'DISABLED' })}
                         />
@@ -165,32 +148,17 @@ export function AiPoliciesPage() {
   );
 }
 
-function PolicyRows({ policy, expanded, canManage, saving, onToggle, onOpen, onSelect }: {
+function PolicyRows({ policy, canManage, saving, onOpen, onSelect }: {
   policy: AiGridPolicy;
-  expanded: boolean;
   canManage: boolean;
   saving: boolean;
-  onToggle: () => void;
   onOpen: () => void;
   onSelect: (checked: boolean) => void;
 }) {
   const conditionalCapabilities = parseStringArray(policy.conditionalCapabilitiesJson);
-  const evidenceTiers = parseStringArray(policy.baseEvidenceTiersJson);
-  const mappings = parseFrameworkMappings(policy.frameworkMappingsJson);
   return (
     <>
       <tr onClick={onOpen}>
-        <td>
-          <button
-            type="button"
-            className="ai-policy-expand"
-            aria-label={expanded ? `Collapse ${policy.name}` : `Expand ${policy.name}`}
-            aria-expanded={expanded}
-            onClick={(event) => { event.stopPropagation(); onToggle(); }}
-          >
-            {expanded ? '▾' : '▸'}
-          </button>
-        </td>
         <td>
           <strong>{policy.name}</strong>
           {conditionalCapabilities.length > 0 ? (
@@ -214,47 +182,6 @@ function PolicyRows({ policy, expanded, canManage, saving, onToggle, onOpen, onS
           </label>
         </td>
       </tr>
-      {expanded ? (
-        <tr className="ai-policy-detail-row">
-          <td />
-          <td colSpan={6}>
-            <div className="ai-policy-detail">
-              <p className="ai-policy-detail-evidence">
-                <strong>Evidence tiers:</strong> {evidenceTiers.length > 0 ? evidenceTiers.join(', ') : '—'}
-              </p>
-              <div className="ai-policy-detail-block">
-                <strong>Required connector capabilities</strong>
-                {conditionalCapabilities.length === 0 ? (
-                  <p>None — decides from base connector evidence.</p>
-                ) : (
-                  <ul className="ai-policy-setup-list">
-                    {conditionalCapabilities.map((capability) => (
-                      <li key={capability}>
-                        Enable <code>{formatLabel(capability)}</code> in the connector to make this policy decision-capable; without it the policy reports <em>NO_DECISION</em>.
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-              <div className="ai-policy-detail-block">
-                <strong>Framework mappings</strong>
-                {mappings.length === 0 ? (
-                  <p>No structured framework mappings.</p>
-                ) : (
-                  <ul className="ai-policy-mapping-list">
-                    {mappings.map((mapping, index) => (
-                      <li key={`${mapping.framework}-${mapping.controlId}-${index}`}>
-                        <strong>{mapping.framework} {mapping.frameworkVersion}</strong> · {mapping.controlId} <span className="ai-policy-mapping-type">{mapping.mappingType}</span>
-                        {mapping.rationale ? <><br /><small>{mapping.rationale}</small></> : null}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-          </td>
-        </tr>
-      ) : null}
     </>
   );
 }

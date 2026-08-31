@@ -40,6 +40,8 @@ class AiGridPolicyCatalogServiceTest {
 
         verify(jdbc).query(contains("p.package_source_ref like 'policy-packages/agcf/%'"),
                 any(SqlParameterSource.class), any(org.springframework.jdbc.core.RowMapper.class));
+        verify(jdbc).query(contains("p.release_family = :releaseFamily"),
+                any(SqlParameterSource.class), any(org.springframework.jdbc.core.RowMapper.class));
         verify(jdbc, org.mockito.Mockito.never()).query(contains("d.available = true"),
                 any(SqlParameterSource.class), any(org.springframework.jdbc.core.RowMapper.class));
     }
