@@ -15,7 +15,7 @@ const changelogPath = join(appRoot, 'docs', 'ai-grid-phase-1-changelog.md');
 const seedMigrationPath = join(appRoot, 'backend', 'src', 'main', 'resources', 'db', 'migration', 'postgres_reset', 'V76__seed_ai_grid_phase_1_catalog.sql');
 const correctionMigrationPath = join(appRoot, 'backend', 'src', 'main', 'resources', 'db', 'migration', 'postgres_reset', 'V88__ai_grid_phase_1_typed_and_correlation_contracts.sql');
 const completionMigrationPath = join(appRoot, 'backend', 'src', 'main', 'resources', 'db', 'migration', 'postgres_reset', 'V89__ai_grid_phase_1_concrete_evidence_contracts.sql');
-const shippingMigrationPath = join(appRoot, 'backend', 'src', 'main', 'resources', 'db', 'migration', 'postgres_reset', 'V90__ai_grid_out_of_box_policy_shipping.sql');
+const shippingMigrationPath = join(appRoot, 'backend', 'src', 'main', 'resources', 'db', 'migration', 'postgres_reset', 'V91__ai_grid_out_of_box_policy_shipping.sql');
 const write = process.argv.includes('--write');
 const frameworkVersions = {
   CSA_AICM: '1.1',
