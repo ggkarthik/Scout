@@ -573,6 +573,18 @@ function routeLoadingFallback() {
   );
 }
 
+function PublicLandingRoute() {
+  return (
+    <main className="public-landing-embed">
+      <iframe
+        className="public-landing-embed__frame"
+        src="/scoutgrid-landing.html"
+        title="ScoutGrid — exposure and BOM management"
+      />
+    </main>
+  );
+}
+
 function actorFromPersona(persona: TestPersona): ActorContext {
   const platformOwner = persona.roles.some((role) => role.replace(/^ROLE_/, '') === 'PLATFORM_OWNER');
   return {
@@ -684,12 +696,15 @@ function AuthSessionBoundary({ children }: { children: React.ReactNode }) {
   }), [activePersona, impersonateBackend, loadPersonas, personaError, personaLoading, personas, previewPersona, resetPersona]);
 
   if (actorQuery.isLoading || actorQuery.isFetching && !actorQuery.data) {
+    if (location.pathname === '/') {
+      return <PublicLandingRoute />;
+    }
     return routeLoadingFallback();
   }
 
   if (actorQuery.isError || !actorQuery.data) {
     if (location.pathname === '/') {
-      return <DemoLandingPage />;
+      return <PublicLandingRoute />;
     }
     return <Navigate to="/login" replace />;
   }
@@ -741,7 +756,7 @@ function AppShell() {
   const aiSecurityEnabled = canUseEntitlement(actor, 'ai.security') && !isPlatformScope;
   const visiblePrimaryNavTabs = React.useMemo(() => {
     if (platformScopeOwner) {
-      return ['vuln-repo', 'connect', 'platform', 'end-of-life'] satisfies AppTab[];
+      return ['vuln-repo', 'connect', 'platform', 'end-of-life', 'platform-policies'] satisfies AppTab[];
     }
     if (canManageTenant(actor)) {
       const tabs: AppTab[] = ['exposure', 'findings', 'vuln-repo', 'campaigns', 'inventory', 'connect', 'admin', 'configurations'];
@@ -858,6 +873,7 @@ function AppShell() {
     if (activeTab === 'connect') return 'Connectors';
     if (activeTab === 'configurations') return 'Configurations';
     if (activeTab === 'platform') return 'Tenant Management';
+    if (activeTab === 'platform-policies') return 'Policies';
     return titleForTab(activeTab);
   }, [activeTab]);
 

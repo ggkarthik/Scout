@@ -511,7 +511,7 @@ applyAuthHeaders(headers):
 
 ### Base URL
 
-`VITE_API_BASE` (default `http://localhost:8080/api`). In dev, Vite proxies `/api/**` to `http://localhost:8080` so the base URL can be relative.
+`VITE_API_BASE` overrides the backend URL. Without an override, development uses `/api` through the Vite proxy to `http://localhost:8080`; production uses `https://api.scoutgrid.io/api` so a missing deployment variable cannot send API requests into the SPA fallback.
 
 ### Token helpers
 
@@ -854,7 +854,7 @@ Copy `.env.example` to `.env.local`. All variables use the `VITE_` prefix.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `VITE_API_BASE` | `http://localhost:8080/api` | Backend API base URL |
+| `VITE_API_BASE` | `/api` in development; `https://api.scoutgrid.io/api` in production | Backend API base URL |
 | `VITE_TURNSTILE_SITE_KEY` | Cloudflare test key in development | Public Turnstile site key used by the demo-request CAPTCHA |
 | `VITE_API_KEY` | `change-me-in-prod` | `X-API-Key` header (local dev fallback) |
 | `VITE_CREATOR_KEY` | `local-creator` | `X-Creator-Key` for PLATFORM_OWNER endpoints (local dev) |

@@ -56,6 +56,9 @@ public class DemoLifecycleService {
     private final SecureRandom secureRandom = new SecureRandom();
     private final String appBaseUrl;
     private BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy = BackgroundTaskExecutionPolicy.allowAll();
+    private TenantSchemaMigrationService tenantSchemaMigrationService;
+    @Value("${app.demo.synchronous-tenant-provisioning-enabled:false}")
+    private boolean synchronousTenantProvisioningEnabled;
 
     public DemoLifecycleService(
             DemoRequestRepository demoRequestRepository,
@@ -92,6 +95,11 @@ public class DemoLifecycleService {
         this.backgroundTaskExecutionPolicy = backgroundTaskExecutionPolicy == null
                 ? BackgroundTaskExecutionPolicy.allowAll()
                 : backgroundTaskExecutionPolicy;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setTenantSchemaMigrationService(TenantSchemaMigrationService tenantSchemaMigrationService) {
+        this.tenantSchemaMigrationService = tenantSchemaMigrationService;
     }
 
     @Transactional
@@ -185,6 +193,7 @@ public class DemoLifecycleService {
             tenant.setUpdatedAt(Instant.now());
             tenant = tenantRepository.save(tenant);
         }
+        provisionTenantSchemaSynchronouslyWhenEnabled(tenant);
         request.setBootstrapStatus("CREATED");
 
         DemoInvite invite = latestInvite(requestId);
@@ -222,18 +231,29 @@ public class DemoLifecycleService {
         return toRequestResponse(demoRequestRepository.save(request));
     }
 
-    @Transactional
+    // Local synchronous provisioning performs DDL on separate connections. Keep
+    // the resend request outside a JPA transaction so it cannot deadlock against
+    // locks held by its own tenant/invite reads.
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public DemoInviteResponse resendInvite(UUID requestId) {
         DemoRequest request = getRequest(requestId);
+        if (request.getTenantId() == null) {
+            throw new DemoAccessException("DEMO_INVITE_INVALID", "Demo request has not been provisioned yet", HttpStatus.BAD_REQUEST);
+        }
+        Tenant tenant = tenantRepository.findById(request.getTenantId())
+                .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + request.getTenantId()));
         DemoInvite invite = latestInvite(requestId);
         if (invite == null) {
-            if (request.getTenantId() == null) {
-                throw new DemoAccessException("DEMO_INVITE_INVALID", "Demo request has not been provisioned yet", HttpStatus.BAD_REQUEST);
-            }
-            Tenant tenant = tenantRepository.findById(request.getTenantId())
-                    .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + request.getTenantId()));
             invite = createInvite(request, tenant);
+        } else {
+            // Repository methods complete their own short transactions because
+            // this workflow intentionally suspends the outer transaction for DDL.
+            // Replace lazy associations with the explicitly loaded entities before
+            // provisioning, email rendering, audit recording, and DTO conversion.
+            invite.setRequest(request);
+            invite.setTenant(tenant);
         }
+        provisionTenantSchemaSynchronouslyWhenEnabled(tenant);
         if ("ACCEPTED".equalsIgnoreCase(invite.getStatus()) || invite.getAcceptedAt() != null) {
             throw new DemoAccessException("DEMO_INVITE_ALREADY_ACCEPTED", "This invite has already been accepted and cannot be resent", HttpStatus.CONFLICT);
         }
@@ -481,6 +501,18 @@ public class DemoLifecycleService {
         return demoInviteRepository.save(invite);
     }
 
+    private void provisionTenantSchemaSynchronouslyWhenEnabled(Tenant tenant) {
+        if (!synchronousTenantProvisioningEnabled
+                || tenant == null
+                || !"PROVISIONING".equalsIgnoreCase(tenant.getStatus())) {
+            return;
+        }
+        if (tenantSchemaMigrationService == null) {
+            throw new IllegalStateException("Synchronous demo tenant provisioning is enabled but unavailable");
+        }
+        tenantSchemaMigrationService.provisionNewTenant(tenant);
+    }
+
     private DemoInvite deliverInvite(DemoInvite invite, DemoRequest request) {
         ResendEmailClient.DeliveryResult deliveryResult = demoInviteEmailService.sendInvite(request, invite);
         if (deliveryResult.state() == ResendEmailClient.DeliveryState.SENT) {
@@ -498,7 +530,11 @@ public class DemoLifecycleService {
                 auditEventService.record("demo.invite.email.failed", "demo_invite", invite.getId().toString(), reasonJson);
             }
         }
-        return demoInviteRepository.save(invite);
+        // Keep the initialized instance. For an existing invite, save() delegates to
+        // EntityManager.merge() and may return a detached copy once the repository
+        // transaction closes. Serializing that copy can trigger lazy-load failures.
+        demoInviteRepository.save(invite);
+        return invite;
     }
 
     private String requestStatusForInvite(DemoInvite invite) {

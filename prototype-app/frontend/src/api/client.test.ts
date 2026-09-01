@@ -141,6 +141,19 @@ describe('api method coverage', () => {
     expect(String(url)).toContain('status=OPEN');
   });
 
+  it('rejects an invalid governed policy catalog response instead of treating it as an empty catalog', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('<!doctype html><title>SPA fallback</title>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' }
+      })
+    );
+
+    await expect(api.listPlatformAiGridPolicies()).rejects.toThrow(
+      'The governed policy catalog returned an invalid response.'
+    );
+  });
+
   it('getRiskPolicy sends GET to /risk-policy', async () => {
     const policy = { criticalSlaDays: 7, highSlaDays: 14 };
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(

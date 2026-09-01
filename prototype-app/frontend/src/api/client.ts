@@ -522,8 +522,9 @@ import type {
   AiGridCoverageDimension,
   AiGridPolicy,
   AiGridPolicyDistribution,
+  AiGridShippingStatus,
+  AiGridPolicyRollout,
   AiGridPlatformPolicyDetail,
-  AiGridPolicyImpactPreview,
   AiGridPolicyReleaseReadiness,
   AiGridPhase1CertificationReadiness,
   AiGridPhase1CorpusBootstrap,
@@ -1366,12 +1367,16 @@ export const api = {
   getAiGridCoverage: () => request<AiGridCoverage>('/ai-coverage'),
   getAiGridCoverageDimensions: () => request<AiGridCoverageDimension[]>('/ai-coverage/dimensions'),
   listAiGridPolicies: () => request<AiGridPolicy[]>('/ai-policies'),
-  listPlatformAiGridPolicies: (filters?: { releaseFamily?: string; lifecycle?: string }) => {
+  listPlatformAiGridPolicies: async (filters?: { releaseFamily?: string; lifecycle?: string }) => {
     const params = new URLSearchParams();
     if (filters?.releaseFamily) params.set('releaseFamily', filters.releaseFamily);
     if (filters?.lifecycle) params.set('lifecycle', filters.lifecycle);
     const query = params.size > 0 ? `?${params.toString()}` : '';
-    return request<AiGridPolicyDistribution[]>(`/platform/ai-grid/policies${query}`);
+    const response = await request<AiGridPolicyDistribution[]>(`/platform/ai-grid/policies${query}`);
+    if (!Array.isArray(response)) {
+      throw new Error('The governed policy catalog returned an invalid response.');
+    }
+    return response;
   },
   getPlatformAiGridPolicyDetail: (policyId: string, version: string) => request<AiGridPlatformPolicyDetail>(
     `/platform/ai-grid/policies/${encodeURIComponent(policyId)}/versions/${encodeURIComponent(version)}`,
@@ -1383,8 +1388,10 @@ export const api = {
     method: 'PUT',
     body: JSON.stringify(payload),
   }),
-  getPlatformAiGridPolicyImpactPreview: (policyId: string, version: string, tenantId: string) => request<AiGridPolicyImpactPreview>(
-    `/platform/ai-grid/policies/${encodeURIComponent(policyId)}/versions/${encodeURIComponent(version)}/impact-preview?tenantId=${encodeURIComponent(tenantId)}`,
+  getPlatformAiGridShippingStatus: () => request<AiGridShippingStatus>('/platform/ai-grid/policies/shipping-status'),
+  listPlatformAiGridPolicyRollouts: () => request<AiGridPolicyRollout[]>('/platform/ai-grid/policy-rollouts'),
+  retryPlatformAiGridPolicyRollout: (rolloutId: string) => request<void>(
+    `/platform/ai-grid/policy-rollouts/${encodeURIComponent(rolloutId)}/retry`, { method: 'POST' },
   ),
   getPlatformAiGridPolicyReleaseReadiness: (policyId: string, version: string) => request<AiGridPolicyReleaseReadiness>(
     `/platform/ai-grid/policies/${encodeURIComponent(policyId)}/versions/${encodeURIComponent(version)}/release-readiness`,
