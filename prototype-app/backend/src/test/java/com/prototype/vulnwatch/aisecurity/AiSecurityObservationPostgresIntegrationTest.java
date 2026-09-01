@@ -358,20 +358,35 @@ class AiSecurityObservationPostgresIntegrationTest {
             assertEquals(1, jdbc.queryForObject("select count(*) from ai_grid_system_revisions", Map.of(), Integer.class),
                     "re-deriving a run must use its relationship snapshot, not changed live relationships");
             assertEquals(1, jdbc.queryForObject(
-                    "select count(*) from findings where finding_kind = 'AI_POSTURE' and status = 'OPEN'",
+                    """
+                    select count(*) from findings
+                     where finding_kind = 'AI_POSTURE' and status = 'OPEN'
+                       and policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL'
+                    """,
                     Map.of(), Integer.class));
             assertTrue(jdbc.queryForObject("""
-                    select due_at is not null from findings where finding_kind = 'AI_POSTURE'
+                    select due_at is not null from findings
+                     where finding_kind = 'AI_POSTURE'
+                       and policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL'
                     """, Map.of(), Boolean.class));
             assertEquals(1, jdbc.queryForObject("""
-                    select count(*) from finding_events where event_type = 'CREATED_BY_AI_ASSESSMENT'
+                    select count(*) from finding_events event
+                      join findings finding on finding.id = event.finding_id
+                     where event.event_type = 'CREATED_BY_AI_ASSESSMENT'
+                       and finding.policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL'
                     """, Map.of(), Integer.class));
-            assertEquals(1, jdbc.queryForObject("select count(*) from finding_subjects", Map.of(), Integer.class));
+            assertEquals(1, jdbc.queryForObject("""
+                    select count(*) from finding_subjects subject
+                      join findings finding on finding.id = subject.finding_id
+                     where finding.policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL'
+                    """, Map.of(), Integer.class));
             assertEquals("CANDIDATE", jdbc.queryForObject("""
                     select owner_state from ai_security_artifacts where native_kind = 'AWS_BEDROCK_AGENT'
                     """, Map.of(), String.class));
             assertNull(jdbc.queryForObject("""
-                    select owner_group from findings where finding_kind = 'AI_POSTURE'
+                    select owner_group from findings
+                     where finding_kind = 'AI_POSTURE'
+                       and policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL'
                     """, Map.of(), String.class));
             assertEquals(2, jdbc.queryForObject("""
                     select completed_scope_count from ai_grid_run_metrics where run_id = :runId
@@ -798,7 +813,11 @@ class AiSecurityObservationPostgresIntegrationTest {
         observationService.ingest(tenant, completingScope);
         tenantExecution.run(tenant, () -> {
             assertEquals(1, jdbc.queryForObject(
-                    "select count(*) from findings where finding_kind = 'AI_POSTURE'",
+                    """
+                    select count(*) from findings
+                     where finding_kind = 'AI_POSTURE'
+                       and policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL'
+                    """,
                     Map.of(), Integer.class));
             assertTrue(count("ai_grid_outbox") > baseline.get("outbox"));
             return null;
@@ -817,7 +836,11 @@ class AiSecurityObservationPostgresIntegrationTest {
         tenantExecution.run(tenant, () -> {
             assertEquals("FAIL", raiDecision(unsafeRun));
             assertEquals(1, jdbc.queryForObject(
-                    "select count(*) from findings where finding_kind = 'AI_POSTURE' and status = 'OPEN'",
+                    """
+                    select count(*) from findings
+                     where finding_kind = 'AI_POSTURE' and status = 'OPEN'
+                       and policy_id = 'AZURE_RAI_POLICY_NON_BLOCKING_FILTER'
+                    """,
                     Map.of(), Integer.class));
             return null;
         });
@@ -829,7 +852,11 @@ class AiSecurityObservationPostgresIntegrationTest {
         tenantExecution.run(tenant, () -> {
             assertEquals("PASS", raiDecision(safeRun));
             assertEquals(0, jdbc.queryForObject(
-                    "select count(*) from findings where finding_kind = 'AI_POSTURE' and status = 'OPEN'",
+                    """
+                    select count(*) from findings
+                     where finding_kind = 'AI_POSTURE' and status = 'OPEN'
+                       and policy_id = 'AZURE_RAI_POLICY_NON_BLOCKING_FILTER'
+                    """,
                     Map.of(), Integer.class));
             return null;
         });
