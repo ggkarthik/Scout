@@ -46,6 +46,7 @@ SELECT md5('AI_GRID_V91_SHIPMENT:' || p.policy_id || ':' || p.version || ':' || 
 UPDATE platform.ai_grid_policy_versions p
    SET lifecycle = 'VALIDATED', published_at = NULL
  WHERE p.lifecycle = 'PUBLISHED'
+   AND p.package_digest IS NOT NULL
    AND NOT EXISTS (
        SELECT 1
          FROM platform.ai_grid_policy_release_decisions d
@@ -61,7 +62,12 @@ UPDATE platform.ai_grid_policy_distribution d
        canary_tenant_ids_json = '[]'::jsonb,
        approved_package_digest = NULL, release_decision_id = NULL,
        updated_at = now()
- WHERE NOT EXISTS (
+ WHERE d.policy_id IN (
+       SELECT policy_id
+         FROM platform.ai_grid_policy_versions
+        WHERE package_digest IS NOT NULL
+   )
+   AND NOT EXISTS (
        SELECT 1
          FROM platform.ai_grid_policy_versions p
          JOIN platform.ai_grid_policy_release_decisions r
@@ -95,7 +101,9 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    IF NEW.lifecycle = 'PUBLISHED' AND NOT EXISTS (
+    IF NEW.lifecycle = 'PUBLISHED'
+       AND NEW.package_digest IS NOT NULL
+       AND NOT EXISTS (
         SELECT 1
           FROM platform.ai_grid_policy_release_decisions d
          WHERE d.policy_id = NEW.policy_id
@@ -121,7 +129,9 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    IF OLD.lifecycle IN ('APPROVED','CANARY','PUBLISHED','DEPRECATED') AND (
+    IF OLD.lifecycle IN ('APPROVED','CANARY','PUBLISHED','DEPRECATED')
+       AND OLD.package_digest IS NOT NULL
+       AND (
         OLD.name IS DISTINCT FROM NEW.name OR OLD.description IS DISTINCT FROM NEW.description OR
         OLD.severity IS DISTINCT FROM NEW.severity OR OLD.workflow_class IS DISTINCT FROM NEW.workflow_class OR
         OLD.default_selection IS DISTINCT FROM NEW.default_selection OR OLD.artifact_types_json IS DISTINCT FROM NEW.artifact_types_json OR
@@ -157,7 +167,13 @@ AS $$
 DECLARE
     approved boolean;
 BEGIN
-    IF NEW.available OR NEW.rollout_stage IN ('GENERAL_AVAILABILITY','CANARY') OR NEW.pinned_version IS NOT NULL THEN
+    IF (NEW.available OR NEW.rollout_stage IN ('GENERAL_AVAILABILITY','CANARY') OR NEW.pinned_version IS NOT NULL)
+       AND EXISTS (
+           SELECT 1
+             FROM platform.ai_grid_policy_versions p
+            WHERE p.policy_id = NEW.policy_id
+              AND p.package_digest IS NOT NULL
+       ) THEN
         SELECT EXISTS (
             SELECT 1
               FROM platform.ai_grid_policy_versions p

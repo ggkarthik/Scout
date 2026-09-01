@@ -54,6 +54,12 @@ class AiGridValidationGovernancePostgresIntegrationTest {
     @BeforeEach
     void seedCandidatePolicy() {
         TenantContext.runAsPlatform(() -> jdbc.update("""
+                update platform.ai_grid_policy_versions
+                   set lifecycle='VALIDATED', published_at=null, approved_by=null, approved_at=null
+                 where policy_id in ('GOVERNANCE_TEST_POLICY', 'GOVERNANCE_PHASE1_LOW_POLICY', 'GOVERNANCE_UNDERPOWERED_POLICY')
+                   and lifecycle='PUBLISHED'
+                """, Map.of()));
+        TenantContext.runAsPlatform(() -> jdbc.update("""
                 insert into platform.ai_grid_policy_versions (
                     policy_id, version, name, description, severity, lifecycle, workflow_class,
                     default_selection, artifact_types_json, required_capabilities_json,
@@ -68,6 +74,12 @@ class AiGridValidationGovernancePostgresIntegrationTest {
                     'GOVERNANCE_TEST_REASON', 'Attach a guardrail.', '{"OWASP_LLM_TOP_10":["LLM01"]}',
                     '["AWS_BEDROCK_AGENT"]', 'STATIC', 'governance-test-package-material-digest')
                 on conflict do nothing
+                """, Map.of()));
+        TenantContext.runAsPlatform(() -> jdbc.update("""
+                update platform.ai_grid_policy_versions
+                   set lifecycle='VALIDATED', published_at=null, approved_by=null, approved_at=null
+                 where policy_id in ('GOVERNANCE_TEST_POLICY', 'GOVERNANCE_PHASE1_LOW_POLICY', 'GOVERNANCE_UNDERPOWERED_POLICY')
+                   and lifecycle='PUBLISHED'
                 """, Map.of()));
         TenantContext.runAsPlatform(() -> jdbc.update("""
                 insert into platform.ai_grid_policy_versions (
