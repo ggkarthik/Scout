@@ -17,7 +17,7 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 @EnabledIfSystemProperty(named = "run.postgres.it", matches = "true")
 class SchemaUpgradePathPostgresIntegrationTest {
 
-    private static final String CURRENT_SCHEMA_VERSION = "91";
+    private static final String CURRENT_SCHEMA_VERSION = "92";
     private static final LocalPostgresTestDatabase.DatabaseConfig DATABASE =
             LocalPostgresTestDatabase.provision("schema_upgrade_path");
     private static final LocalPostgresTestDatabase.DatabaseConfig UPGRADE_DATABASE =

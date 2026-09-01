@@ -17,6 +17,29 @@ ALTER TABLE platform.ai_grid_policy_distribution
 CREATE INDEX IF NOT EXISTS idx_ai_grid_release_decisions_digest
     ON platform.ai_grid_policy_release_decisions (policy_id, policy_version, package_digest, decision, decided_at DESC);
 
+-- V91 is the source-controlled initial package shipment. Preserve that reviewed
+-- shipment by materializing its digest-bound approval in the policy ledger before
+-- applying the trust reset below. Future publications must use the normal
+-- independent approval workflow.
+INSERT INTO platform.ai_grid_policy_release_decisions
+    (id, policy_id, policy_version, package_digest, decision, reason, decided_by)
+SELECT md5('AI_GRID_V91_SHIPMENT:' || p.policy_id || ':' || p.version || ':' || p.package_digest)::uuid,
+       p.policy_id, p.version, p.package_digest, 'APPROVED',
+       'Source-controlled V91 initial package shipment', 'ai-grid-package-compiler'
+  FROM platform.ai_grid_policy_versions p
+ WHERE p.policy_id LIKE 'AGCF-%'
+   AND p.package_source_ref LIKE 'policy-packages/agcf/%'
+   AND p.lifecycle = 'PUBLISHED'
+   AND p.package_digest IS NOT NULL
+   AND NOT EXISTS (
+       SELECT 1
+         FROM platform.ai_grid_policy_release_decisions d
+        WHERE d.policy_id = p.policy_id
+          AND d.policy_version = p.version
+          AND d.decision = 'APPROVED'
+          AND d.package_digest = p.package_digest
+   );
+
 -- Existing bundled publications without a digest-bound approval are not trusted.
 -- Their history remains in the release-decision ledger, but they must be manually
 -- approved again before distribution.
@@ -48,6 +71,24 @@ UPDATE platform.ai_grid_policy_distribution d
           AND r.package_digest = p.package_digest
         WHERE p.policy_id = d.policy_id AND p.lifecycle IN ('PUBLISHED','DEPRECATED')
    );
+
+UPDATE platform.ai_grid_policy_distribution d
+   SET approved_package_digest = p.package_digest,
+       release_decision_id = r.id,
+       updated_at = now()
+  FROM platform.ai_grid_policy_versions p
+  JOIN LATERAL (
+      SELECT id
+        FROM platform.ai_grid_policy_release_decisions
+       WHERE policy_id = p.policy_id
+         AND policy_version = p.version
+         AND decision = 'APPROVED'
+         AND package_digest = p.package_digest
+       ORDER BY decided_at DESC
+       LIMIT 1
+  ) r ON true
+ WHERE d.policy_id = p.policy_id
+   AND p.lifecycle IN ('PUBLISHED','DEPRECATED');
 
 CREATE OR REPLACE FUNCTION platform.require_ai_grid_approved_package()
 RETURNS trigger
