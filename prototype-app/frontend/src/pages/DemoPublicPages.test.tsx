@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
@@ -38,7 +40,7 @@ describe('Demo public pages', () => {
     delete window.turnstile;
   });
 
-  it('renders the landing screen at the index route with login and request-demo access', async () => {
+  it('renders the supplied ScoutGrid landing page at the index route', async () => {
     renderWithProviders(
       <Routes>
         <Route path="/" element={<DemoLandingPage />} />
@@ -46,12 +48,19 @@ describe('Demo public pages', () => {
       { route: '/' }
     );
 
-    expect(screen.getByRole('heading', { name: /Exposure and SBOM management for modern software\./i })).toBeInTheDocument();
-    expect(screen.getByText(/SBOM · AI BOM · CBOM/i)).toBeInTheDocument();
-    expect(screen.queryByText(/Frequently asked questions/i)).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Blogs' })).toHaveAttribute('href', '/demo/blog');
-    expect(screen.getAllByRole('link', { name: /Request demo/i })[0]).toHaveAttribute('href', '/demo/request');
-    expect(screen.getAllByRole('link', { name: /Log in/i })[0]).toHaveAttribute('href', '/login');
+    expect(screen.getByTitle('ScoutGrid — exposure and BOM management')).toHaveAttribute('src', '/scoutgrid-landing.html');
+  });
+
+  it('configures the embedded landing-page login links for top-level navigation', () => {
+    const artifact = readFileSync(resolve(process.cwd(), 'public/scoutgrid-landing.html'), 'utf8');
+    const templateText = artifact.match(
+      /const __bundlerTemplate =\s*([\s\S]*?)\s*;\s*<\/script>/
+    )?.[1];
+
+    expect(templateText).toBeDefined();
+    const template = JSON.parse(templateText!);
+    expect(template.match(/<a href="#"[^>]*>Log in<\/a>/g)).toHaveLength(2);
+    expect(artifact).toContain('<a href="/login" target="_top"$1>Log in</a>');
   });
 
   it('lists the first blog post and links to the article', () => {

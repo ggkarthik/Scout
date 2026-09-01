@@ -118,7 +118,10 @@ public class TenantSchemaMigrationService {
     public void provisionNewTenant(Tenant tenant) {
         UUID runId = UUID.randomUUID();
         try {
-            schemaService.provisionSchemaFromTemplate(tenant.getSchemaName());
+            // Provisioning can be interrupted after the schema clone commits but
+            // before Flyway and the tenant status complete. Reconcile the existing
+            // schema so retrying the operation is safe.
+            schemaService.provisionOrReconcileSchemaFromTemplate(tenant.getSchemaName());
             SchemaResult result = migrateOne(tenant, runId);
             if (result.failed()) {
                 throw new IllegalStateException(result.failureMessage());

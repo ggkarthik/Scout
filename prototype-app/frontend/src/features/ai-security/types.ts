@@ -123,6 +123,29 @@ export type AiGridPolicyDistribution = {
   releaseDecisionId?: string | null;
 };
 
+export type AiGridShippingStatus = {
+  expectedPolicies: number;
+  installedPolicies: number;
+  publishedPolicies: number;
+  distributedPolicies: number;
+  digestMatchedPolicies: number;
+  rolloutPendingTenants: number;
+  blockers: string[];
+};
+
+export type AiGridPolicyRollout = {
+  id: string;
+  releaseId: string;
+  releaseType: string;
+  policyId: string;
+  previousVersion: string | null;
+  newVersion: string;
+  packageDigest: string;
+  status: string;
+  createdAt: string;
+  completedAt: string | null;
+};
+
 export type AiGridPlatformPolicyDetail = {
   policyId: string;
   version: string;

@@ -38,7 +38,9 @@ class AiGridPolicyCatalogServiceTest {
     void platformCatalogFiltersByReleaseFamilyAndLifecycleWithoutFilteringAvailability() {
         service.distributions("AGCF_PHASE_1", "VALIDATED");
 
-        verify(jdbc).query(contains("where (cast(:releaseFamily as text) is null or p.release_family = cast(:releaseFamily as text))"),
+        verify(jdbc).query(contains("p.package_source_ref like 'policy-packages/agcf/%'"),
+                any(SqlParameterSource.class), any(org.springframework.jdbc.core.RowMapper.class));
+        verify(jdbc).query(contains("p.release_family = :releaseFamily"),
                 any(SqlParameterSource.class), any(org.springframework.jdbc.core.RowMapper.class));
         verify(jdbc, org.mockito.Mockito.never()).query(contains("d.available = true"),
                 any(SqlParameterSource.class), any(org.springframework.jdbc.core.RowMapper.class));

@@ -7,6 +7,7 @@ export type AppTab =
   | 'dashboard'
   | 'findings'
   | 'policies'
+  | 'platform-policies'
   | 'operations'
   | 'vuln-repo'
   | 'campaigns'
@@ -187,6 +188,8 @@ export function pathForTab(tab: AppTab): string {
       return '/findings';
     case 'policies':
       return '/policies';
+    case 'platform-policies':
+      return pathForPlatformView('ai-policies');
     case 'operations':
       return `/operations/${OPERATIONS_DEFAULT_VIEW}`;
     case 'vuln-repo':
@@ -412,6 +415,7 @@ export function activeTabForPath(pathname: string): AppTab {
   if (pathname.startsWith('/connect')) return 'connect';
   if (pathname.startsWith('/admin')) return 'admin';
   if (pathname.startsWith('/platform/eol')) return 'end-of-life';
+  if (pathname.startsWith('/platform/ai-policies')) return 'platform-policies';
   if (pathname.startsWith('/platform')) return 'platform';
   if (pathname.startsWith('/configurations')) return 'configurations';
   return 'dashboard';
@@ -426,6 +430,8 @@ export function titleForTab(tab: AppTab): string {
     case 'findings':
       return 'Findings';
     case 'policies':
+      return 'Policies';
+    case 'platform-policies':
       return 'Policies';
     case 'operations':
       return 'Operational Dashboard';

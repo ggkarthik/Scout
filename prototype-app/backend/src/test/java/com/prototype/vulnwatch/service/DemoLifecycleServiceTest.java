@@ -41,6 +41,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.web.server.ResponseStatusException;
 
 @ExtendWith(MockitoExtension.class)
@@ -70,6 +71,37 @@ class DemoLifecycleServiceTest {
     private TenantLifecycleGuardService tenantLifecycleGuardService;
     @Mock
     private TenantSchemaExecutionService tenantSchemaExecutionService;
+    @Mock
+    private TenantSchemaMigrationService tenantSchemaMigrationService;
+
+    @Test
+    void synchronousDemoProvisioningActivatesPendingTenantWhenEnabled() {
+        Tenant tenant = provisionedTenant();
+        tenant.setStatus("PROVISIONING");
+        doAnswer(invocation -> {
+            tenant.setStatus("ACTIVE");
+            return null;
+        }).when(tenantSchemaMigrationService).provisionNewTenant(tenant);
+
+        DemoLifecycleService service = service();
+        service.setTenantSchemaMigrationService(tenantSchemaMigrationService);
+        ReflectionTestUtils.setField(service, "synchronousTenantProvisioningEnabled", true);
+
+        ReflectionTestUtils.invokeMethod(service, "provisionTenantSchemaSynchronouslyWhenEnabled", tenant);
+
+        assertEquals("ACTIVE", tenant.getStatus());
+        verify(tenantSchemaMigrationService).provisionNewTenant(tenant);
+    }
+
+    @Test
+    void resendRunsOutsideJpaTransactionForSynchronousSchemaProvisioning() throws NoSuchMethodException {
+        var transaction = DemoLifecycleService.class
+                .getMethod("resendInvite", UUID.class)
+                .getAnnotation(org.springframework.transaction.annotation.Transactional.class);
+
+        assertNotNull(transaction);
+        assertEquals(Propagation.NOT_SUPPORTED, transaction.propagation());
+    }
 
     @Test
     void approveMarksRequestAndInviteSentWhenEmailDeliverySucceeds() {
@@ -528,8 +560,12 @@ class DemoLifecycleServiceTest {
         existingInvite.setExpiresAt(java.time.Instant.now().plusSeconds(86400));
 
         when(demoRequestRepository.findById(request.getId())).thenReturn(Optional.of(request));
+        when(tenantRepository.findById(tenant.getId())).thenReturn(Optional.of(tenant));
         when(demoInviteRepository.findByRequest_IdOrderByCreatedAtDesc(request.getId())).thenReturn(List.of(existingInvite));
-        when(demoInviteRepository.save(any(DemoInvite.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        DemoInvite detachedSaveResult = new DemoInvite();
+        ReflectionTestUtils.setField(detachedSaveResult, "id", existingInvite.getId());
+        detachedSaveResult.setStatus("SENT");
+        when(demoInviteRepository.save(existingInvite)).thenReturn(detachedSaveResult);
         when(demoInviteEmailService.sendInvite(request, existingInvite))
                 .thenReturn(ResendEmailClient.DeliveryResult.sent("email-456"));
 
@@ -538,6 +574,9 @@ class DemoLifecycleServiceTest {
 
         assertEquals("SENT", response.status());
         assertNotNull(response.lastSentAt());
+        assertEquals(request.getId(), response.requestId());
+        assertEquals(tenant.getId(), response.tenantId());
+        assertEquals(tenant.getName(), response.tenantName());
         assertEquals("INVITE_SENT", request.getBootstrapStatus());
         verify(demoInviteEmailService).sendInvite(request, existingInvite);
         verify(demoRequestRepository).save(request);
@@ -562,6 +601,7 @@ class DemoLifecycleServiceTest {
         acceptedInvite.setExpiresAt(java.time.Instant.now().plusSeconds(86400));
 
         when(demoRequestRepository.findById(request.getId())).thenReturn(Optional.of(request));
+        when(tenantRepository.findById(tenant.getId())).thenReturn(Optional.of(tenant));
         when(demoInviteRepository.findByRequest_IdOrderByCreatedAtDesc(request.getId())).thenReturn(List.of(acceptedInvite));
 
         DemoLifecycleService service = service();
