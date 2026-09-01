@@ -409,7 +409,9 @@ class AiSecurityObservationPostgresIntegrationTest {
                       and state = 'UNRESOLVED_OWNER' and status = 'OPEN'
                     """, Map.of("id", agentId), Integer.class));
             assertEquals("AI Platform Team", jdbc.queryForObject("""
-                    select owner_group from findings where finding_kind = 'AI_POSTURE'
+                    select owner_group from findings
+                     where finding_kind = 'AI_POSTURE'
+                       and policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL'
                     """, Map.of(), String.class));
 
             runMetricsService.recordProviderCalls(tenant, runId, "AWS", 17);
