@@ -159,21 +159,6 @@ ON CONFLICT (policy_id) DO UPDATE
        updated_by = excluded.updated_by,
        updated_at = now();
 
-UPDATE platform.ai_grid_policy_distribution d
-   SET available = false, rollout_stage = 'RETIRED', updated_by = 'ai-grid-package-compiler', updated_at = now()
- WHERE NOT EXISTS (
-     SELECT 1 FROM platform.ai_grid_policy_versions p
-      WHERE p.policy_id = d.policy_id
-        AND p.policy_id LIKE 'AGCF-%'
-        AND p.package_source_ref LIKE 'policy-packages/agcf/%'
-        AND p.lifecycle = 'PUBLISHED'
- );
-
-UPDATE platform.ai_grid_policy_versions
-   SET lifecycle = 'RETIRED'
- WHERE policy_id NOT LIKE 'AGCF-%'
-   AND lifecycle = 'PUBLISHED';
-
 INSERT INTO platform.ai_grid_policy_rollouts
     (id, release_id, release_type, policy_id, previous_version, new_version, package_digest, distribution_snapshot_json, status, completed_at)
 SELECT md5('AGCF_PHASE_1_INITIAL:' || p.policy_id || ':' || p.version)::uuid,
