@@ -53,7 +53,9 @@ describe('Demo public pages', () => {
 
   it('configures the embedded landing-page login links for top-level navigation', () => {
     const artifact = readFileSync(resolve(process.cwd(), 'public/scoutgrid-landing.html'), 'utf8');
-    const templateText = artifact.match(/<script type="__bundler\/template">\s*([\s\S]*?)\s*<\/script>/)?.[1];
+    const templateText = artifact.match(
+      /const __bundlerTemplate =\s*([\s\S]*?)\s*;\s*<\/script>/
+    )?.[1];
 
     expect(templateText).toBeDefined();
     const template = JSON.parse(templateText!);
