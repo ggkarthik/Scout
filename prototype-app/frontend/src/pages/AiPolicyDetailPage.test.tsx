@@ -11,6 +11,7 @@ function buildPolicy(overrides: Partial<AiSecurityPolicy> = {}): AiSecurityPolic
     version: '1.0.0',
     name: 'Public knowledge-base S3 source',
     severity: 'CRITICAL',
+    lifecycle: 'PUBLISHED',
     artifactTypes: ['AI_MODEL'],
     requiredResourceFamilies: ['BEDROCK_KNOWLEDGE_BASES', 'S3_EXPOSURE'],
     description: 'A Bedrock knowledge base uses an S3 data source that is publicly accessible.',

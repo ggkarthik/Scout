@@ -138,29 +138,8 @@ public class AiGridPhase1ReleaseBoardService {
     }
 
     public Board promote(String actor) {
-        return TenantContext.runAsPlatform(() -> transactions.execute(status -> {
-            Board board = board();
-            if (!board.blockers().isEmpty()) throw new ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT,
-                    "Phase 1 promotion blocked: " + String.join(", ", board.blockers()));
-            jdbc.update("""
-                    update platform.ai_grid_policy_distribution d
-                       set available=true, rollout_stage='GENERAL_AVAILABILITY',
-                           canary_tenant_ids_json='[]'::jsonb,
-                           approved_package_digest=a.package_digest, release_decision_id=a.decision_id,
-                           updated_by=:actor, updated_at=now()
-                      from lateral (
-                           select p.package_digest, r.id decision_id
-                             from platform.ai_grid_policy_versions p
-                             join platform.ai_grid_policy_release_decisions r
-                               on r.policy_id=p.policy_id and r.policy_version=p.version
-                              and r.decision='APPROVED' and r.package_digest=p.package_digest
-                            where p.policy_id=d.policy_id and p.release_family='AGCF_PHASE_1' and p.lifecycle='PUBLISHED'
-                            order by r.decided_at desc limit 1
-                      ) a
-                     where d.policy_id in (select policy_id from platform.ai_grid_policy_versions where release_family='AGCF_PHASE_1')
-                    """, Map.of("actor", actor));
-            return board();
-        }));
+        throw new ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT,
+                "Bulk Phase 1 promotion is retired; publish each policy independently after fresh approval");
     }
 
     private Gate latestGate(String key) {

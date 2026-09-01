@@ -1399,6 +1399,9 @@ export const api = {
   publishPlatformAiGridPolicy: (policyId: string, version: string) => request<{ published: boolean; reason: string }>(
     `/platform/ai-grid/policies/${encodeURIComponent(policyId)}/versions/${encodeURIComponent(version)}/publish`, { method: 'POST' },
   ),
+  deprecatePlatformAiGridPolicy: (policyId: string) => request<void>(
+    `/platform/ai-grid/validation/policies/${encodeURIComponent(policyId)}/deprecate`, { method: 'POST' },
+  ),
   getPlatformAiGridPhase1CertificationReadiness: () => request<AiGridPhase1CertificationReadiness>(
     '/platform/ai-grid/validation/releases/phase-1/certification-readiness',
   ),

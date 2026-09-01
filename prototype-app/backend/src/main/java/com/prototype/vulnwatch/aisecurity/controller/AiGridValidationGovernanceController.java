@@ -165,6 +165,11 @@ public class AiGridValidationGovernanceController {
         deprecations.deprecate(policyId, version, actor());
     }
 
+    @PostMapping("/policies/{policyId}/deprecate")
+    public void deprecateLogical(@PathVariable String policyId) {
+        deprecations.deprecateLogical(policyId, actor());
+    }
+
     @GetMapping("/releases/r1/readiness")
     public AiGridR1CertificationService.ReleaseReadiness r1Readiness() {
         return r1Certification.readiness();

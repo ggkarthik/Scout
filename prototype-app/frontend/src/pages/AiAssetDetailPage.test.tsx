@@ -43,6 +43,7 @@ function buildPolicy(overrides: Partial<AiSecurityPolicy> = {}): AiSecurityPolic
     version: '1.0.0',
     name: 'Public bot endpoint exposed',
     severity: 'HIGH',
+    lifecycle: 'PUBLISHED',
     artifactTypes: ['AI_AGENT'],
     requiredResourceFamilies: ['AZURE_BOT_SERVICES'],
     description: 'A bot service exposes a public messaging endpoint without network restrictions.',

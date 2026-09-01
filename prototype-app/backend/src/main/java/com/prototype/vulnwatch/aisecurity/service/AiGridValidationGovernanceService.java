@@ -492,6 +492,7 @@ public class AiGridValidationGovernanceService {
 
     public ReleaseDecision publishPolicy(String policyId, String version, String actor) {
         return TenantContext.runAsPlatform(() -> transactions.execute(status -> {
+            assertApprovalInvariant();
             PolicyCandidate candidate = policyCandidate(policyId, version);
             String digest = digest(candidate.digestMaterial());
             AnswerKeyGate answerKey = answerKeyGate(policyId, version, digest);
@@ -532,9 +533,28 @@ public class AiGridValidationGovernanceService {
                      where policy_id = :policyId and version = :version
                     """, Map.of("actor", actor, "policyId", policyId, "version", version));
             ensurePublishedDistribution(policyId, version, candidate.packageDigest(), decisionId, actor);
+            createExplicitRollout(policyId, version, candidate.packageDigest(), decisionId, actor);
             return new ReleaseDecision(decisionId, policyId, version, true, reason, answerKey.runId(),
                     precision == null ? null : precision.id(), candidate.packageDigest());
         }));
+    }
+
+    private void assertApprovalInvariant() {
+        Integer invalid = jdbc.queryForObject("""
+                select count(*) from platform.ai_grid_policy_distribution d
+                 where (d.available or d.rollout_stage in ('GENERAL_AVAILABILITY','CANARY') or d.pinned_version is not null)
+                   and not exists (
+                       select 1 from platform.ai_grid_policy_versions p
+                       join platform.ai_grid_policy_release_decisions r
+                         on r.id=d.release_decision_id and r.policy_id=p.policy_id
+                        and r.policy_version=p.version and r.package_digest=p.package_digest
+                        and r.decision='APPROVED' and r.revoked_at is null
+                       where p.policy_id=d.policy_id and p.version=d.pinned_version
+                   )
+                """, Map.of(), Integer.class);
+        if (invalid != null && invalid > 0) {
+            throw conflict("AI Grid policy mutation is blocked: active distributions violate the V93 approval invariant");
+        }
     }
 
     public String policyDigest(String policyId, String version) {
@@ -568,24 +588,38 @@ public class AiGridValidationGovernanceService {
             PrecisionReview precision = candidate.requiresPrecisionReview()
                     ? passingPrecisionReview(policyId, version, digest) : null;
             LatestDecision latest = jdbc.query("""
-                    select decision, reason, decided_at from platform.ai_grid_policy_release_decisions
+                    select id, decision, reason, package_digest, revoked_at, decided_at
+                     from platform.ai_grid_policy_release_decisions
                      where policy_id = :policyId and policy_version = :version
                      order by decided_at desc limit 1
                     """, Map.of("policyId", policyId, "version", version), rs -> rs.next()
-                    ? new LatestDecision(rs.getString("decision"), rs.getString("reason"),
+                    ? new LatestDecision(rs.getObject("id", UUID.class), rs.getString("decision"), rs.getString("reason"),
+                    rs.getString("package_digest"), rs.getTimestamp("revoked_at") != null,
                     rs.getTimestamp("decided_at").toInstant()) : null);
             List<String> blockers = new ArrayList<>();
             if (answerKey == null) blockers.add("FRESH_PASSING_ANSWER_KEY_REQUIRED");
             if (candidate.requiresPrecisionReview() && precision == null) {
                 blockers.add("PASSING_PRECISION_REVIEW_REQUIRED");
             }
+            if (candidate.packageDigest() == null || candidate.packageDigest().isBlank()) {
+                blockers.add("PACKAGE_DIGEST_REQUIRED");
+            }
             if (!List.of("VALIDATED", "APPROVED", "CANARY", "PUBLISHED").contains(candidate.lifecycle())) {
                 blockers.add("POLICY_LIFECYCLE_NOT_RELEASABLE");
             }
+            LatestDecision approved = jdbc.query("""
+                    select id, package_digest, revoked_at from platform.ai_grid_policy_release_decisions
+                     where policy_id=:policyId and policy_version=:version and decision='APPROVED'
+                     order by decided_at desc limit 1
+                    """, Map.of("policyId", policyId, "version", version), rs -> rs.next()
+                    ? new LatestDecision(rs.getObject("id", UUID.class), "APPROVED", null,
+                    rs.getString("package_digest"), rs.getTimestamp("revoked_at") != null, null) : null);
             return new ReleaseReadiness(policyId, version, candidate.lifecycle(), candidate.severity(), digest,
                     blockers.isEmpty(), blockers, answerKey == null ? null : answerKey.runId(),
                     precision == null ? null : precision.id(), latest == null ? null : latest.decision(),
-                    latest == null ? null : latest.reason(), latest == null ? null : latest.decidedAt());
+                    latest == null ? null : latest.reason(), latest == null ? null : latest.decidedAt(),
+                    approved == null ? null : approved.packageDigest(), approved == null ? null : approved.id(),
+                    approved != null && approved.revoked());
         });
     }
 
@@ -953,7 +987,7 @@ public class AiGridValidationGovernanceService {
             jdbc.update("""
                     update platform.ai_grid_policy_distribution
                        set available=true, rollout_stage=case when rollout_stage='RETIRED' then 'PAUSED' else rollout_stage end,
-                           pinned_version=coalesce(pinned_version,:version), approved_package_digest=:digest,
+                           pinned_version=:version, approved_package_digest=:digest,
                            release_decision_id=:decisionId, updated_by=:actor, updated_at=now()
                      where policy_id=:id
                     """, new MapSqlParameterSource().addValue("id", policyId).addValue("version", version)
@@ -968,6 +1002,35 @@ public class AiGridValidationGovernanceService {
                     """, new MapSqlParameterSource().addValue("id", policyId).addValue("version", version)
                     .addValue("digest", packageDigest).addValue("decisionId", decisionId).addValue("actor", actor));
         }
+    }
+
+    private void createExplicitRollout(String policyId, String version, String digest, UUID decisionId, String actor) {
+        UUID rolloutId = UUID.randomUUID();
+        jdbc.update("""
+                insert into platform.ai_grid_policy_rollouts
+                    (id, release_id, release_type, policy_id, previous_version, new_version,
+                     package_digest, approved_package_digest, release_decision_id,
+                     distribution_snapshot_json, status)
+                select :id, :releaseId, 'POLICY_VERSION', p.policy_id, d.pinned_version, p.version,
+                       p.package_digest, :digest, :decisionId,
+                       jsonb_build_object('available', d.available, 'defaultSelection', d.default_selection,
+                         'rolloutStage', d.rollout_stage, 'canaryTenantIds', d.canary_tenant_ids_json,
+                         'pinnedVersion', d.pinned_version), 'PENDING'
+                  from platform.ai_grid_policy_versions p
+                  join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id
+                 where p.policy_id=:policyId and p.version=:version
+                on conflict (release_id, policy_id, new_version) do nothing
+                """, new MapSqlParameterSource().addValue("id", rolloutId)
+                .addValue("releaseId", "POLICY_APPROVAL:" + policyId + ":" + version + ":" + decisionId)
+                .addValue("policyId", policyId).addValue("version", version)
+                .addValue("digest", digest).addValue("decisionId", decisionId).addValue("actor", actor));
+        jdbc.update("""
+                insert into platform.ai_grid_policy_rollout_tasks (id, rollout_id, tenant_id)
+                select md5(:rolloutId::text || ':' || t.id::text)::uuid, :rolloutId, t.id
+                  from platform.tenants t
+                 where t.status='ACTIVE' and t.deleted_at is null
+                on conflict (rollout_id, tenant_id) do nothing
+                """, Map.of("rolloutId", rolloutId));
     }
 
     private AnswerKeyEnvironment mapEnvironment(java.sql.ResultSet rs) throws java.sql.SQLException {
@@ -1061,7 +1124,7 @@ public class AiGridValidationGovernanceService {
         }
     }
     private record AnswerKeyGate(UUID runId, UUID environmentId) {}
-    private record LatestDecision(String decision, String reason, Instant decidedAt) {}
+    private record LatestDecision(UUID id, String decision, String reason, String packageDigest, boolean revoked, Instant decidedAt) {}
     private record PolicyRef(String policyId, String version) {}
 
     public record EnvironmentCommand(String environmentKey, String version, String provider, String resourceFamily,
@@ -1119,7 +1182,8 @@ public class AiGridValidationGovernanceService {
     public record ReleaseReadiness(String policyId, String policyVersion, String lifecycle, String severity,
                                    String catalogDigest, boolean ready, List<String> blockers,
                                    UUID answerKeyRunId, UUID precisionReviewId, String latestDecision,
-                                   String latestDecisionReason, Instant latestDecisionAt) {}
+                                   String latestDecisionReason, Instant latestDecisionAt,
+                                   String latestApprovedDigest, UUID latestApprovalId, boolean latestApprovalRevoked) {}
     public record Phase1PolicyCertification(String policyId, String version, String catalogDigest,
                                             boolean answerKeyReady, boolean precisionReady, boolean releaseReady,
                                             List<String> blockers) {}
