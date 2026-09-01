@@ -940,7 +940,8 @@ public class AiSecurityApiService {
                 select distinct on (p.policy_id) p.policy_id,p.version,p.name,p.severity,p.artifact_types_json::text,
                        p.required_resource_families_json::text,p.description,p.remediation,p.framework_mappings_json::text
                   from platform.ai_grid_policy_versions p
-                  join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id and p.version=d.pinned_version
+                  join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id
+                   and (p.version=d.pinned_version or (d.pinned_version is null and p.package_digest is null))
                  where p.lifecycle in ('PUBLISHED', 'CANARY', 'DEPRECATED')
                    and (d.available=true or p.lifecycle='DEPRECATED')
                    and (d.rollout_stage='GENERAL_AVAILABILITY'
@@ -954,7 +955,8 @@ public class AiSecurityApiService {
                 select p.policy_id,p.version,p.name,p.severity,p.artifact_types_json::text,
                        p.required_resource_families_json::text,p.description,p.remediation,p.framework_mappings_json::text
                   from platform.ai_grid_policy_versions p
-                  join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id and p.version=d.pinned_version
+                  join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id
+                   and (p.version=d.pinned_version or (d.pinned_version is null and p.package_digest is null))
                  where p.policy_id=:id and p.lifecycle in ('PUBLISHED', 'CANARY', 'DEPRECATED')
                    and (d.available=true or p.lifecycle='DEPRECATED')
                    and (d.rollout_stage='GENERAL_AVAILABILITY'

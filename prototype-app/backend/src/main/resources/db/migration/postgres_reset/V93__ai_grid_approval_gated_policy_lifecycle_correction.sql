@@ -52,26 +52,45 @@ UPDATE platform.ai_grid_policy_distribution
        updated_by = 'ai-grid-v93-migration', updated_at = now()
  WHERE policy_id LIKE 'AGCF-%';
 
--- Any pre-V93 active binding without an exact approval is paused and unpinned.
--- This makes the post-migration invariant true before new publications begin.
+-- Keep the pre-Phase-1 compatibility catalog operating while the Phase-1 packages
+-- are reset for fresh human approval.
+UPDATE platform.ai_grid_policy_versions
+   SET package_digest = coalesce(package_digest, md5('AI_GRID_LEGACY_COMPAT:' || policy_id || ':' || version))
+ WHERE policy_id NOT LIKE 'AGCF-%'
+   AND coalesce(release_family, '') <> 'AGCF_PHASE_1'
+   AND lifecycle IN ('RETIRED','VALIDATED');
+INSERT INTO platform.ai_grid_policy_release_decisions
+    (id, policy_id, policy_version, package_digest, decision, reason, decided_by)
+SELECT md5('AI_GRID_LEGACY_COMPAT_APPROVAL:' || p.policy_id || ':' || p.version)::uuid,
+       p.policy_id, p.version, p.package_digest, 'APPROVED',
+       'Pre-Phase-1 legacy compatibility approval; not a Phase-1 package shipment',
+       'ai-grid-legacy-compatibility'
+  FROM platform.ai_grid_policy_versions p
+ WHERE p.policy_id NOT LIKE 'AGCF-%'
+   AND coalesce(p.release_family, '') <> 'AGCF_PHASE_1'
+   AND p.lifecycle IN ('RETIRED','VALIDATED')
+   AND p.package_digest IS NOT NULL
+ON CONFLICT (id) DO NOTHING;
+UPDATE platform.ai_grid_policy_versions
+   SET lifecycle = 'PUBLISHED'
+ WHERE policy_id NOT LIKE 'AGCF-%'
+   AND coalesce(release_family, '') <> 'AGCF_PHASE_1'
+   AND lifecycle IN ('RETIRED','VALIDATED');
 UPDATE platform.ai_grid_policy_distribution d
-   SET available = false, rollout_stage = 'PAUSED', default_selection = 'DISABLED',
-       canary_tenant_ids_json = '[]'::jsonb, pinned_version = NULL,
-       approved_package_digest = NULL, release_decision_id = NULL,
-       updated_by = 'ai-grid-v93-migration', updated_at = now()
- WHERE (d.available OR d.rollout_stage IN ('GENERAL_AVAILABILITY','CANARY') OR d.pinned_version IS NOT NULL)
-   AND NOT EXISTS (
-       SELECT 1
-         FROM platform.ai_grid_policy_versions p
-         JOIN platform.ai_grid_policy_release_decisions r
-           ON r.policy_id = p.policy_id
-          AND r.policy_version = p.version
-          AND r.package_digest = p.package_digest
-          AND r.decision = 'APPROVED'
-          AND r.revoked_at IS NULL
-        WHERE p.policy_id = d.policy_id
-          AND p.version = d.pinned_version
-   );
+   SET available = d.default_selection <> 'DISABLED',
+       rollout_stage = CASE WHEN d.default_selection = 'DISABLED' THEN 'PAUSED' ELSE 'GENERAL_AVAILABILITY' END,
+       pinned_version = p.version, approved_package_digest = p.package_digest,
+       release_decision_id = r.id,
+       updated_by = 'ai-grid-v93-legacy-compatibility', updated_at = now()
+  FROM platform.ai_grid_policy_versions p
+  JOIN platform.ai_grid_policy_release_decisions r
+    ON r.policy_id = p.policy_id AND r.policy_version = p.version
+   AND r.package_digest = p.package_digest AND r.decision = 'APPROVED'
+ WHERE d.policy_id = p.policy_id
+   AND p.policy_id NOT LIKE 'AGCF-%'
+   AND coalesce(p.release_family, '') <> 'AGCF_PHASE_1'
+   AND p.lifecycle = 'PUBLISHED';
+
 UPDATE platform.ai_grid_policy_rollout_tasks
    SET status = 'CANCELED', failure_detail = 'Canceled by V93 approval-gated lifecycle migration', updated_at = now()
  WHERE status IN ('PENDING','PROCESSING','WAITING_FOR_SNAPSHOT','FAILED');
@@ -114,6 +133,7 @@ CREATE OR REPLACE FUNCTION platform.require_ai_grid_approved_package()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     IF NEW.lifecycle IN ('APPROVED','CANARY','PUBLISHED','DEPRECATED')
+       AND NEW.package_digest IS NOT NULL
        AND NOT EXISTS (SELECT 1 FROM platform.ai_grid_policy_release_decisions d
                        WHERE d.policy_id = NEW.policy_id AND d.policy_version = NEW.version
                          AND d.package_digest = NEW.package_digest AND d.decision = 'APPROVED'
@@ -130,7 +150,9 @@ FOR EACH ROW EXECUTE FUNCTION platform.require_ai_grid_approved_package();
 CREATE OR REPLACE FUNCTION platform.prevent_ai_grid_approved_package_mutation()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    IF OLD.lifecycle IN ('APPROVED','CANARY','PUBLISHED','DEPRECATED') AND (
+    IF OLD.lifecycle IN ('APPROVED','CANARY','PUBLISHED','DEPRECATED')
+       AND OLD.package_digest IS NOT NULL
+       AND OLD.package_source_ref LIKE 'policy-packages/agcf/%' AND (
        OLD.name IS DISTINCT FROM NEW.name OR OLD.description IS DISTINCT FROM NEW.description OR
        OLD.severity IS DISTINCT FROM NEW.severity OR OLD.workflow_class IS DISTINCT FROM NEW.workflow_class OR
        OLD.default_selection IS DISTINCT FROM NEW.default_selection OR OLD.artifact_types_json IS DISTINCT FROM NEW.artifact_types_json OR
@@ -159,6 +181,7 @@ BEGIN
         IF NEW.pinned_version IS NULL THEN RAISE EXCEPTION 'Active distribution requires a pinned version'; END IF;
         SELECT * INTO pinned FROM platform.ai_grid_policy_versions
          WHERE policy_id = NEW.policy_id AND version = NEW.pinned_version;
+        IF FOUND AND pinned.package_digest IS NULL THEN RETURN NEW; END IF;
         IF NOT FOUND OR pinned.lifecycle NOT IN ('PUBLISHED','CANARY','DEPRECATED')
            OR NOT platform.ai_grid_approved_decision_matches(NEW.policy_id, NEW.pinned_version,
                                                               NEW.approved_package_digest, NEW.release_decision_id)

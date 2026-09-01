@@ -546,8 +546,9 @@ class AiSecurityObservationPostgresIntegrationTest {
                 """, Map.of());
         jdbc.update("""
                 insert into platform.ai_grid_policy_distribution
-                    (policy_id, available, default_selection, rollout_stage, approved_package_digest, release_decision_id, updated_by)
-                select 'AI_GRID_COVERAGE_OMISSION_TEST', true, 'PREVIEW', 'GENERAL_AVAILABILITY',
+                    (policy_id, available, default_selection, rollout_stage, pinned_version,
+                     approved_package_digest, release_decision_id, updated_by)
+                select 'AI_GRID_COVERAGE_OMISSION_TEST', true, 'PREVIEW', 'GENERAL_AVAILABILITY', '1.0.0',
                        p.package_digest, r.id, 'integration-test'
                   from platform.ai_grid_policy_versions p
                   join platform.ai_grid_policy_release_decisions r
