@@ -496,7 +496,11 @@ class AiSecurityObservationPostgresIntegrationTest {
         });
 
         UUID reviewedFindingId = tenantExecution.run(tenant, () -> jdbc.queryForObject(
-                "select id from findings where finding_kind = 'AI_POSTURE'", Map.of(), UUID.class));
+                """
+                select id from findings
+                 where finding_kind = 'AI_POSTURE'
+                   and policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL'
+                """, Map.of(), UUID.class));
         aiSecurityApiService.review(tenant, reviewedFindingId,
                 com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ReviewDisposition.FALSE_POSITIVE,
                 "regression: review on the host finding model", "integration-reviewer");
@@ -612,7 +616,11 @@ class AiSecurityObservationPostgresIntegrationTest {
                 "AI Grid evidence must remain isolated in the owning tenant schema");
 
         UUID findingId = tenantExecution.run(tenant, () -> jdbc.queryForObject(
-                "select id from findings where finding_kind = 'AI_POSTURE'",
+                """
+                select id from findings
+                 where finding_kind = 'AI_POSTURE'
+                   and policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL'
+                """,
                 Map.of(), UUID.class));
         tenantExecution.run(tenant, () -> findingWorkflowService.updateWorkflow(findingId,
                 new FindingWorkflowUpdateRequest("SUPPRESSED", null, null, null,
