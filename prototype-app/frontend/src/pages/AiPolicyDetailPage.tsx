@@ -321,10 +321,10 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
           <input
             type="checkbox"
             checked={policy.enabled}
-            disabled={!canManage || mutation.isPending}
+            disabled={!canManage || mutation.isPending || policy.lifecycle === 'DEPRECATED'}
             onChange={(event) => mutation.mutate({ id: policy.id, enabled: event.target.checked })}
           />
-          <span>{policy.enabled ? 'Enabled' : 'Disabled'}</span>
+          <span>{policy.lifecycle === 'DEPRECATED' ? 'Deprecated · inactive' : policy.enabled ? 'Enabled' : 'Disabled'}</span>
         </label>
       </div>
 
@@ -351,13 +351,13 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
                 <div className="cvd-ov-left">
                   <div className="cvd-ov-meta">
                     <span className={`cvd-status-pill ${policy.enabled ? 'cvd-status-ok' : 'cvd-status-neutral'}`}>
-                      {policy.enabled ? 'Enabled' : 'Disabled'}
+                      {policy.lifecycle === 'DEPRECATED' ? 'Deprecated · inactive' : policy.enabled ? 'Enabled' : 'Disabled'}
                     </span>
                     {policy.lastEvaluatedAt && (
                       <span className="cvd-ov-meta-eval">· Last evaluated {formatDate(policy.lastEvaluatedAt)}</span>
                     )}
                   </div>
-                  <div className="cvd-ov-first-seen">{policy.id} · v{policy.version}</div>
+                  <div className="cvd-ov-first-seen">{policy.id}</div>
                   <h1 className="cvd-ov-cve-id">{policy.name}</h1>
                   <div className="cvd-ov-badges">
                     <span className={severityClassName(policy.severity)}>{policy.severity}</span>
@@ -395,8 +395,6 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
                     <span className="cvd-tech-attr-value mono">{policy.id}</span>
                   </div>
                   <div className="cvd-tech-attr">
-                    <span className="cvd-tech-attr-label">Version</span>
-                    <span className="cvd-tech-attr-value">v{policy.version}</span>
                   </div>
                   <div className="cvd-tech-attr">
                     <span className="cvd-tech-attr-label">Artifact types</span>

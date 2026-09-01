@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.aisecurity.controller;
 
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService;
+import com.prototype.vulnwatch.aisecurity.service.AiGridPolicyDeprecationService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.AdjudicationCommand;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.AnswerKeyCase;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.AnswerKeyEnvironment;
@@ -43,15 +44,18 @@ public class AiGridValidationGovernanceController {
     private final AiGridR1CertificationService r1Certification;
     private final AiGridR2CertificationService r2Certification;
     private final RequestActorService actors;
+    private final AiGridPolicyDeprecationService deprecations;
 
     public AiGridValidationGovernanceController(AiGridValidationGovernanceService governance,
                                                 AiGridR1CertificationService r1Certification,
                                                 AiGridR2CertificationService r2Certification,
-                                                RequestActorService actors) {
+                                                RequestActorService actors,
+                                                AiGridPolicyDeprecationService deprecations) {
         this.governance = governance;
         this.r1Certification = r1Certification;
         this.r2Certification = r2Certification;
         this.actors = actors;
+        this.deprecations = deprecations;
     }
 
     @GetMapping("/answer-keys")
@@ -154,6 +158,11 @@ public class AiGridValidationGovernanceController {
     @PostMapping("/policies/{policyId}/versions/{version}/publish")
     public ReleaseDecision publish(@PathVariable String policyId, @PathVariable String version) {
         return governance.publishPolicy(policyId, version, actor());
+    }
+
+    @PostMapping("/policies/{policyId}/versions/{version}/deprecate")
+    public void deprecate(@PathVariable String policyId, @PathVariable String version) {
+        deprecations.deprecate(policyId, version, actor());
     }
 
     @GetMapping("/releases/r1/readiness")

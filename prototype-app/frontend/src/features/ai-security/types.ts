@@ -119,6 +119,8 @@ export type AiGridPolicyDistribution = {
   frameworkMappingsJson?: string;
   releaseFamily?: string | null;
   releaseWave?: string | null;
+  approvedPackageDigest?: string | null;
+  releaseDecisionId?: string | null;
 };
 
 export type AiGridPlatformPolicyDetail = {
@@ -449,6 +451,7 @@ export type AiSecurityFinding = {
   firstObservedAt: string;
   lastObservedAt: string;
   resolvedAt: string | null;
+  closedReason?: string | null;
 };
 
 export type AiSecurityPolicy = {
@@ -471,6 +474,7 @@ export type AiSecurityPolicy = {
   decisionCoverageStatus: 'PASS' | 'FAIL' | 'NO_DATA';
   evaluatedArtifacts: number;
   noDecisionCount: number;
+  lifecycle?: string;
 };
 
 export type PolicyScopeMode = 'ALL' | 'MATCH_RULES' | 'CUSTOM_LIST';

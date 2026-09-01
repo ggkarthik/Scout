@@ -59,14 +59,14 @@ class AiGridValidationGovernancePostgresIntegrationTest {
                     default_selection, artifact_types_json, required_capabilities_json,
                     required_relationships_json, required_resource_families_json, required_facts_json,
                     predicate_json, reason_code, remediation, framework_mappings_json,
-                    native_kinds_json, scope_resolution)
+                    native_kinds_json, scope_resolution, package_digest)
                 values ('GOVERNANCE_TEST_POLICY', '1.0.0', 'Governance test policy',
                     'Only publish after validation governance passes.', 'HIGH', 'VALIDATED',
                     'POSTURE_FINDING', 'PREVIEW', '["AI_AGENT"]', '[]', '[]', '["BEDROCK_AGENTS"]',
                     '[{"factKey":"bedrock.agent.guardrail_attached_configured","valueType":"BOOLEAN","evidenceClasses":["CONFIGURATION"],"maxAgeSeconds":86400}]',
                     '{"fact":"bedrock.agent.guardrail_attached_configured","eq":false}',
                     'GOVERNANCE_TEST_REASON', 'Attach a guardrail.', '{"OWASP_LLM_TOP_10":["LLM01"]}',
-                    '["AWS_BEDROCK_AGENT"]', 'STATIC')
+                    '["AWS_BEDROCK_AGENT"]', 'STATIC', 'governance-test-package-material-digest')
                 on conflict do nothing
                 """, Map.of()));
         TenantContext.runAsPlatform(() -> jdbc.update("""

@@ -129,18 +129,6 @@ public class AiGridPolicyCatalogService {
             if (!List.of("GENERAL_AVAILABILITY", "CANARY", "PAUSED", "RETIRED").contains(command.rolloutStage())) bad("Invalid rolloutStage");
             Integer policy = jdbc.queryForObject("select count(*) from platform.ai_grid_policy_versions where policy_id=:id and lifecycle='PUBLISHED'", Map.of("id", policyId), Integer.class);
             if (policy == null || policy == 0) notFound("Published policy not found");
-            if ("GENERAL_AVAILABILITY".equals(command.rolloutStage())) {
-                Integer approved = jdbc.queryForObject("""
-                        select count(*) from platform.ai_grid_policy_versions p
-                         where p.policy_id = :id and p.release_family = 'AGCF_PHASE_1'
-                           and not exists (select 1 from platform.ai_grid_policy_release_decisions d
-                                            where d.policy_id = p.policy_id and d.policy_version = p.version
-                                              and d.decision = 'APPROVED')
-                        """, Map.of("id", policyId), Integer.class);
-                if (approved != null && approved > 0) {
-                    conflict("Phase 1 policy requires a governed APPROVED release decision before GENERAL_AVAILABILITY");
-                }
-            }
             List<String> cohort = command.canaryTenantIds() == null ? List.of() : command.canaryTenantIds();
             if (new HashSet<>(cohort).size() != cohort.size()) bad("CANARY cohort contains duplicate tenant IDs");
             List<UUID> tenantIds = new java.util.ArrayList<>();
@@ -161,16 +149,43 @@ public class AiGridPolicyCatalogService {
                         Map.of("id", policyId, "version", pinned), Integer.class);
                 if (published == null || published == 0) conflict("Pinned version must be a published version of this policy");
             }
+            boolean requiresApproval = command.available() || List.of("GENERAL_AVAILABILITY", "CANARY").contains(command.rolloutStage()) || pinned != null;
+            String targetVersion = pinned == null ? jdbc.queryForObject("""
+                    select version from platform.ai_grid_policy_versions
+                     where policy_id=:id and lifecycle='PUBLISHED'
+                     order by published_at desc nulls last, version desc limit 1
+                    """, Map.of("id", policyId), String.class) : pinned;
+            String approvedDigest = null;
+            UUID releaseDecisionId = null;
+            if (requiresApproval) {
+                Map<String, Object> approval = jdbc.query("""
+                        select p.package_digest, d.id
+                          from platform.ai_grid_policy_versions p
+                          join platform.ai_grid_policy_release_decisions d
+                            on d.policy_id=p.policy_id and d.policy_version=p.version
+                           and d.decision='APPROVED' and d.package_digest=p.package_digest
+                         where p.policy_id=:id and p.version=:version and p.lifecycle='PUBLISHED'
+                         order by d.decided_at desc limit 1
+                        """, new MapSqlParameterSource().addValue("id", policyId).addValue("version", targetVersion), rs ->
+                        rs.next() ? Map.of("digest", rs.getString(1), "id", rs.getObject(2, UUID.class)) : Map.of());
+                if (approval.isEmpty()) conflict("Distribution requires an exact APPROVED release decision for the selected package digest");
+                approvedDigest = (String) approval.get("digest");
+                releaseDecisionId = (UUID) approval.get("id");
+            }
             String before = distributionState(policyId);
             jdbc.update("""
-                    insert into platform.ai_grid_policy_distribution (policy_id,available,default_selection,rollout_stage,canary_tenant_ids_json,pinned_version,updated_by)
-                    values (:id,:available,:selection,:stage,cast(:cohort as jsonb),:pinned,:actor)
+                    insert into platform.ai_grid_policy_distribution
+                        (policy_id,available,default_selection,rollout_stage,canary_tenant_ids_json,pinned_version,
+                         approved_package_digest,release_decision_id,updated_by)
+                    values (:id,:available,:selection,:stage,cast(:cohort as jsonb),:pinned,:digest,:decisionId,:actor)
                     on conflict (policy_id) do update set available=excluded.available, default_selection=excluded.default_selection,
                     rollout_stage=excluded.rollout_stage, canary_tenant_ids_json=excluded.canary_tenant_ids_json,
-                    pinned_version=excluded.pinned_version, updated_by=excluded.updated_by, updated_at=now()
+                    pinned_version=excluded.pinned_version, approved_package_digest=excluded.approved_package_digest,
+                    release_decision_id=excluded.release_decision_id, updated_by=excluded.updated_by, updated_at=now()
                     """, new MapSqlParameterSource().addValue("id", policyId).addValue("available", command.available())
                     .addValue("selection", command.defaultSelection()).addValue("stage", command.rolloutStage())
-                    .addValue("cohort", json(cohort)).addValue("pinned", pinned).addValue("actor", actor));
+                    .addValue("cohort", json(cohort)).addValue("pinned", pinned).addValue("digest", approvedDigest)
+                    .addValue("decisionId", releaseDecisionId).addValue("actor", actor));
             audit.record("ai_grid.policy_distribution.updated", "ai_grid_policy", policyId,
                     "{\"before\":" + before + ",\"after\":" + distributionState(policyId)
                             + ",\"affectedTenantCount\":" + ("CANARY".equals(command.rolloutStage()) ? cohort.size() : "null") + "}");
@@ -195,6 +210,7 @@ public class AiGridPolicyCatalogService {
         String lifecycleFilter = blank(lifecycle);
         return TenantContext.runAsPlatform(() -> jdbc.query("""
             select d.policy_id,d.available,d.default_selection,d.rollout_stage,d.canary_tenant_ids_json::text,d.pinned_version,d.updated_by,d.updated_at,
+                   d.approved_package_digest,d.release_decision_id,
                    p.version,p.name,p.severity,p.lifecycle,p.control_objective_id,p.provider,p.evaluation_mode,
                    p.base_evidence_tiers_json::text,p.conditional_capabilities_json::text,p.framework_mappings_json::text,
                    p.release_family,p.release_wave
@@ -205,7 +221,7 @@ public class AiGridPolicyCatalogService {
                and (cast(:lifecycle as text) is null or p.lifecycle = cast(:lifecycle as text))
              order by p.provider,p.policy_id
             """, new MapSqlParameterSource().addValue("releaseFamily", family).addValue("lifecycle", lifecycleFilter),
-                (rs, n) -> new Distribution(rs.getString(1),rs.getBoolean(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7),rs.getTimestamp(8).toInstant(),rs.getString(9),rs.getString(10),rs.getString(11),rs.getString(12),rs.getString(13),rs.getString(14),rs.getString(15),rs.getString(16),rs.getString(17),rs.getString(18),rs.getString(19),rs.getString(20))));
+                (rs, n) -> new Distribution(rs.getString(1),rs.getBoolean(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7),rs.getTimestamp(8).toInstant(),rs.getString(9),rs.getObject(10, UUID.class),rs.getString(11),rs.getString(12),rs.getString(13),rs.getString(14),rs.getString(15),rs.getString(16),rs.getString(17),rs.getString(18),rs.getString(19),rs.getString(20),rs.getString(21),rs.getString(22))));
     }
 
     public PolicyDetail detail(String policyId, String version) { return TenantContext.runAsPlatform(() -> {
@@ -414,6 +430,6 @@ public class AiGridPolicyCatalogService {
     }
     public record PolicyVersion(String policyId, String version, String lifecycle, String packageDigest, String packageSourceRef) {}
     public record DistributionCommand(boolean available, String defaultSelection, String rolloutStage, List<String> canaryTenantIds, String pinnedVersion) {}
-    public record Distribution(String policyId, boolean available, String defaultSelection, String rolloutStage, String canaryTenantIdsJson, String pinnedVersion, String updatedBy, java.time.Instant updatedAt, String version, String name, String severity, String lifecycle, String controlObjectiveId, String provider, String evaluationMode, String baseEvidenceTiersJson, String conditionalCapabilitiesJson, String frameworkMappingsJson, String releaseFamily, String releaseWave) {}
+    public record Distribution(String policyId, boolean available, String defaultSelection, String rolloutStage, String canaryTenantIdsJson, String pinnedVersion, String updatedBy, java.time.Instant updatedAt, String approvedPackageDigest, UUID releaseDecisionId, String version, String name, String severity, String lifecycle, String controlObjectiveId, String provider, String evaluationMode, String baseEvidenceTiersJson, String conditionalCapabilitiesJson, String frameworkMappingsJson, String releaseFamily, String releaseWave) {}
     public record PolicyDetail(String policyId, String version, String name, String description, String severity, String lifecycle, String workflowClass, String defaultSelection, String controlObjectiveId, String objectiveName, String securityIntent, String remediationIntent, String provider, String evaluationMode, JsonNode evaluationDefinition, JsonNode baseEvidenceTiers, JsonNode conditionalCapabilities, JsonNode requiredCapabilities, JsonNode requiredRelationships, JsonNode requiredResourceFamilies, JsonNode nativeKinds, JsonNode requiredFacts, JsonNode frameworkMappings, JsonNode certificationParameterProfile, String packageDigest, String packageSourceRef, String releaseFamily, String releaseWave) {}
 }

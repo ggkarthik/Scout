@@ -110,10 +110,11 @@ public class AiGridPhase1ReleaseBoardService {
         String normalized = normalizeProvider(provider);
         return TenantContext.runAsPlatform(() -> transactions.execute(status -> {
             Distribution before = jdbc.query("""
-                    select available, default_selection, rollout_stage, canary_tenant_ids_json::text, pinned_version
+                    select available, default_selection, rollout_stage, canary_tenant_ids_json::text, pinned_version,
+                           approved_package_digest, release_decision_id
                       from platform.ai_grid_policy_distribution where policy_id = :id
                     """, Map.of("id", policyId), rs -> rs.next() ? new Distribution(rs.getBoolean(1), rs.getString(2),
-                    rs.getString(3), rs.getString(4), rs.getString(5)) : null);
+                    rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6), rs.getObject(7, UUID.class)) : null);
             Integer valid = jdbc.queryForObject("""
                     select count(*) from platform.ai_grid_policy_versions
                      where policy_id = :id and provider = :provider and release_family = 'AGCF_PHASE_1'
@@ -124,10 +125,11 @@ public class AiGridPhase1ReleaseBoardService {
             Integer paused = jdbc.queryForObject("select count(*) from platform.ai_grid_policy_distribution where policy_id=:id and available=false and rollout_stage='PAUSED'", Map.of("id", policyId), Integer.class);
             jdbc.update("""
                     update platform.ai_grid_policy_distribution set available=:available, default_selection=:selection,
-                        rollout_stage=:stage, canary_tenant_ids_json=cast(:cohort as jsonb), pinned_version=:pinned where policy_id=:id
+                        rollout_stage=:stage, canary_tenant_ids_json=cast(:cohort as jsonb), pinned_version=:pinned,
+                        approved_package_digest=:digest, release_decision_id=:decisionId where policy_id=:id
                     """, new MapSqlParameterSource().addValue("id", policyId).addValue("available", before.available())
                     .addValue("selection", before.selection()).addValue("stage", before.stage()).addValue("cohort", before.cohort())
-                    .addValue("pinned", before.pinned()));
+                    .addValue("pinned", before.pinned()).addValue("digest", before.digest()).addValue("decisionId", before.decisionId()));
             Map<String, Object> evidence = new java.util.LinkedHashMap<>();
             evidence.put("policyId", policyId); evidence.put("provider", normalized);
             evidence.put("restoredRolloutStage", before.stage()); evidence.put("restoredPinnedVersion", before.pinned());
@@ -141,10 +143,21 @@ public class AiGridPhase1ReleaseBoardService {
             if (!board.blockers().isEmpty()) throw new ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT,
                     "Phase 1 promotion blocked: " + String.join(", ", board.blockers()));
             jdbc.update("""
-                    update platform.ai_grid_policy_distribution d set available=true, rollout_stage='GENERAL_AVAILABILITY',
-                        canary_tenant_ids_json='[]'::jsonb, updated_by=:actor, updated_at=now()
-                     where exists (select 1 from platform.ai_grid_policy_versions p
-                                    where p.policy_id=d.policy_id and p.release_family='AGCF_PHASE_1' and p.lifecycle='PUBLISHED')
+                    update platform.ai_grid_policy_distribution d
+                       set available=true, rollout_stage='GENERAL_AVAILABILITY',
+                           canary_tenant_ids_json='[]'::jsonb,
+                           approved_package_digest=a.package_digest, release_decision_id=a.decision_id,
+                           updated_by=:actor, updated_at=now()
+                      from lateral (
+                           select p.package_digest, r.id decision_id
+                             from platform.ai_grid_policy_versions p
+                             join platform.ai_grid_policy_release_decisions r
+                               on r.policy_id=p.policy_id and r.policy_version=p.version
+                              and r.decision='APPROVED' and r.package_digest=p.package_digest
+                            where p.policy_id=d.policy_id and p.release_family='AGCF_PHASE_1' and p.lifecycle='PUBLISHED'
+                            order by r.decided_at desc limit 1
+                      ) a
+                     where d.policy_id in (select policy_id from platform.ai_grid_policy_versions where release_family='AGCF_PHASE_1')
                     """, Map.of("actor", actor));
             return board();
         }));
@@ -177,7 +190,8 @@ public class AiGridPhase1ReleaseBoardService {
         return Math.round((candidate * 10000.0 / baseline)) / 10000.0;
     }
     private record CanaryEvidence(String provider, double utility, long expected, long noDecisions, long unexplained) {}
-    private record Distribution(boolean available, String selection, String stage, String cohort, String pinned) {}
+    private record Distribution(boolean available, String selection, String stage, String cohort, String pinned,
+                                String digest, UUID decisionId) {}
     private record RunPerformance(UUID runId, UUID connectorId, long durationMs, long assessments, long persistedRows) {}
     public record Gate(String gateKey, String status, String evidenceJson, java.time.Instant recordedAt) {}
     public record Board(int totalPolicies, long releaseReadyPolicies, List<Gate> gates, List<String> blockers) {}
