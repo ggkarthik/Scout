@@ -434,7 +434,8 @@ async function walk(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
   const nested = await Promise.all(entries.map(async (entry) => {
     const path = join(directory, entry.name);
-    return entry.isDirectory() ? walk(path) : entry.name.endsWith('.json') && entry.name !== 'phase-1-manifest.json' ? [path] : [];
+    return entry.isDirectory() ? walk(path) : entry.name.endsWith('.json')
+      && !['phase-1-manifest.json', 'phase-2-catalog-contract.json'].includes(entry.name) ? [path] : [];
   }));
   return nested.flat();
 }
