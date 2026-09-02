@@ -1396,7 +1396,7 @@ export const api = {
   getPlatformAiGridPolicyReleaseReadiness: (policyId: string) => request<AiGridPolicyReleaseReadiness>(
     `/platform/ai-grid/validation/policies/${encodeURIComponent(policyId)}/release-readiness`,
   ),
-  approvePlatformAiGridPolicy: (policyId: string) => request(`/platform/ai-grid/validation/policies/${encodeURIComponent(policyId)}/approve`, { method: 'POST' }),
+  approvePlatformAiGridPolicy: (policyId: string) => request<{ approved: boolean; reason?: string }>(`/platform/ai-grid/validation/policies/${encodeURIComponent(policyId)}/approve`, { method: 'POST' }),
   publishPlatformAiGridPolicy: (policyId: string, targetTenantIds: string[]) => request(`/platform/ai-grid/validation/policies/${encodeURIComponent(policyId)}/publish`, { method: 'POST', body: JSON.stringify({ targetTenantIds }) }),
   deprecatePlatformAiGridPolicy: (policyId: string, reason: string, successorPolicyId?: string) => request(`/platform/ai-grid/validation/policies/${encodeURIComponent(policyId)}/deprecate`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ reason, successorPolicyId }) }),
   revokePlatformAiGridReleaseBinding: (bindingId: string, reason: string) => request<void>(`/platform/ai-grid/validation/release-bindings/${encodeURIComponent(bindingId)}/revoke`, { method: 'POST', body: JSON.stringify({ reason }) }),

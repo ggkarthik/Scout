@@ -30,6 +30,7 @@ export function PlatformAiPolicyStudio() {
   const [owasp, setOwasp] = React.useState('ALL');
   const [query, setQuery] = React.useState('');
   const [activePolicyId, setActivePolicyId] = React.useState<string | null>(null);
+  const [approvalMessage, setApprovalMessage] = React.useState<string | null>(null);
   const catalog = useQuery({ queryKey: ['platform-ai-grid-policies'], queryFn: () => api.listPlatformAiGridPolicies() });
   const shipping = useQuery({ queryKey: ['platform-ai-grid-shipping-status'], queryFn: api.getPlatformAiGridShippingStatus });
   const tenants = useQuery({ queryKey: ['platform-ai-grid-active-tenants'], queryFn: api.listTenants });
@@ -41,10 +42,14 @@ export function PlatformAiPolicyStudio() {
   ]);
   const approve = useMutation({
     mutationFn: api.approvePlatformAiGridPolicy,
-    onSuccess: () => void Promise.all([
-      client.invalidateQueries({ queryKey: ['platform-ai-grid-policies'] }),
-      client.invalidateQueries({ queryKey: ['platform-ai-grid-shipping-status'] }),
-    ]),
+    onSuccess: (result: { approved?: boolean; reason?: string }) => {
+      setApprovalMessage(result.approved ? 'Policy approved successfully.' : `Approval blocked: ${result.reason ?? 'release gates have not passed.'}`);
+      void Promise.all([
+        client.invalidateQueries({ queryKey: ['platform-ai-grid-policies'] }),
+        client.invalidateQueries({ queryKey: ['platform-ai-grid-shipping-status'] }),
+      ]);
+    },
+    onError: (error: Error) => setApprovalMessage(`Approval failed: ${error.message}`),
   });
   const publish = useMutation({
     mutationFn: ({ policyId, targetTenantIds }: { policyId: string; targetTenantIds: string[] }) => api.publishPlatformAiGridPolicy(policyId, targetTenantIds),
@@ -79,7 +84,8 @@ export function PlatformAiPolicyStudio() {
       <strong>{shipping.data?.blockers.length ? `${shipping.data.blockers.length} blocker${shipping.data.blockers.length === 1 ? '' : 's'}` : 'Ready to ship'}</strong>
     </div></header>
     <ShippingSummary status={shipping.data} />
-    {shipping.data?.blockers.length ? <p className="notice error">{shipping.data.blockers.join(' · ')}</p> : null}
+      {shipping.data?.blockers.length ? <p className="notice error">{shipping.data.blockers.join(' · ')}</p> : null}
+      {approvalMessage ? <p className={`notice ${approvalMessage.startsWith('Policy approved') ? 'success' : 'error'}`}>{approvalMessage}</p> : null}
 
     <section className="panel policy-catalog-panel">
       <div className="panel-header policy-catalog-header"><div><h3>Policy catalog</h3><p className="panel-caption">Approve a validated policy, publish it to an explicit tenant canary cohort, or deprecate it through its policy-ID lifecycle.</p></div>
