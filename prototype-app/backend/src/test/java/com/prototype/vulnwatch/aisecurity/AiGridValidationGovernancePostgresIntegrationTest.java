@@ -14,6 +14,8 @@ import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceServ
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.PrecisionSampleCommand;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.ResultCommand;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.RunCommand;
+import com.prototype.vulnwatch.aisecurity.service.AiGridPolicyDeprecationService;
+import com.prototype.vulnwatch.aisecurity.service.AiGridPolicyDeprecationService.DeprecationCommand;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.service.TenantContext;
 import com.prototype.vulnwatch.service.TenantSchemaExecutionService;
@@ -27,6 +29,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -46,6 +50,7 @@ class AiGridValidationGovernancePostgresIntegrationTest {
     }
 
     @Autowired private AiGridValidationGovernanceService governance;
+    @Autowired private AiGridPolicyDeprecationService deprecations;
     @Autowired private NamedParameterJdbcTemplate jdbc;
     @Autowired private TenantService tenantService;
     @Autowired private TenantSchemaMigrationService tenantSchemaMigrationService;
@@ -67,6 +72,19 @@ class AiGridValidationGovernancePostgresIntegrationTest {
                     '{"fact":"bedrock.agent.guardrail_attached_configured","eq":false}',
                     'GOVERNANCE_TEST_REASON', 'Attach a guardrail.', '{"OWASP_LLM_TOP_10":["LLM01"]}',
                     '["AWS_BEDROCK_AGENT"]', 'STATIC')
+                on conflict do nothing
+                """, Map.of()));
+        TenantContext.runAsPlatform(() -> jdbc.update("""
+                insert into platform.ai_grid_policy_versions (
+                    policy_id, version, name, description, severity, lifecycle, workflow_class,
+                    default_selection, artifact_types_json, required_capabilities_json,
+                    required_relationships_json, required_resource_families_json, required_facts_json,
+                    predicate_json, reason_code, remediation, framework_mappings_json,
+                    native_kinds_json, scope_resolution)
+                values ('GOVERNANCE_DEPRECATION_POLICY', '1.0.0', 'Deprecation test policy',
+                    'Tests idempotent policy retirement.', 'LOW', 'VALIDATED', 'POSTURE_FINDING',
+                    'DISABLED', '[]', '[]', '[]', '[]', '[]', '{"always":false}',
+                    'GOVERNANCE_DEPRECATION_REASON', 'Retire it.', '[]', '[]', 'STATIC')
                 on conflict do nothing
                 """, Map.of()));
         TenantContext.runAsPlatform(() -> jdbc.update("""
@@ -236,6 +254,32 @@ class AiGridValidationGovernancePostgresIntegrationTest {
         assertFalse(readiness.ready());
         assertTrue(readiness.blockers().contains("FRESH_PASSING_ANSWER_KEY_REQUIRED"));
         assertTrue(readiness.blockers().contains("PASSING_PRECISION_REVIEW_REQUIRED"));
+    }
+
+    @Test
+    void deprecationIsIdempotentWhenTheSameRequestIsSubmittedConcurrently() throws Exception {
+        String idempotencyKey = "deprecate-governance-policy-once";
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            var first = executor.submit(() -> TenantContext.runAsPlatform(() -> deprecations.deprecate(
+                    "GOVERNANCE_DEPRECATION_POLICY",
+                    new DeprecationCommand("Replacement is available", null, idempotencyKey), "release-owner")));
+            var second = executor.submit(() -> TenantContext.runAsPlatform(() -> deprecations.deprecate(
+                    "GOVERNANCE_DEPRECATION_POLICY",
+                    new DeprecationCommand("Replacement is available", null, idempotencyKey), "release-owner")));
+
+            assertEquals(first.get().id(), second.get().id());
+        } finally {
+            executor.shutdownNow();
+        }
+        assertEquals(1, TenantContext.runAsPlatform(() -> jdbc.queryForObject("""
+                select count(*) from platform.ai_grid_policy_deprecations
+                 where policy_id = 'GOVERNANCE_DEPRECATION_POLICY'
+                """, Map.of(), Integer.class)));
+        assertEquals("DEPRECATED", TenantContext.runAsPlatform(() -> jdbc.queryForObject("""
+                select lifecycle from platform.ai_grid_policy_versions
+                 where policy_id = 'GOVERNANCE_DEPRECATION_POLICY' and version = '1.0.0'
+                """, Map.of(), String.class)));
     }
 
     private void labelTruePositive(UUID reviewId, UUID sampleId) {

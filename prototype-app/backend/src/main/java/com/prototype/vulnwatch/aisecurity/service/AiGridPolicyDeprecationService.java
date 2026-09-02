@@ -59,7 +59,7 @@ public class AiGridPolicyDeprecationService {
             List<String> versions = jdbc.query("""
                     select version from platform.ai_grid_policy_versions
                      where policy_id = :policyId and lifecycle <> 'DEPRECATED'
-                     order by created_at desc, version desc
+                     order by created_at desc, version desc for update
                     """, Map.of("policyId", policyId), (rs, row) -> rs.getString(1));
             if (versions.isEmpty()) throw notFound("AI Grid policy not found or already deprecated");
             String version = versions.get(0);
@@ -92,8 +92,8 @@ public class AiGridPolicyDeprecationService {
                      where t.status = 'ACTIVE' and t.deleted_at is null
                     on conflict (deprecation_id, tenant_id) do nothing
                     """, Map.of("id", id, "deprecationId", id.toString()));
-            audit.record("ai_grid.policy.deprecated", "ai_grid_policy", policyId,
-                    "{\"successorPolicyId\":" + jsonString(blank(command.successorPolicyId())) + "}");
+            audit.recordExplicitActor(null, actor, "PLATFORM_OWNER", "ai_grid.policy.deprecated", "ai_grid_policy",
+                    policyId, "{\"successorPolicyId\":" + jsonString(blank(command.successorPolicyId())) + "}", "SUCCESS");
             return byId(id);
         }));
     }
