@@ -267,7 +267,8 @@ public class AiGridApiService {
                        and ((d.rollout_stage = 'GENERAL_AVAILABILITY')
                         or (d.rollout_stage in ('CANARY', 'DEV') and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
                        and exists (select 1 from platform.ai_grid_policy_versions p
-                                    where p.policy_id=d.policy_id and p.lifecycle='PUBLISHED')
+                                    where p.policy_id=d.policy_id
+                                      and p.lifecycle in ('VALIDATED','APPROVED','CANARY','PUBLISHED'))
                     """, Map.of("id", policyId, "tenantId", tenant.getId().toString()), (rs, n) -> rs.getString(1));
             if (defaults.isEmpty()) {
                 throw new org.springframework.web.server.ResponseStatusException(
