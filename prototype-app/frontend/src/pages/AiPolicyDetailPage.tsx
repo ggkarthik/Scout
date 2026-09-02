@@ -7,6 +7,7 @@ import { hasRole } from '../features/auth/roles';
 import { formatDate, formatLabel, severityClassName } from '../features/cve-workbench/formatting';
 import type {
   AiGridPolicy,
+  AiSecurityPolicy,
   AiSecurityFinding,
   PolicyExceptionOverride,
   PolicyScopeCondition,
@@ -176,12 +177,38 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
     queryFn: () => api.listAiSecurityFindings(policyId, undefined, 0, 200),
   });
   const mutation = useMutation({
-    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => api.updateAiGridPolicyEnabled(id, enabled),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['ai-security-policies'] }),
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => api.updateAiGridPolicySelection(id, enabled ? 'ENABLED' : 'DISABLED'),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['ai-security-policies'] });
+      void queryClient.invalidateQueries({ queryKey: ['ai-grid-policies'] });
+    },
   });
 
-  const policy = policiesQuery.data?.find((item) => item.id === policyId) ?? null;
   const policyMetadata: AiGridPolicy | null = policyMetadataQuery.data?.find((item) => item.policyId === policyId) ?? null;
+  const legacyPolicy = policiesQuery.data?.find((item) => item.id === policyId) ?? null;
+  const policy: AiSecurityPolicy | null = legacyPolicy ?? (policyMetadata ? {
+    id: policyMetadata.policyId,
+    version: policyMetadata.version,
+    name: policyMetadata.name,
+    severity: policyMetadata.severity,
+    artifactTypes: [],
+    requiredResourceFamilies: [],
+    description: `${policyMetadata.provider} governed AI security policy evaluated with ${policyMetadata.evaluationMode}.`,
+    remediation: 'Review the policy evidence and remediate any failing control objective.',
+    controlMappings: {},
+    available: true,
+    enabled: policyMetadata.selection !== 'DISABLED',
+    openFindings: 0,
+    lifetimeFindings: 0,
+    lastEvaluatedAt: null,
+    decisionCoverage: 0,
+    decisionCoverageThreshold: 1,
+    decisionCoverageStatus: 'NO_DATA',
+    evaluatedArtifacts: 0,
+    noDecisionCount: 0,
+    lifecycle: policyMetadata.lifecycle,
+    inactiveReason: null,
+  } : null);
   const allFindings = React.useMemo(() => findingsQuery.data?.items ?? [], [findingsQuery.data?.items]);
   const visibleFindings = React.useMemo(() => (
     findingsStatusFilter ? allFindings.filter((finding) => finding.status === findingsStatusFilter) : allFindings
@@ -296,10 +323,10 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
     setScopeDirty(true);
   };
 
-  if (policiesQuery.isLoading) {
+  if (policiesQuery.isLoading && policyMetadataQuery.isLoading) {
     return <section className="panel"><div className="empty-state"><p>Loading policy…</p></div></section>;
   }
-  if (policiesQuery.isError) {
+  if (policiesQuery.isError && policyMetadataQuery.isError) {
     return <section className="panel"><div className="notice error">AI Security policies could not be loaded.</div></section>;
   }
   if (!policy) {
