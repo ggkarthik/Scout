@@ -859,7 +859,7 @@ public class CustomerDemoDatasetService {
                 ON CONFLICT (id) DO NOTHING
                 """, stableId(tenantId, "campaign-activity:" + campaignOne), campaignOne, ts(now.minus(1, ChronoUnit.DAYS)));
 
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < 6; i++) {
             jdbcTemplate.update("""
                     INSERT INTO audit_events
                         (id, tenant_id, occurred_at, actor_subject, actor_role, action,

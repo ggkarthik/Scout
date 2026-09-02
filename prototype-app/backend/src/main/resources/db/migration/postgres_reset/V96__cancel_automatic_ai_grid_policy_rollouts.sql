@@ -5,12 +5,18 @@
 
 ALTER TABLE platform.ai_grid_policy_rollouts
     DROP CONSTRAINT IF EXISTS ai_grid_policy_rollouts_status_check;
+UPDATE platform.ai_grid_policy_rollouts
+   SET status = 'CANCELLED'
+ WHERE status = 'CANCELED';
 ALTER TABLE platform.ai_grid_policy_rollouts
     ADD CONSTRAINT ai_grid_policy_rollouts_status_check
     CHECK (status IN ('PENDING','PROCESSING','COMPLETED','FAILED','CANCELLED'));
 
 ALTER TABLE platform.ai_grid_policy_rollout_tasks
     DROP CONSTRAINT IF EXISTS ai_grid_policy_rollout_tasks_status_check;
+UPDATE platform.ai_grid_policy_rollout_tasks
+   SET status = 'CANCELLED'
+ WHERE status = 'CANCELED';
 ALTER TABLE platform.ai_grid_policy_rollout_tasks
     ADD CONSTRAINT ai_grid_policy_rollout_tasks_status_check
     CHECK (status IN ('PENDING','PROCESSING','WAITING_FOR_SNAPSHOT','COMPLETED','FAILED','CANCELLED'));
