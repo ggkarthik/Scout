@@ -17,7 +17,8 @@ class AiGridValidationGovernanceServiceTest {
         AiGridValidationGovernanceService service = new AiGridValidationGovernanceService(
                 org.mockito.Mockito.mock(NamedParameterJdbcTemplate.class),
                 org.mockito.Mockito.mock(TransactionTemplate.class), new ObjectMapper(),
-                org.mockito.Mockito.mock(com.prototype.vulnwatch.service.TenantSchemaExecutionService.class));
+                org.mockito.Mockito.mock(com.prototype.vulnwatch.service.TenantSchemaExecutionService.class),
+                org.mockito.Mockito.mock(com.prototype.vulnwatch.service.TenantService.class));
 
         ResponseStatusException error = assertThrows(ResponseStatusException.class, () -> service.addPrecisionSample(
                 UUID.randomUUID(), new AiGridValidationGovernanceService.PrecisionSampleCommand(

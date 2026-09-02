@@ -20,6 +20,12 @@ import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceServ
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.ReleaseDecision;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.ReleaseReadiness;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.RunCommand;
+import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.PolicyApproval;
+import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.PolicyPublication;
+import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.PublishCommand;
+import com.prototype.vulnwatch.aisecurity.service.AiGridPolicyDeprecationService;
+import com.prototype.vulnwatch.aisecurity.service.AiGridPolicyDeprecationService.Deprecation;
+import com.prototype.vulnwatch.aisecurity.service.AiGridPolicyDeprecationService.DeprecationCommand;
 import com.prototype.vulnwatch.aisecurity.service.AiGridR1CertificationService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridR2CertificationService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridR1CertificationService.EvidenceCommand;
@@ -28,27 +34,33 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/platform/ai-grid/validation")
 @PreAuthorize("hasRole('PLATFORM_OWNER')")
 public class AiGridValidationGovernanceController {
     private final AiGridValidationGovernanceService governance;
+    private final AiGridPolicyDeprecationService deprecations;
     private final AiGridR1CertificationService r1Certification;
     private final AiGridR2CertificationService r2Certification;
     private final RequestActorService actors;
 
     public AiGridValidationGovernanceController(AiGridValidationGovernanceService governance,
+                                                AiGridPolicyDeprecationService deprecations,
                                                 AiGridR1CertificationService r1Certification,
                                                 AiGridR2CertificationService r2Certification,
                                                 RequestActorService actors) {
         this.governance = governance;
+        this.deprecations = deprecations;
         this.r1Certification = r1Certification;
         this.r2Certification = r2Certification;
         this.actors = actors;
@@ -86,12 +98,22 @@ public class AiGridValidationGovernanceController {
 
     @GetMapping("/policies/{policyId}/versions/{version}/digest")
     public Map<String, String> policyDigest(@PathVariable String policyId, @PathVariable String version) {
-        return Map.of("digest", governance.policyDigest(policyId, version));
+        throw legacyVersionRoute();
     }
 
     @GetMapping("/policies/{policyId}/versions/{version}/release-readiness")
     public ReleaseReadiness releaseReadiness(@PathVariable String policyId, @PathVariable String version) {
-        return governance.releaseReadiness(policyId, version);
+        throw legacyVersionRoute();
+    }
+
+    @GetMapping("/policies/{policyId}/digest")
+    public Map<String, String> policyDigest(@PathVariable String policyId) {
+        return Map.of("digest", governance.policyDigest(policyId));
+    }
+
+    @GetMapping("/policies/{policyId}/release-readiness")
+    public ReleaseReadiness releaseReadiness(@PathVariable String policyId) {
+        return governance.releaseReadiness(policyId);
     }
 
     @GetMapping("/releases/phase-1/certification-readiness")
@@ -153,7 +175,30 @@ public class AiGridValidationGovernanceController {
 
     @PostMapping("/policies/{policyId}/versions/{version}/publish")
     public ReleaseDecision publish(@PathVariable String policyId, @PathVariable String version) {
-        return governance.publishPolicy(policyId, version, actor());
+        throw legacyVersionRoute();
+    }
+
+    @PostMapping("/policies/{policyId}/approve")
+    public PolicyApproval approve(@PathVariable String policyId) {
+        return governance.approvePolicy(policyId, actor());
+    }
+
+    @PostMapping("/policies/{policyId}/publish")
+    public PolicyPublication publish(@PathVariable String policyId,
+                                     @RequestBody(required = false) PublishCommand command) {
+        return governance.publishApprovedPolicy(policyId, command, actor());
+    }
+
+    @PostMapping("/release-bindings/{bindingId}/revoke")
+    public void revoke(@PathVariable UUID bindingId, @RequestBody RevokeCommand command) {
+        governance.revokeReleaseBinding(bindingId, command.reason(), actor());
+    }
+
+    @PostMapping("/policies/{policyId}/deprecate")
+    public Deprecation deprecate(@PathVariable String policyId, @RequestBody DeprecationCommand command,
+                                 @RequestHeader("Idempotency-Key") String idempotencyKey) {
+        return deprecations.deprecate(policyId,
+                new DeprecationCommand(command.reason(), command.successorPolicyId(), idempotencyKey), actor());
     }
 
     @GetMapping("/releases/r1/readiness")
@@ -187,5 +232,11 @@ public class AiGridValidationGovernanceController {
         return actors.currentActor().userId();
     }
 
+    private ResponseStatusException legacyVersionRoute() {
+        return new ResponseStatusException(HttpStatus.GONE,
+                "Version-keyed AI Grid release routes were replaced by policy-ID keyed routes");
+    }
+
     public record BiasCommand(boolean passed, String rationale) {}
+    public record RevokeCommand(String reason) {}
 }

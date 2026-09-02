@@ -1393,12 +1393,13 @@ export const api = {
   retryPlatformAiGridPolicyRollout: (rolloutId: string) => request<void>(
     `/platform/ai-grid/policy-rollouts/${encodeURIComponent(rolloutId)}/retry`, { method: 'POST' },
   ),
-  getPlatformAiGridPolicyReleaseReadiness: (policyId: string, version: string) => request<AiGridPolicyReleaseReadiness>(
-    `/platform/ai-grid/policies/${encodeURIComponent(policyId)}/versions/${encodeURIComponent(version)}/release-readiness`,
+  getPlatformAiGridPolicyReleaseReadiness: (policyId: string) => request<AiGridPolicyReleaseReadiness>(
+    `/platform/ai-grid/validation/policies/${encodeURIComponent(policyId)}/release-readiness`,
   ),
-  publishPlatformAiGridPolicy: (policyId: string, version: string) => request<{ published: boolean; reason: string }>(
-    `/platform/ai-grid/policies/${encodeURIComponent(policyId)}/versions/${encodeURIComponent(version)}/publish`, { method: 'POST' },
-  ),
+  approvePlatformAiGridPolicy: (policyId: string) => request(`/platform/ai-grid/validation/policies/${encodeURIComponent(policyId)}/approve`, { method: 'POST' }),
+  publishPlatformAiGridPolicy: (policyId: string, targetTenantIds: string[]) => request(`/platform/ai-grid/validation/policies/${encodeURIComponent(policyId)}/publish`, { method: 'POST', body: JSON.stringify({ targetTenantIds }) }),
+  deprecatePlatformAiGridPolicy: (policyId: string, reason: string, successorPolicyId?: string) => request(`/platform/ai-grid/validation/policies/${encodeURIComponent(policyId)}/deprecate`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ reason, successorPolicyId }) }),
+  revokePlatformAiGridReleaseBinding: (bindingId: string, reason: string) => request<void>(`/platform/ai-grid/validation/release-bindings/${encodeURIComponent(bindingId)}/revoke`, { method: 'POST', body: JSON.stringify({ reason }) }),
   getPlatformAiGridPhase1CertificationReadiness: () => request<AiGridPhase1CertificationReadiness>(
     '/platform/ai-grid/validation/releases/phase-1/certification-readiness',
   ),

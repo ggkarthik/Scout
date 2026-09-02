@@ -606,7 +606,7 @@ clearStoredAuthToken(): void               // removes from localStorage
 - Azure connector: `listAiSecurityAzureConnectors()`, `getAiSecurityAzureRequirements()`, `saveAiSecurityAzureConnector(payload)`, `runAiSecurityAzureConnector(connectorId)`, `runAiSecurityAzureTarget(targetId)`; Foundry single-form flow `testAiSecurityAzureFoundryConfig()`/`runAiSecurityAzureFoundryConfig()`; credential profiles `listAiSecurityAzureCredentials()`, `createAiSecurityAzureCredential(payload)`, `testAiSecurityAzureCredential(profileId, subscriptionId)`, `rotateAiSecurityAzureCredential(profileId, payload)`, `revokeAiSecurityAzureCredential(profileId)`
 - Coverage: `getAiGridCoverage()`, `getAiGridCoverageDimensions()`
 - Exposure intelligence: `getAiExposureIntelligenceOverview()`, `listAiExposurePriorities()`, `listAiActionQueue()`, `getAiAssetPosture(artifactId)`, `listAiGridExposures(cursor?, limit?)`, `getAiGridExposure(exposureId)`, `dispositionAiGridExposure(exposureId, disposition, reason)`, `getAiGridRunMetrics(runId)`, `confirmAiGridArtifactOwner(artifactId, ownerName, reason?)`
-- Platform governance: `listPlatformAiGridPolicies()`, distribution/impact-preview/release-readiness/publish mutations, `getPlatformAiGridOwaspCoverage()`, `getPlatformAiGridPolicyCandidates()`
+- Platform governance: `listPlatformAiGridPolicies()`, policy-ID `approvePlatformAiGridPolicy()`, `publishPlatformAiGridPolicy(policyId, targetTenantIds)`, `deprecatePlatformAiGridPolicy()`, `revokePlatformAiGridReleaseBinding()`, policy detail/readiness, `getPlatformAiGridOwaspCoverage()`, `getPlatformAiGridPolicyCandidates()`
 
 **Auth / Admin:**
 - `getAuthContext()` -> `ActorContext`

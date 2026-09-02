@@ -125,6 +125,9 @@ public class AiGridPolicyCatalogService {
     public Distribution updateDistribution(String policyId, DistributionCommand command, String actor) {
         return TenantContext.runAsPlatform(() -> {
             if (command == null) bad("Distribution command is required");
+            if (command.available() || blank(command.pinnedVersion()) != null) {
+                conflict("Policies can only be exposed and pinned through an approved policy-ID release binding");
+            }
             if (!SELECTIONS.contains(command.defaultSelection())) bad("Invalid defaultSelection");
             if (!List.of("GENERAL_AVAILABILITY", "CANARY", "PAUSED", "RETIRED").contains(command.rolloutStage())) bad("Invalid rolloutStage");
             Integer policy = jdbc.queryForObject("select count(*) from platform.ai_grid_policy_versions where policy_id=:id and lifecycle='PUBLISHED'", Map.of("id", policyId), Integer.class);

@@ -1,0 +1,27 @@
+{
+  "release": "AGCF_PHASE_2",
+  "catalogVersion": 1,
+  "technicalVersion": "1.0.0",
+  "newPolicyRanges": [
+    { "provider": "AWS", "prefix": "AGCF-AWS", "from": 39, "to": 68 },
+    { "provider": "AZURE", "prefix": "AGCF-AZR", "from": 33, "to": 69 }
+  ],
+  "replacements": [
+    { "predecessorPolicyId": "AGCF-AWS-017", "successorPolicyId": "AGCF-AWS-069" },
+    { "predecessorPolicyId": "AGCF-AWS-024", "successorPolicyId": "AGCF-AWS-070" },
+    { "predecessorPolicyId": "AGCF-AWS-031", "successorPolicyId": "AGCF-AWS-071" },
+    { "predecessorPolicyId": "AGCF-AWS-032", "successorPolicyId": "AGCF-AWS-072" },
+    { "predecessorPolicyId": "AGCF-AZR-001", "successorPolicyId": "AGCF-AZR-070" },
+    { "predecessorPolicyId": "AGCF-AZR-002", "successorPolicyId": "AGCF-AZR-071" },
+    { "predecessorPolicyId": "AGCF-AZR-019", "successorPolicyId": "AGCF-AZR-072" },
+    { "predecessorPolicyId": "AGCF-AZR-030", "successorPolicyId": "AGCF-AZR-073" },
+    { "predecessorPolicyId": "AGCF-AZR-031", "successorPolicyId": "AGCF-AZR-074" },
+    { "predecessorPolicyId": "AGCF-AZR-032", "successorPolicyId": "AGCF-AZR-075" },
+    { "predecessorPolicyId": "AGCF-XSP-001", "successorPolicyId": "AGCF-XSP-007" },
+    { "predecessorPolicyId": "AGCF-XSP-002", "successorPolicyId": "AGCF-XSP-008" },
+    { "predecessorPolicyId": "AGCF-XSP-003", "successorPolicyId": "AGCF-XSP-009" },
+    { "predecessorPolicyId": "AGCF-XSP-004", "successorPolicyId": "AGCF-XSP-010" },
+    { "predecessorPolicyId": "AGCF-XSP-005", "successorPolicyId": "AGCF-XSP-011" },
+    { "predecessorPolicyId": "AGCF-XSP-006", "successorPolicyId": "AGCF-XSP-012" }
+  ]
+}
