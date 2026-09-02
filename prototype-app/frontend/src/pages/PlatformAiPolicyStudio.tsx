@@ -71,7 +71,7 @@ export function PlatformAiPolicyStudio() {
   const hasFilters = provider !== 'ALL' || rollout !== 'ALL' || selection !== 'ALL' || owasp !== 'ALL' || query.trim() !== '';
 
   return <section className="platform-ai-policy-studio">
-    <header className="ai-security-hero policies policy-studio-hero"><div>
+      <header className="ai-security-hero policies policy-studio-hero"><div>
       <span className="ai-security-kicker">Tenant Management / Policies</span><h2>Policy distribution</h2>
       <p>Ship a governed catalog, make tenant defaults clear, and stage rollout changes from one workspace.</p>
     </div><div className={shipping.data?.blockers.length ? 'policy-shipping-state policy-shipping-state--blocked' : 'policy-shipping-state'}>
@@ -110,9 +110,9 @@ export function PlatformAiPolicyStudio() {
       </div>
     </section>
 
-    <section className="panel policy-rollout-panel"><div className="panel-header"><div><h3>Automatic rollout queue</h3><p className="panel-caption">Queued jobs wait for a complete stored connector snapshot; catalog shipping remains available while they do.</p></div><span className="policy-results-count">{rollouts.data?.filter((item) => item.status !== 'COMPLETED').length ?? 0} active</span></div>
-      <div className="table-scroll"><table className="data-table"><thead><tr><th>Policy</th><th>Version</th><th>State</th><th>Created</th><th>Action</th></tr></thead><tbody>
-        {rollouts.isLoading ? <tr><td colSpan={5}>Loading rollout jobs…</td></tr> : (rollouts.data ?? []).length === 0 ? <tr><td colSpan={5}>No rollout jobs are waiting.</td></tr> : (rollouts.data ?? []).map((item) => <tr key={item.id}><td><strong>{item.policyId}</strong></td><td>{item.newVersion}</td><td><span className={statusClass(item.status)}>{item.status}</span></td><td>{new Date(item.createdAt).toLocaleString()}</td><td><button type="button" className="btn btn-secondary btn-sm" onClick={() => retry.mutate(item.id)} disabled={retry.isPending || item.status === 'COMPLETED'}>{item.status === 'COMPLETED' ? 'Complete' : 'Retry'}</button></td></tr>)}
+    <section className="panel policy-rollout-panel"><div className="panel-header"><div><h3>Approval-bound rollout queue</h3><p className="panel-caption">Each rollout is created by one policy approval and carries its exact digest and release-decision binding.</p></div><span className="policy-results-count">{rollouts.data?.filter((item) => item.status !== 'COMPLETED' && item.status !== 'CANCELED').length ?? 0} active</span></div>
+      <div className="table-scroll"><table className="data-table"><thead><tr><th>Policy</th><th>Version</th><th>Approved digest</th><th>Decision</th><th>State</th><th>Created</th><th>Action</th></tr></thead><tbody>
+        {rollouts.isLoading ? <tr><td colSpan={7}>Loading rollout jobs…</td></tr> : (rollouts.data ?? []).length === 0 ? <tr><td colSpan={7}>No rollout jobs are waiting.</td></tr> : (rollouts.data ?? []).map((item) => <tr key={item.id}><td><strong>{item.policyId}</strong></td><td>{item.newVersion}</td><td className="mono">{item.approvedDigest ?? '—'}</td><td className="mono">{item.releaseDecisionId ?? '—'}</td><td><span className={statusClass(item.status)}>{item.status}</span></td><td>{new Date(item.createdAt).toLocaleString()}</td><td><button type="button" className="btn btn-secondary btn-sm" onClick={() => retry.mutate(item.id)} disabled={retry.isPending || item.status === 'COMPLETED' || item.status === 'CANCELED'}>{item.status === 'COMPLETED' ? 'Complete' : item.status === 'CANCELED' ? 'Canceled' : 'Retry'}</button></td></tr>)}
       </tbody></table></div>
     </section>
   </section>;

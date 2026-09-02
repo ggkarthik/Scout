@@ -725,7 +725,14 @@ export function FindingDetailPage() {
                   <KVRow label="Auto-Close Eligible">{fmtDt(currentFinding.autoCloseEligibleAt)}</KVRow>
                 )}
                 {currentFinding.closedReason && (
-                  <KVRow label="Closed Reason">{currentFinding.closedReason.replace(/_/g, ' ')}</KVRow>
+                  <KVRow label="Closed Reason">{currentFinding.closedReason === 'AUTO_POLICY_PLATFORM_DEPRECATED'
+                    ? 'Closed — policy deprecated by platform'
+                    : currentFinding.closedReason === 'AUTO_POLICY_TENANT_DISABLED'
+                      ? 'Closed — policy disabled for this tenant'
+                      : currentFinding.closedReason.replace(/_/g, ' ')}</KVRow>
+                )}
+                {(currentFinding.closedReason === 'AUTO_POLICY_PLATFORM_DEPRECATED' || currentFinding.closedReason === 'AUTO_POLICY_TENANT_DISABLED') && (
+                  <p className="fd3-muted">This closure does not indicate verified remediation.</p>
                 )}
                 {currentFinding.closedAt && (
                   <KVRow label="Closed At">{fmtDt(currentFinding.closedAt)}</KVRow>

@@ -113,13 +113,28 @@ class AiGridPhase1PolicyMigrationPostgresIntegrationTest {
     }
 
     private void publishSuccessor() {
-        jdbc.update("update platform.ai_grid_policy_versions set lifecycle = 'PUBLISHED' where policy_id = :id",
-                Map.of("id", SUCCESSOR));
+        String digest = jdbc.queryForObject("""
+                select package_digest from platform.ai_grid_policy_versions
+                 where policy_id = :id and version = '1.0.0'
+                """, Map.of("id", SUCCESSOR), String.class);
+        UUID decisionId = UUID.randomUUID();
+        jdbc.update("""
+                insert into platform.ai_grid_policy_release_decisions
+                    (id, policy_id, policy_version, package_digest, decision, reason, decided_by)
+                values (:id, :policyId, '1.0.0', :digest, 'APPROVED',
+                        'Test approval for migration successor', 'test-release-owner')
+                """, Map.of("id", decisionId, "policyId", SUCCESSOR, "digest", digest));
+        jdbc.update("""
+                update platform.ai_grid_policy_versions
+                   set lifecycle = 'PUBLISHED'
+                 where policy_id = :id and version = '1.0.0'
+                """, Map.of("id", SUCCESSOR));
         jdbc.update("""
                 update platform.ai_grid_policy_distribution
-                   set available = true, rollout_stage = 'GENERAL_AVAILABILITY'
+                   set available = true, rollout_stage = 'GENERAL_AVAILABILITY', pinned_version = '1.0.0',
+                       approved_package_digest = :digest, release_decision_id = :decisionId
                  where policy_id = :id
-                """, Map.of("id", SUCCESSOR));
+                """, Map.of("id", SUCCESSOR, "digest", digest, "decisionId", decisionId));
     }
 
     private UUID seedOpenFinding(Tenant tenant, String policyId, UUID subject, String displayId) {

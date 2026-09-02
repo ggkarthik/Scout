@@ -51,7 +51,8 @@ export type Finding = {
   closedBy?: string;
   closedReason?: 'MANUAL_FIXED' | 'MANUAL_FALSE_POSITIVE' | 'MANUAL_ACCEPTED_RISK' |
     'AUTO_NOT_OBSERVED' | 'AUTO_COMPONENT_REMOVED' | 'AUTO_ASSET_RETIRED' |
-    'AUTO_DUPLICATE' | 'AUTO_SOURCE_DISABLED' | 'AUTO_SUPPRESSED_BY_RULE';
+    'AUTO_DUPLICATE' | 'AUTO_SOURCE_DISABLED' | 'AUTO_POLICY_PLATFORM_DEPRECATED' |
+    'AUTO_POLICY_TENANT_DISABLED' | 'AUTO_SUPPRESSED_BY_RULE';
   closedRuleId?: string;
   ownershipSyncedAt?: string;
   ownership?: OwnershipSummary;

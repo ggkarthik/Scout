@@ -258,6 +258,16 @@ export function AiFindingDetailPage({ findingId }: AiFindingDetailPageProps) {
               <div className="fd3-kv-table">
                 <KVRow label="Finding">{finding.title}</KVRow>
                 <KVRow label="Status"><span className="status-pill">{finding.status.replace(/_/g, ' ')}</span></KVRow>
+                {finding.closedReason && <KVRow label="Closure reason">
+                  {finding.closedReason === 'AUTO_POLICY_PLATFORM_DEPRECATED'
+                    ? 'Closed — policy deprecated by platform'
+                    : finding.closedReason === 'AUTO_POLICY_TENANT_DISABLED'
+                      ? 'Closed — policy disabled for this tenant'
+                      : finding.closedReason.replace(/_/g, ' ')}
+                </KVRow>}
+                {(finding.closedReason === 'AUTO_POLICY_PLATFORM_DEPRECATED' || finding.closedReason === 'AUTO_POLICY_TENANT_DISABLED') && (
+                  <p className="fd3-muted">This closure does not indicate verified remediation.</p>
+                )}
                 <KVRow label="Analyst review">{finding.reviewDisposition.replace(/_/g, ' ')}</KVRow>
                 <KVRow label="Artifact">
                   <button type="button" className="btn-link" onClick={() => navigate(pathForInventoryAiAsset(finding.artifactId))}>
@@ -279,7 +289,7 @@ export function AiFindingDetailPage({ findingId }: AiFindingDetailPageProps) {
             ) : (
               <Panel title={policy.name}>
                 <div className="fd3-kv-table">
-                  <KVRow label="Policy ID"><span className="mono">{policy.id} · v{policy.version}</span></KVRow>
+                  <KVRow label="Policy ID"><span className="mono">{policy.id}</span></KVRow>
                   <KVRow label="Severity"><span className={severityClassName(policy.severity)}>{policy.severity}</span></KVRow>
                   <KVRow label="Coverage">{Math.round(policy.decisionCoverage * 100)}%</KVRow>
                   <KVRow label="Description">{policy.description}</KVRow>

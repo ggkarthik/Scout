@@ -655,6 +655,7 @@ public class AiSecurityApiService {
                                when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) severity,
                            f.status, f.title, f.evidence::text evidence_json,
                            f.first_observed_at, f.last_observed_at, f.closed_at resolved_at,
+                           f.closed_reason,
                            coalesce(review.disposition, 'UNREVIEWED') as disposition
                       from findings f
                       join finding_subjects fs on fs.finding_id = f.id and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
@@ -710,7 +711,6 @@ public class AiSecurityApiService {
     public List<PolicyResponse> policies(Tenant tenant) {
         return tenantExecution.run(tenant, () -> catalogPolicies(tenant).stream()
                 .map(this::policy)
-                .filter(PolicyResponse::available)
                 .toList());
     }
 
@@ -718,7 +718,6 @@ public class AiSecurityApiService {
         return tenantExecution.run(tenant, () -> catalogPolicies(tenant).stream()
                 .filter(definition -> definition.id().equals(policyId))
                 .map(this::policy)
-                .filter(PolicyResponse::available)
                 .findFirst()
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "AI Security policy not found")));
     }
@@ -736,7 +735,8 @@ public class AiSecurityApiService {
                 actor,
                 "Updated through the AI Security policy compatibility API");
         if (!enabled) {
-            canonicalFindings.closeForPolicy(tenant, policyId);
+            canonicalFindings.closeForPolicy(tenant, policyId,
+                    com.prototype.vulnwatch.domain.FindingCloseReason.AUTO_POLICY_TENANT_DISABLED);
         }
         auditEventService.record("ai_security.policy.updated", "ai_security_policy",
                 policyId, "{\"enabled\":" + enabled + "}");
@@ -940,11 +940,13 @@ public class AiSecurityApiService {
                 select distinct on (p.policy_id) p.policy_id,p.version,p.name,p.severity,p.artifact_types_json::text,
                        p.required_resource_families_json::text,p.description,p.remediation,p.framework_mappings_json::text
                   from platform.ai_grid_policy_versions p
-                  join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id and d.available=true
-                 where p.lifecycle in ('PUBLISHED', 'CANARY')
+                  join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id
+                   and (p.version=d.pinned_version or (d.pinned_version is null and p.package_digest is null))
+                 where p.lifecycle in ('PUBLISHED', 'CANARY', 'DEPRECATED')
+                   and (d.available=true or p.lifecycle='DEPRECATED')
                    and (d.rollout_stage='GENERAL_AVAILABILITY'
                         or (d.rollout_stage='CANARY' and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
-                 order by p.policy_id,p.published_at desc nulls last,p.version desc
+                 order by p.policy_id,p.version
                 """, Map.of("tenantId", tenant.getId().toString()), (rs, n) -> catalogDefinition(rs));
     }
 
@@ -953,11 +955,13 @@ public class AiSecurityApiService {
                 select p.policy_id,p.version,p.name,p.severity,p.artifact_types_json::text,
                        p.required_resource_families_json::text,p.description,p.remediation,p.framework_mappings_json::text
                   from platform.ai_grid_policy_versions p
-                  join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id and d.available=true
-                 where p.policy_id=:id and p.lifecycle in ('PUBLISHED', 'CANARY')
+                  join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id
+                   and (p.version=d.pinned_version or (d.pinned_version is null and p.package_digest is null))
+                 where p.policy_id=:id and p.lifecycle in ('PUBLISHED', 'CANARY', 'DEPRECATED')
+                   and (d.available=true or p.lifecycle='DEPRECATED')
                    and (d.rollout_stage='GENERAL_AVAILABILITY'
                         or (d.rollout_stage='CANARY' and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
-                 order by p.published_at desc nulls last,p.version desc limit 1
+                 order by p.version limit 1
                 """, Map.of("id", policyId, "tenantId", tenant.getId().toString()), (rs, n) -> catalogDefinition(rs));
         return definitions.stream().findFirst();
     }
@@ -1158,7 +1162,9 @@ public class AiSecurityApiService {
                        coalesce(open_counts.open_count, 0) as open_count,
                        coalesce(lifetime_counts.lifetime_count, 0) as lifetime_count,
                        quality.last_evaluated_at, quality.pass_count, quality.fail_count,
-                       quality.no_decision_count
+                       quality.no_decision_count,
+                       (select lifecycle from platform.ai_grid_policy_versions where policy_id=d.policy_id
+                         and version=d.pinned_version limit 1) as lifecycle
                   from platform.ai_grid_policy_distribution d
                   left join ai_grid_policy_selections s on s.policy_id = d.policy_id
                   left join (
@@ -1180,8 +1186,10 @@ public class AiSecurityApiService {
                  where d.policy_id = :policyId
                 """, Map.of("policyId", definition.id()));
         boolean available = Boolean.TRUE.equals(row.get("available"));
+        String lifecycle = (String) row.get("lifecycle");
         String selection = (String) row.get("selection");
-        boolean enabled = available && ("REQUIRED".equals(selection) || "ENABLED".equals(selection));
+        boolean enabled = available && !"DEPRECATED".equals(lifecycle)
+                && ("REQUIRED".equals(selection) || "ENABLED".equals(selection));
         long pass = number(row.get("pass_count"));
         long fail = number(row.get("fail_count"));
         long noDecision = number(row.get("no_decision_count"));
@@ -1193,7 +1201,8 @@ public class AiSecurityApiService {
                 number(row.get("open_count")), number(row.get("lifetime_count")),
                 row.get("last_evaluated_at") instanceof java.sql.Timestamp timestamp ? timestamp.toInstant() : null,
                 coverageGate.coverage(), coverageGate.threshold(), coverageGate.status(),
-                coverageGate.evaluatedArtifacts(), coverageGate.noDecisionCount());
+                coverageGate.evaluatedArtifacts(), coverageGate.noDecisionCount(), lifecycle,
+                "DEPRECATED".equals(lifecycle) ? "PLATFORM_DEPRECATED" : null);
     }
 
     static CoverageGate coverageGate(String severity, long pass, long fail, long noDecision) {
@@ -1212,6 +1221,7 @@ public class AiSecurityApiService {
                            when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) severity,
                        f.status, f.title, f.evidence::text evidence_json,
                        f.first_observed_at, f.last_observed_at, f.closed_at resolved_at,
+                       f.closed_reason,
                        coalesce(review.disposition, 'UNREVIEWED') as disposition
                   from findings f
                   join finding_subjects fs on fs.finding_id = f.id and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
@@ -1293,7 +1303,8 @@ public class AiSecurityApiService {
                 rs.getString("disposition"),
                 instant(rs, "first_observed_at"),
                 instant(rs, "last_observed_at"),
-                instant(rs, "resolved_at"));
+                instant(rs, "resolved_at"),
+                rs.getString("closed_reason"));
     }
 
     private RunResponse run(SyncRun run) {
@@ -1419,6 +1430,7 @@ public class AiSecurityApiService {
             UUID id, String displayId, String policyId, String policyVersion, UUID artifactId,
             String artifactName, String severity, String status, String title, Map<String, Object> evidence,
             String reviewDisposition, Instant firstObservedAt, Instant lastObservedAt, Instant resolvedAt
+            , String closedReason
     ) {
     }
 
@@ -1428,7 +1440,7 @@ public class AiSecurityApiService {
             Map<String, String> controlMappings, boolean available, boolean enabled,
             long openFindings, long lifetimeFindings, Instant lastEvaluatedAt, double decisionCoverage,
             double decisionCoverageThreshold, String decisionCoverageStatus,
-            long evaluatedArtifacts, long noDecisionCount
+            long evaluatedArtifacts, long noDecisionCount, String lifecycle, String inactiveReason
     ) {
     }
 

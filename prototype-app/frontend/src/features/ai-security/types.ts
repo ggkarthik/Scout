@@ -85,7 +85,7 @@ export type AiGridPolicy = {
   version: string;
   name: string;
   severity: string;
-  lifecycle: string;
+  lifecycle: 'DRAFT' | 'VALIDATED' | 'APPROVED' | 'CANARY' | 'PUBLISHED' | 'DEPRECATED' | 'RETIRED';
   workflowClass: string;
   selection: AiGridPolicySelection;
   controlObjectiveId: string;
@@ -110,7 +110,7 @@ export type AiGridPolicyDistribution = {
   version: string;
   name: string;
   severity: string;
-  lifecycle: string;
+  lifecycle: 'DRAFT' | 'VALIDATED' | 'APPROVED' | 'CANARY' | 'PUBLISHED' | 'DEPRECATED' | 'RETIRED';
   controlObjectiveId?: string;
   provider?: 'AWS' | 'AZURE' | 'MULTI_CLOUD' | string;
   evaluationMode?: string;
@@ -119,6 +119,9 @@ export type AiGridPolicyDistribution = {
   frameworkMappingsJson?: string;
   releaseFamily?: string | null;
   releaseWave?: string | null;
+  approvedPackageDigest?: string | null;
+  releaseDecisionId?: string | null;
+  inactiveReason?: 'PLATFORM_DEPRECATED' | 'TENANT_DISABLED' | null;
 };
 
 export type AiGridShippingStatus = {
@@ -139,6 +142,8 @@ export type AiGridPolicyRollout = {
   previousVersion: string | null;
   newVersion: string;
   packageDigest: string;
+  approvedDigest: string | null;
+  releaseDecisionId: string | null;
   status: string;
   createdAt: string;
   completedAt: string | null;
@@ -150,7 +155,7 @@ export type AiGridPlatformPolicyDetail = {
   name: string;
   description: string;
   severity: string;
-  lifecycle: string;
+  lifecycle: 'DRAFT' | 'VALIDATED' | 'APPROVED' | 'CANARY' | 'PUBLISHED' | 'DEPRECATED' | 'RETIRED';
   workflowClass: string;
   defaultSelection: AiGridPolicySelection;
   controlObjectiveId: string;
@@ -201,6 +206,9 @@ export type AiGridPolicyReleaseReadiness = {
   latestDecision: string | null;
   latestDecisionReason: string | null;
   latestDecisionAt: string | null;
+  latestApprovedDigest: string | null;
+  latestApprovalId: string | null;
+  latestApprovalRevoked: boolean;
 };
 
 export type AiGridPhase1PolicyCertification = {
@@ -472,6 +480,7 @@ export type AiSecurityFinding = {
   firstObservedAt: string;
   lastObservedAt: string;
   resolvedAt: string | null;
+  closedReason?: string | null;
 };
 
 export type AiSecurityPolicy = {
@@ -494,6 +503,8 @@ export type AiSecurityPolicy = {
   decisionCoverageStatus: 'PASS' | 'FAIL' | 'NO_DATA';
   evaluatedArtifacts: number;
   noDecisionCount: number;
+  lifecycle: 'DRAFT' | 'VALIDATED' | 'APPROVED' | 'CANARY' | 'PUBLISHED' | 'DEPRECATED' | 'RETIRED';
+  inactiveReason?: 'PLATFORM_DEPRECATED' | 'TENANT_DISABLED' | null;
 };
 
 export type PolicyScopeMode = 'ALL' | 'MATCH_RULES' | 'CUSTOM_LIST';

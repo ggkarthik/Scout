@@ -65,6 +65,7 @@ describe('AiPoliciesPage', () => {
       id: 'AGCF-AWS-001', version: '1.0.0', name: 'Public knowledge-base S3 source', severity: 'CRITICAL',
       artifactTypes: [], requiredResourceFamilies: [], description: 'Block public access and restrict the bucket policy.',
       remediation: 'Block public access and restrict the bucket policy.', controlMappings: {}, available: true, enabled: true,
+      lifecycle: 'PUBLISHED',
       openFindings: 0, lifetimeFindings: 0, lastEvaluatedAt: null, decisionCoverage: 1, decisionCoverageThreshold: 1,
       decisionCoverageStatus: 'PASS', evaluatedArtifacts: 1, noDecisionCount: 0,
     }]);
@@ -91,6 +92,7 @@ describe('AiPoliciesPage', () => {
       id: 'AGCF-AWS-013', version: '1.0.0', name: 'Sensitive-data agent lacks PII guardrail', severity: 'CRITICAL',
       artifactTypes: [], requiredResourceFamilies: [], description: 'Require a PII guardrail.',
       remediation: 'Attach a PII guardrail.', controlMappings: {}, available: true, enabled: true,
+      lifecycle: 'PUBLISHED',
       openFindings: 0, lifetimeFindings: 0, lastEvaluatedAt: null, decisionCoverage: 1, decisionCoverageThreshold: 1,
       decisionCoverageStatus: 'PASS', evaluatedArtifacts: 1, noDecisionCount: 0,
     }]);

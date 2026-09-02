@@ -18,6 +18,7 @@ import com.prototype.vulnwatch.service.RiskPolicyService;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
@@ -63,6 +64,21 @@ class AiGridFindingServiceTest {
         service.refreshProjectionAfterCommit(tenant);
 
         verify(projections).refreshTenant(tenant);
+    }
+
+    @Test
+    void policyDeprecationUsesThePlatformDeprecationCloseReason() {
+        Finding finding = mock(Finding.class);
+        when(findings.findOpenAiFindingsByTenantAndPolicy(tenant, "POLICY")).thenReturn(List.of(finding));
+
+        int closed = service.closeForPolicy(tenant, "POLICY", FindingCloseReason.AUTO_POLICY_PLATFORM_DEPRECATED);
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, closed);
+        verify(workflow).autoCloseFinding(org.mockito.ArgumentMatchers.eq(finding),
+                org.mockito.ArgumentMatchers.eq(FindingCloseReason.AUTO_POLICY_PLATFORM_DEPRECATED),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyMap(),
+                org.mockito.ArgumentMatchers.any());
+        verify(findings).saveAll(List.of(finding));
     }
 
     private AiGridFindingService.AssessmentResult result(String selection, String decision) {

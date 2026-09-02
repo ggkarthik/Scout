@@ -517,25 +517,50 @@ class AiSecurityObservationPostgresIntegrationTest {
                     default_selection, artifact_types_json, required_capabilities_json,
                     required_relationships_json, required_resource_families_json, required_facts_json,
                     predicate_json, reason_code, remediation, framework_mappings_json,
-                    parameter_definitions_json, native_kinds_json, scope_resolution, published_at)
-                select 'AI_GRID_COVERAGE_OMISSION_TEST', version, 'Coverage omission test', description,
-                       severity, 'PUBLISHED', workflow_class, 'PREVIEW', artifact_types_json,
+                    parameter_definitions_json, native_kinds_json, scope_resolution, package_digest, published_at)
+                select 'AI_GRID_COVERAGE_OMISSION_TEST', '1.0.0', 'Coverage omission test', description,
+                       severity, 'VALIDATED', workflow_class, 'PREVIEW', artifact_types_json,
                        required_capabilities_json, required_relationships_json,
                        required_resource_families_json, required_facts_json, predicate_json,
                        'AI_GRID_COVERAGE_OMISSION', remediation, framework_mappings_json,
-                       parameter_definitions_json, native_kinds_json, scope_resolution, now()
+                       parameter_definitions_json, native_kinds_json, scope_resolution,
+                       'integration-test-coverage-omission-digest', null
                   from platform.ai_grid_policy_versions
                  where policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL' and version = '2.0.0'
                 on conflict do nothing
                 """, Map.of());
         jdbc.update("""
+                insert into platform.ai_grid_policy_release_decisions
+                    (id, policy_id, policy_version, package_digest, decision, reason, decided_by)
+                select md5('AI_GRID_COVERAGE_OMISSION_TEST:1.0.0')::uuid,
+                       policy_id, version, package_digest, 'APPROVED',
+                       'Integration-test package approval', 'integration-test'
+                  from platform.ai_grid_policy_versions
+                 where policy_id = 'AI_GRID_COVERAGE_OMISSION_TEST' and version = '1.0.0'
+                on conflict do nothing
+                """, Map.of());
+        jdbc.update("""
+                update platform.ai_grid_policy_versions
+                   set lifecycle='PUBLISHED', published_at=now(), approved_by='integration-test', approved_at=now()
+                 where policy_id = 'AI_GRID_COVERAGE_OMISSION_TEST' and version = '1.0.0'
+                """, Map.of());
+        jdbc.update("""
                 insert into platform.ai_grid_policy_distribution
-                    (policy_id, available, default_selection, rollout_stage, updated_by)
-                values ('AI_GRID_COVERAGE_OMISSION_TEST', true, 'PREVIEW', 'GENERAL_AVAILABILITY', 'integration-test')
+                    (policy_id, available, default_selection, rollout_stage, pinned_version,
+                     approved_package_digest, release_decision_id, updated_by)
+                select 'AI_GRID_COVERAGE_OMISSION_TEST', true, 'PREVIEW', 'GENERAL_AVAILABILITY', '1.0.0',
+                       p.package_digest, r.id, 'integration-test'
+                  from platform.ai_grid_policy_versions p
+                  join platform.ai_grid_policy_release_decisions r
+                    on r.policy_id=p.policy_id and r.policy_version=p.version
+                   and r.decision='APPROVED' and r.package_digest=p.package_digest
+                 where p.policy_id='AI_GRID_COVERAGE_OMISSION_TEST' and p.version='1.0.0'
                 on conflict (policy_id) do update set
                     available = excluded.available,
                     default_selection = excluded.default_selection,
                     rollout_stage = excluded.rollout_stage,
+                    approved_package_digest = excluded.approved_package_digest,
+                    release_decision_id = excluded.release_decision_id,
                     updated_by = excluded.updated_by,
                     updated_at = now()
                 """, Map.of());

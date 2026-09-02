@@ -66,13 +66,18 @@ public class AiGridFindingService {
      */
     @Transactional
     public int closeForPolicy(Tenant tenant, String policyId) {
+        return closeForPolicy(tenant, policyId, FindingCloseReason.AUTO_POLICY_NOT_OWNER_FACING);
+    }
+
+    @Transactional
+    public int closeForPolicy(Tenant tenant, String policyId, FindingCloseReason reason) {
         List<Finding> candidates = findings.findOpenAiFindingsByTenantAndPolicy(tenant, policyId);
         Instant closedAt = Instant.now();
         for (Finding finding : candidates) {
             workflow.autoCloseFinding(
                     finding,
-                    FindingCloseReason.AUTO_POLICY_NOT_OWNER_FACING,
-                    "AI finding auto-closed because its policy is no longer owner-facing",
+                    reason,
+                    "AI finding auto-closed because the policy is inactive",
                     Map.of("policyId", policyId),
                     closedAt);
         }

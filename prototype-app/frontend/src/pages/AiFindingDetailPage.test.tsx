@@ -60,6 +60,7 @@ function buildPolicy(overrides: Partial<AiSecurityPolicy> = {}): AiSecurityPolic
     version: '1.0.0',
     name: 'Azure RAI policy contains a non-blocking filter',
     severity: 'HIGH',
+    lifecycle: 'PUBLISHED',
     artifactTypes: ['OTHER_AI_ARTIFACT'],
     requiredResourceFamilies: ['AZURE_RAI_POLICIES'],
     description: 'A guardrail RAI policy filter is configured to annotate rather than block.',
