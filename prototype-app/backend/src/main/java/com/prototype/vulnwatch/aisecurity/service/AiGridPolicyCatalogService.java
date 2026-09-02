@@ -220,7 +220,8 @@ public class AiGridPolicyCatalogService {
               from platform.ai_grid_policy_distribution d join lateral (
                   select * from platform.ai_grid_policy_versions p where p.policy_id=d.policy_id
                   order by p.published_at desc nulls last,p.version desc limit 1) p on true
-             where (cast(:releaseFamily as text) is null or p.release_family = cast(:releaseFamily as text))
+             where ((cast(:releaseFamily as text) is null and p.release_family in ('AGCF_PHASE_1', 'AGCF_PHASE_2'))
+                    or p.release_family = cast(:releaseFamily as text))
                and (cast(:lifecycle as text) is null or p.lifecycle = cast(:lifecycle as text))
              order by p.provider,p.policy_id
             """, new MapSqlParameterSource().addValue("releaseFamily", family).addValue("lifecycle", lifecycleFilter),
