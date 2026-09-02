@@ -63,7 +63,13 @@ public class AiGridPolicyDeprecationService {
                      where policy_id = :policyId and lifecycle <> 'DEPRECATED'
                      order by created_at desc, version desc for update
                     """, Map.of("policyId", policyId), (rs, row) -> rs.getString(1));
-            if (versions.isEmpty()) throw notFound("AI Grid policy not found or already deprecated");
+            if (versions.isEmpty()) {
+                Deprecation completedWhileWaiting = byIdempotencyKey(command.idempotencyKey());
+                if (completedWhileWaiting != null && completedWhileWaiting.policyId().equals(policyId)) {
+                    return completedWhileWaiting;
+                }
+                throw notFound("AI Grid policy not found or already deprecated");
+            }
             String version = versions.get(0);
             UUID id = UUID.randomUUID();
             jdbc.update("""
