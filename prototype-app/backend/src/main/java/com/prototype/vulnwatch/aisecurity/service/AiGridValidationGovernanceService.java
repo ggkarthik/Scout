@@ -642,7 +642,12 @@ public class AiGridValidationGovernanceService {
                 """, rs -> rs.next() ? rs.getObject(1, UUID.class) : null));
             if (snapshotRunId == null) throw conflict("CANARY cohort tenant lacks a complete snapshot: " + tenant.getSlug());
         }
+        boolean publishAll = command != null && command.publishAll();
+        String rolloutStage = publishAll ? "GENERAL_AVAILABILITY" : "CANARY";
+        // GA is not a canary cohort. Keep the target list in the release binding for
+        // audit/rollout work, but expose an empty canary list in distribution metadata.
         String tenantIdsJson = "[" + tenantIds.stream().map(id -> "\"" + id + "\"").collect(java.util.stream.Collectors.joining(",")) + "]";
+        String canaryTenantIdsJson = publishAll ? "[]" : tenantIdsJson;
         return TenantContext.runAsPlatform(() -> transactions.execute(status -> {
             String version = singleCurrentVersion(policyId);
             PolicyCandidate candidate = policyCandidate(policyId, version);
@@ -658,8 +663,8 @@ public class AiGridValidationGovernanceService {
             if (approvalId == null) throw conflict("A current digest-bound approval is required before publishing");
             if (!"APPROVED".equals(candidate.lifecycle())) throw conflict("Policy lifecycle must be APPROVED");
             UUID bindingId = UUID.randomUUID();
-            String distribution = "{\"available\":true,\"rolloutStage\":\"CANARY\",\"canaryTenantIds\":"
-                    + tenantIdsJson + ",\"pinnedVersion\":\"" + version + "\"}";
+            String distribution = "{\"available\":true,\"rolloutStage\":\"" + rolloutStage + "\",\"canaryTenantIds\":"
+                    + canaryTenantIdsJson + ",\"targetTenantIds\":" + tenantIdsJson + ",\"pinnedVersion\":\"" + version + "\"}";
             try {
                 jdbc.update("""
                         insert into platform.ai_grid_policy_release_bindings
@@ -682,13 +687,13 @@ public class AiGridValidationGovernanceService {
                     insert into platform.ai_grid_policy_distribution
                         (policy_id,available,default_selection,rollout_stage,canary_tenant_ids_json,pinned_version,
                          approved_package_digest,release_decision_id,updated_by)
-                    values (:policyId,true,:selection,'CANARY',cast(:tenants as jsonb),:version,
+                    values (:policyId,true,:selection,:stage,cast(:canaryTenants as jsonb),:version,
                             :packageDigest,:approval,:actor)
-                    on conflict (policy_id) do update set available=true, rollout_stage='CANARY',
+                    on conflict (policy_id) do update set available=true, rollout_stage=excluded.rollout_stage,
                         canary_tenant_ids_json=excluded.canary_tenant_ids_json, pinned_version=excluded.pinned_version,
                         updated_by=excluded.updated_by, updated_at=now()
                     """, new MapSqlParameterSource().addValue("policyId", policyId).addValue("selection", defaultSelection(policyId, version))
-                    .addValue("tenants", tenantIdsJson).addValue("version", version).addValue("packageDigest", packageDigest)
+                    .addValue("stage", rolloutStage).addValue("canaryTenants", canaryTenantIdsJson).addValue("version", version).addValue("packageDigest", packageDigest)
                     .addValue("approval", approvalId).addValue("actor", actor));
             UUID rolloutId = UUID.randomUUID();
             jdbc.update("""
