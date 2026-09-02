@@ -12,6 +12,7 @@ import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceServ
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.LabelCommand;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.PrecisionReviewCommand;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.PrecisionSampleCommand;
+import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.PublishCommand;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.ResultCommand;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.RunCommand;
 import com.prototype.vulnwatch.aisecurity.service.AiGridPolicyDeprecationService;
@@ -210,19 +211,30 @@ class AiGridValidationGovernancePostgresIntegrationTest {
         assertEquals(run.id(), ready.answerKeyRunId());
         assertEquals(review.id(), ready.precisionReviewId());
 
-        var released = governance.publishPolicy(policyId, version, "release-owner");
-        assertTrue(released.published());
-        assertEquals(run.id(), released.answerKeyRunId());
-        assertEquals(review.id(), released.precisionReviewId());
+        var approval = governance.approvePolicy(policyId, "release-owner");
+        assertTrue(approval.approved());
+        var released = governance.publishApprovedPolicy(policyId,
+                new PublishCommand(List.of(provenance.tenantId())), "release-owner");
+        assertEquals(approval.approvalId(), released.approvalId());
+        assertEquals(List.of(provenance.tenantId()), released.targetTenantIds());
         assertEquals("PUBLISHED", TenantContext.runAsPlatform(() -> jdbc.queryForObject("""
                 select lifecycle from platform.ai_grid_policy_versions
                  where policy_id = :policyId and version = :version
                 """, Map.of("policyId", policyId, "version", version), String.class)));
-        assertEquals(2, TenantContext.runAsPlatform(() -> jdbc.queryForObject("""
+        assertEquals(1, TenantContext.runAsPlatform(() -> jdbc.queryForObject("""
                 select count(*) from platform.ai_grid_policy_release_decisions
                  where policy_id = :policyId and policy_version = :version
                 """, Map.of("policyId", policyId, "version", version), Integer.class)));
         assertEquals("APPROVED", governance.releaseReadiness(policyId, version).latestDecision());
+        governance.revokeReleaseBinding(released.releaseBindingId(), "Canary review complete", "release-owner");
+        assertEquals("REVOKED", TenantContext.runAsPlatform(() -> jdbc.queryForObject("""
+                select state from platform.ai_grid_policy_release_bindings where id = :id
+                """, Map.of("id", released.releaseBindingId()), String.class)));
+        assertEquals(1, TenantContext.runAsPlatform(() -> jdbc.queryForObject("""
+                select count(*) from platform.ai_grid_policy_rollout_tasks task
+                 join platform.ai_grid_policy_rollouts rollout on rollout.id = task.rollout_id
+                 where rollout.release_id = :binding and task.status = 'CANCELLED'
+                """, Map.of("binding", released.releaseBindingId().toString()), Integer.class)));
     }
 
     @Test
