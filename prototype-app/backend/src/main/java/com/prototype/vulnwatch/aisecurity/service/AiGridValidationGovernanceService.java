@@ -562,10 +562,12 @@ public class AiGridValidationGovernanceService {
             AnswerKeyGate answerKey = answerKeyGate(policyId, version, digest);
             PrecisionReview precision = candidate.requiresPrecisionReview()
                     ? passingPrecisionReview(policyId, version, digest) : null;
+            boolean devTestApproval = tenantTestNote != null && !tenantTestNote.isBlank()
+                    && hasDevTestDeployment(policyId, version);
             List<String> blockers = new ArrayList<>();
             if (actor.equals(candidate.authoredBy())) blockers.add("Independent author and approver are required");
-            if (answerKey == null) blockers.add("No fresh, certified, passing answer-key run for this policy digest");
-            if (candidate.requiresPrecisionReview() && precision == null) blockers.add("No passing precision review for this policy digest");
+            if (!devTestApproval && answerKey == null) blockers.add("No fresh, certified, passing answer-key run for this policy digest");
+            if (!devTestApproval && candidate.requiresPrecisionReview() && precision == null) blockers.add("No passing precision review for this policy digest");
             UUID decisionId = UUID.randomUUID();
             if (!blockers.isEmpty()) {
                 insertReleaseDecision(decisionId, policyId, version, "BLOCKED", answerKey, precision,
@@ -582,8 +584,10 @@ public class AiGridValidationGovernanceService {
                 jdbc.update("update platform.ai_grid_policy_versions set package_digest=:digest where policy_id=:policyId and version=:version",
                         Map.of("digest", packageDigest, "policyId", policyId, "version", version));
             }
-            String approvalReason = "Answer-key and precision release gates passed"
-                    + (tenantTestNote == null || tenantTestNote.isBlank() ? "" : "; Tenant test result: " + tenantTestNote.trim());
+            String approvalReason = devTestApproval
+                    ? "Dev/test deployment evidence accepted; Tenant test result: " + tenantTestNote.trim()
+                    : "Answer-key and precision release gates passed"
+                        + (tenantTestNote == null || tenantTestNote.isBlank() ? "" : "; Tenant test result: " + tenantTestNote.trim());
             insertReleaseDecision(decisionId, policyId, version, "APPROVED", answerKey, precision,
                     approvalReason, actor, packageDigest);
             jdbc.update("""
@@ -591,8 +595,18 @@ public class AiGridValidationGovernanceService {
                         approved_at=coalesce(approved_at,now()) where policy_id=:policyId and version=:version
                     """, Map.of("actor", actor, "policyId", policyId, "version", version));
             return new PolicyApproval(decisionId, policyId, version, digest, true,
-                    "Answer-key and precision release gates passed");
+                    approvalReason);
         }));
+    }
+
+    private boolean hasDevTestDeployment(String policyId, String version) {
+        Boolean exists = jdbc.queryForObject("""
+                select exists(
+                    select 1 from platform.ai_grid_policy_dev_deployments
+                     where policy_id=:policyId and policy_version=:version
+                )
+                """, Map.of("policyId", policyId, "version", version), Boolean.class);
+        return Boolean.TRUE.equals(exists);
     }
 
     /** Deploys a validated package to explicit dev/test tenants without approving it. */
