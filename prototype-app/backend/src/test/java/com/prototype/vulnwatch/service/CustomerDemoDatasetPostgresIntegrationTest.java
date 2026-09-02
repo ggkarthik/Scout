@@ -131,7 +131,7 @@ class CustomerDemoDatasetPostgresIntegrationTest {
             assertEquals(4, count("fix_records"));
             assertEquals(2, count("campaigns"));
             assertEquals(4, count("campaign_vulnerabilities"));
-            assertEquals(5, count("audit_events"));
+            assertEquals(6, count("audit_events"));
         });
 
         UUID aiBomId = tenantSchemaExecutionService.run(tenant, () -> jdbcTemplate.queryForObject("""

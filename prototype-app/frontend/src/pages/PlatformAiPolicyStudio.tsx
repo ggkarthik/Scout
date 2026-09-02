@@ -22,8 +22,6 @@ function statusClass(value: string): string {
   return `policy-status policy-status--${value.toLowerCase().replace(/_/g, '-')}`;
 }
 
-function parseCohort(value: string): string[] { try { return JSON.parse(value || '[]') as string[]; } catch { return []; } }
-
 export function PlatformAiPolicyStudio() {
   const client = useQueryClient();
   const [provider, setProvider] = React.useState('ALL');
@@ -32,23 +30,29 @@ export function PlatformAiPolicyStudio() {
   const [owasp, setOwasp] = React.useState('ALL');
   const [query, setQuery] = React.useState('');
   const [activePolicyId, setActivePolicyId] = React.useState<string | null>(null);
-  const catalog = useQuery({ queryKey: ['platform-ai-grid-policies'], queryFn: () => api.listPlatformAiGridPolicies({ releaseFamily: 'AGCF_PHASE_1', lifecycle: 'PUBLISHED' }) });
+  const catalog = useQuery({ queryKey: ['platform-ai-grid-policies'], queryFn: () => api.listPlatformAiGridPolicies({ releaseFamily: 'AGCF_PHASE_1' }) });
   const shipping = useQuery({ queryKey: ['platform-ai-grid-shipping-status'], queryFn: api.getPlatformAiGridShippingStatus });
   const tenants = useQuery({ queryKey: ['platform-ai-grid-active-tenants'], queryFn: api.listTenants });
   const rollouts = useQuery({ queryKey: ['platform-ai-grid-policy-rollouts'], queryFn: api.listPlatformAiGridPolicyRollouts });
-  const update = useMutation({
-    mutationFn: ({ policy, patch, canaryTenantIds }: { policy: AiGridPolicyDistribution; patch: Partial<AiGridPolicyDistribution>; canaryTenantIds: string[] }) =>
-      api.updatePlatformAiGridPolicyDistribution(policy.policyId, {
-        available: patch.available ?? policy.available,
-        defaultSelection: patch.defaultSelection ?? policy.defaultSelection,
-        rolloutStage: patch.rolloutStage ?? policy.rolloutStage,
-        pinnedVersion: patch.pinnedVersion ?? policy.pinnedVersion,
-        canaryTenantIds,
-      }),
+  const invalidateLifecycle = () => void Promise.all([
+    client.invalidateQueries({ queryKey: ['platform-ai-grid-policies'] }),
+    client.invalidateQueries({ queryKey: ['platform-ai-grid-shipping-status'] }),
+    client.invalidateQueries({ queryKey: ['platform-ai-grid-policy-rollouts'] }),
+  ]);
+  const approve = useMutation({
+    mutationFn: api.approvePlatformAiGridPolicy,
     onSuccess: () => void Promise.all([
       client.invalidateQueries({ queryKey: ['platform-ai-grid-policies'] }),
       client.invalidateQueries({ queryKey: ['platform-ai-grid-shipping-status'] }),
     ]),
+  });
+  const publish = useMutation({
+    mutationFn: ({ policyId, targetTenantIds }: { policyId: string; targetTenantIds: string[] }) => api.publishPlatformAiGridPolicy(policyId, targetTenantIds),
+    onSuccess: invalidateLifecycle,
+  });
+  const deprecate = useMutation({
+    mutationFn: ({ policyId, reason }: { policyId: string; reason: string }) => api.deprecatePlatformAiGridPolicy(policyId, reason),
+    onSuccess: invalidateLifecycle,
   });
   const retry = useMutation({
     mutationFn: api.retryPlatformAiGridPolicyRollout,
@@ -78,7 +82,7 @@ export function PlatformAiPolicyStudio() {
     {shipping.data?.blockers.length ? <p className="notice error">{shipping.data.blockers.join(' · ')}</p> : null}
 
     <section className="panel policy-catalog-panel">
-      <div className="panel-header policy-catalog-header"><div><h3>Policy catalog</h3><p className="panel-caption">Select a policy to manage its availability, default, rollout stage, and canary cohort without editing the table in place.</p></div>
+      <div className="panel-header policy-catalog-header"><div><h3>Policy catalog</h3><p className="panel-caption">Approve a validated policy, publish it to an explicit tenant canary cohort, or deprecate it through its policy-ID lifecycle.</p></div>
         <span className="policy-results-count">{policies.length} of {catalog.data?.length ?? 0} policies</span></div>
       <div className="policy-filter-bar" aria-label="Policy catalog filters">
         <label className="policy-search"><span>Find policy</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, ID, provider, or OWASP mapping" /></label>
@@ -98,10 +102,12 @@ export function PlatformAiPolicyStudio() {
             <td><span className={statusClass(policy.defaultSelection)}>{policy.defaultSelection}</span></td><td><span className={statusClass(policy.rolloutStage)}>{rolloutLabel(policy.rolloutStage)}</span></td>
             <td><button type="button" className="btn btn-secondary btn-sm" aria-label={`Manage ${policy.name}`} onClick={() => setActivePolicyId(policy.policyId)}>Manage</button></td>
           </tr>)}</tbody></table></div>
-        <PolicyConfigurationPanel key={activePolicy?.policyId ?? 'empty'} policy={activePolicy} tenantIds={activeTenantIds} saving={update.isPending}
-          onClose={() => setActivePolicyId(null)} onSave={(policy, patch, cohort) => update.mutate({ policy, patch, canaryTenantIds: cohort })} />
+        <PolicyConfigurationPanel key={activePolicy?.policyId ?? 'empty'} policy={activePolicy} tenantIds={activeTenantIds}
+          saving={approve.isPending || publish.isPending || deprecate.isPending}
+          onClose={() => setActivePolicyId(null)} onApprove={(policy) => approve.mutate(policy.policyId)}
+          onPublish={(policy, targetTenantIds) => publish.mutate({ policyId: policy.policyId, targetTenantIds })}
+          onDeprecate={(policy, reason) => deprecate.mutate({ policyId: policy.policyId, reason })} />
       </div>
-      {catalog.data && catalog.data.length !== 76 ? <p className="notice error">Catalog mismatch: expected 76 shipped policies, found {catalog.data.length}.</p> : null}
     </section>
 
     <section className="panel policy-rollout-panel"><div className="panel-header"><div><h3>Automatic rollout queue</h3><p className="panel-caption">Queued jobs wait for a complete stored connector snapshot; catalog shipping remains available while they do.</p></div><span className="policy-results-count">{rollouts.data?.filter((item) => item.status !== 'COMPLETED').length ?? 0} active</span></div>
@@ -117,23 +123,18 @@ function ShippingSummary({ status }: { status?: { expectedPolicies: number; inst
   return <section className="summary-strip policy-shipping-summary" aria-label="Shipping summary"><span><strong>{value('expectedPolicies')}</strong> catalog packages</span><span><strong>{value('installedPolicies')}</strong> installed</span><span><strong>{value('publishedPolicies')}</strong> published</span><span><strong>{value('distributedPolicies')}</strong> distributed</span><span><strong>{value('digestMatchedPolicies')}</strong> digest verified</span><span><strong>{value('rolloutPendingTenants')}</strong> tenant jobs pending</span></section>;
 }
 
-function PolicyConfigurationPanel({ policy, tenantIds, saving, onClose, onSave }: { policy: AiGridPolicyDistribution | null; tenantIds: string[]; saving: boolean; onClose: () => void; onSave: (policy: AiGridPolicyDistribution, patch: Partial<AiGridPolicyDistribution>, cohort: string[]) => void }) {
-  const [available, setAvailable] = React.useState(policy?.available ?? true);
-  const [defaultSelection, setDefaultSelection] = React.useState<AiGridPolicySelection>(policy?.defaultSelection ?? 'ENABLED');
-  const [rolloutStage, setRolloutStage] = React.useState<AiGridPolicyDistribution['rolloutStage']>(policy?.rolloutStage ?? 'GENERAL_AVAILABILITY');
-  const [cohort, setCohort] = React.useState<string[]>(() => policy ? parseCohort(policy.canaryTenantIdsJson) : []);
+function PolicyConfigurationPanel({ policy, tenantIds, saving, onClose, onApprove, onPublish, onDeprecate }: { policy: AiGridPolicyDistribution | null; tenantIds: string[]; saving: boolean; onClose: () => void; onApprove: (policy: AiGridPolicyDistribution) => void; onPublish: (policy: AiGridPolicyDistribution, targetTenantIds: string[]) => void; onDeprecate: (policy: AiGridPolicyDistribution, reason: string) => void }) {
+  const [cohort, setCohort] = React.useState<string[]>([]);
+  const [deprecationReason, setDeprecationReason] = React.useState('');
   const detail = useQuery({ queryKey: ['platform-ai-grid-policy-detail', policy?.policyId, policy?.version], queryFn: () => api.getPlatformAiGridPolicyDetail(policy!.policyId, policy!.version), enabled: policy != null });
-  if (!policy) return <aside className="policy-configuration-empty"><span className="ai-security-kicker">Configuration</span><h4>Select a policy</h4><p>Choose <strong>Manage</strong> beside a policy to review its rollout and make a single, intentional update.</p></aside>;
-  const hasCanaryCohort = rolloutStage !== 'CANARY' || cohort.length > 0;
+  if (!policy) return <aside className="policy-configuration-empty"><span className="ai-security-kicker">Lifecycle</span><h4>Select a policy</h4><p>Choose <strong>Manage</strong> beside a policy to approve, publish to a canary cohort, or deprecate it.</p></aside>;
   return <aside className="policy-configuration-panel" aria-label={`${policy.name} configuration`}><div className="policy-configuration-heading"><div><span className="ai-security-kicker">Configuration</span><h4>{policy.name}</h4><p>{policy.policyId} · v{policy.version}</p></div><button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>Close</button></div>
     <div className="policy-detail-summary"><span className={statusClass(policy.severity)}>{policy.severity}</span><span>{detail.data?.description ?? 'Loading policy intent…'}</span></div>
-    <div className="policy-config-fields"><label className="policy-toggle"><input type="checkbox" checked={available} onChange={(event) => setAvailable(event.target.checked)} /><span><strong>Available to tenants</strong><small>Tenants can only select policies that are available.</small></span></label>
-      <label>Tenant default<select value={defaultSelection} onChange={(event) => setDefaultSelection(event.target.value as AiGridPolicySelection)}>{DEFAULTS.map((value) => <option key={value}>{value}</option>)}</select></label>
-      <label>Rollout stage<select value={rolloutStage} onChange={(event) => setRolloutStage(event.target.value as AiGridPolicyDistribution['rolloutStage'])}>{ROLLOUTS.map((value) => <option key={value} value={value}>{rolloutLabel(value)}</option>)}</select></label>
-      {rolloutStage === 'CANARY' ? <label>Canary tenants<select multiple value={cohort} aria-label={`${policy.policyId} canary tenants`} onChange={(event) => setCohort(Array.from(event.target.selectedOptions, (option) => option.value))}>{tenantIds.map((id) => <option key={id} value={id}>{id}</option>)}</select><small>Select at least one active tenant for a canary rollout.</small></label> : null}
+    <div className="policy-config-fields"><label>Canary tenants<select multiple value={cohort} aria-label={`${policy.policyId} canary tenants`} onChange={(event) => setCohort(Array.from(event.target.selectedOptions, (option) => option.value))}>{tenantIds.map((id) => <option key={id} value={id}>{id}</option>)}</select><small>Choose one or more active tenants. Publishing never targets only the Default Workspace unless a caller intentionally uses the no-body API fallback.</small></label>
+      <label>Deprecation reason<input value={deprecationReason} onChange={(event) => setDeprecationReason(event.target.value)} placeholder="Why this policy is being retired" /></label>
     </div>
-    {rolloutStage === 'CANARY' && !hasCanaryCohort ? <p className="notice error">Choose at least one tenant before saving this canary rollout.</p> : null}
-    <div className="button-row"><button type="button" className="btn btn-primary" disabled={saving || !hasCanaryCohort} onClick={() => onSave(policy, { available, defaultSelection, rolloutStage, pinnedVersion: policy.version }, cohort)}>{saving ? 'Saving…' : 'Save policy settings'}</button><button type="button" className="btn btn-secondary" disabled={saving} onClick={() => { const next = rolloutStage === 'PAUSED' ? 'GENERAL_AVAILABILITY' : 'PAUSED'; setRolloutStage(next); onSave(policy, { rolloutStage: next }, cohort); }}>{rolloutStage === 'PAUSED' ? 'Resume rollout' : 'Pause rollout'}</button></div>
+    {cohort.length === 0 ? <p className="notice error">Choose at least one tenant before publishing a canary.</p> : null}
+    <div className="button-row"><button type="button" className="btn btn-secondary" disabled={saving || policy.lifecycle !== 'VALIDATED'} onClick={() => onApprove(policy)}>{saving ? 'Working…' : 'Approve policy'}</button><button type="button" className="btn btn-primary" disabled={saving || policy.lifecycle !== 'APPROVED' || cohort.length === 0} onClick={() => onPublish(policy, cohort)}>{saving ? 'Working…' : 'Publish canary'}</button><button type="button" className="btn btn-secondary" disabled={saving || policy.lifecycle === 'DEPRECATED' || deprecationReason.trim() === ''} onClick={() => onDeprecate(policy, deprecationReason.trim())}>{saving ? 'Working…' : 'Deprecate policy'}</button></div>
     <details className="policy-technical-details"><summary>Policy implementation details</summary><dl><dt>Control objective</dt><dd>{detail.data?.controlObjectiveId ?? policy.controlObjectiveId ?? '—'}</dd><dt>Evaluation mode</dt><dd>{detail.data?.evaluationMode ?? policy.evaluationMode ?? '—'}</dd><dt>Source</dt><dd>{detail.data?.packageSourceRef ?? 'Loading…'}</dd></dl></details>
   </aside>;
 }

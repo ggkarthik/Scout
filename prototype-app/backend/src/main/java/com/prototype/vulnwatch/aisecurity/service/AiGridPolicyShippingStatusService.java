@@ -39,8 +39,6 @@ public class AiGridPolicyShippingStatusService {
             List<String> blockers = new java.util.ArrayList<>();
             if (expected != 76) blockers.add("Expected 76 bundled policies but found " + expected);
             if (installed != expected) blockers.add("Bundled catalog is not fully installed");
-            if (published != expected) blockers.add("Bundled catalog is not fully published");
-            if (distributed != expected) blockers.add("Bundled catalog is not fully distributed and pinned");
             if (digestMatched != expected) blockers.add("One or more bundled package digests are missing or invalid");
             return new ShippingStatus(expected, installed, published, distributed, digestMatched, pending, List.copyOf(blockers));
         });

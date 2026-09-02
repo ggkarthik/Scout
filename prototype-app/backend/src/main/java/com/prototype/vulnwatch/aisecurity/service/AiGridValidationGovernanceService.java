@@ -4,8 +4,10 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.service.TenantContext;
 import com.prototype.vulnwatch.service.TenantSchemaExecutionService;
+import com.prototype.vulnwatch.service.TenantService;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -15,6 +17,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.LinkedHashSet;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -35,14 +38,16 @@ public class AiGridValidationGovernanceService {
     private final TransactionTemplate transactions;
     private final ObjectMapper objectMapper;
     private final TenantSchemaExecutionService tenantExecution;
+    private final TenantService tenants;
 
     public AiGridValidationGovernanceService(NamedParameterJdbcTemplate jdbc, TransactionTemplate transactions,
                                              ObjectMapper objectMapper,
-                                             TenantSchemaExecutionService tenantExecution) {
+                                             TenantSchemaExecutionService tenantExecution, TenantService tenants) {
         this.jdbc = jdbc;
         this.transactions = transactions;
         this.objectMapper = objectMapper;
         this.tenantExecution = tenantExecution;
+        this.tenants = tenants;
     }
 
     public AnswerKeyEnvironment createEnvironment(EnvironmentCommand command, String actor) {
@@ -538,6 +543,145 @@ public class AiGridValidationGovernanceService {
         return TenantContext.runAsPlatform(() -> digest(policyCandidate(policyId, version).digestMaterial()));
     }
 
+    /** Creates an immutable, digest-bound approval without exposing the policy to tenants. */
+    public PolicyApproval approvePolicy(String policyId, String actor) {
+        return TenantContext.runAsPlatform(() -> transactions.execute(status -> {
+            String version = singleCurrentVersion(policyId);
+            PolicyCandidate candidate = policyCandidate(policyId, version);
+            String digest = digest(candidate.digestMaterial());
+            AnswerKeyGate answerKey = answerKeyGate(policyId, version, digest);
+            PrecisionReview precision = candidate.requiresPrecisionReview()
+                    ? passingPrecisionReview(policyId, version, digest) : null;
+            List<String> blockers = new ArrayList<>();
+            if (actor.equals(candidate.authoredBy())) blockers.add("Independent author and approver are required");
+            if (answerKey == null) blockers.add("No fresh, certified, passing answer-key run for this policy digest");
+            if (candidate.requiresPrecisionReview() && precision == null) blockers.add("No passing precision review for this policy digest");
+            UUID decisionId = UUID.randomUUID();
+            if (!blockers.isEmpty()) {
+                insertReleaseDecision(decisionId, policyId, version, "BLOCKED", answerKey, precision,
+                        String.join("; ", blockers), actor, digest);
+                return new PolicyApproval(decisionId, policyId, version, digest, false, String.join("; ", blockers));
+            }
+            if (!List.of("VALIDATED", "APPROVED").contains(candidate.lifecycle())) {
+                String reason = "Policy lifecycle must be VALIDATED or APPROVED";
+                insertReleaseDecision(decisionId, policyId, version, "BLOCKED", answerKey, precision, reason, actor, digest);
+                return new PolicyApproval(decisionId, policyId, version, digest, false, reason);
+            }
+            jdbc.update("""
+                    update platform.ai_grid_policy_versions set lifecycle='APPROVED', approved_by=:actor,
+                        approved_at=coalesce(approved_at,now()) where policy_id=:policyId and version=:version
+                    """, Map.of("actor", actor, "policyId", policyId, "version", version));
+            insertReleaseDecision(decisionId, policyId, version, "APPROVED", answerKey, precision,
+                    "Answer-key and precision release gates passed", actor, digest);
+            return new PolicyApproval(decisionId, policyId, version, digest, true,
+                    "Answer-key and precision release gates passed");
+        }));
+    }
+
+    /** Publishes an already-approved policy to an explicit active canary cohort. */
+    public PolicyPublication publishApprovedPolicy(String policyId, PublishCommand command, String actor) {
+        List<UUID> tenantIds = command == null || command.targetTenantIds() == null || command.targetTenantIds().isEmpty()
+                ? List.of(tenants.getDefaultTenant().getId()) : command.targetTenantIds();
+        if (new LinkedHashSet<>(tenantIds).size() != tenantIds.size()) throw badRequest("CANARY cohort contains duplicate tenant IDs");
+        List<Tenant> cohort = tenantIds.stream().map(tenants::requireTenantUuid).toList();
+        for (Tenant tenant : cohort) {
+            if (!"ACTIVE".equals(tenant.getStatus())) throw conflict("CANARY cohort contains an inactive tenant");
+            UUID snapshotRunId = tenantExecution.run(tenant, () -> jdbc.query("""
+                select run_id from ai_grid_snapshot_manifests group by run_id
+                 order by max(observed_at) desc limit 1
+                """, rs -> rs.next() ? rs.getObject(1, UUID.class) : null));
+            if (snapshotRunId == null) throw conflict("CANARY cohort tenant lacks a complete snapshot: " + tenant.getSlug());
+        }
+        String tenantIdsJson = "[" + tenantIds.stream().map(id -> "\"" + id + "\"").collect(java.util.stream.Collectors.joining(",")) + "]";
+        return TenantContext.runAsPlatform(() -> transactions.execute(status -> {
+            String version = singleCurrentVersion(policyId);
+            PolicyCandidate candidate = policyCandidate(policyId, version);
+            String digest = digest(candidate.digestMaterial());
+            UUID approvalId = jdbc.query("""
+                    select id from platform.ai_grid_policy_release_decisions
+                     where policy_id=:policyId and policy_version=:version and decision='APPROVED'
+                       and approved_package_digest=:digest
+                     order by decided_at desc limit 1
+                    """, Map.of("policyId", policyId, "version", version, "digest", digest),
+                    rs -> rs.next() ? rs.getObject(1, UUID.class) : null);
+            if (approvalId == null) throw conflict("A current digest-bound approval is required before publishing");
+            if (!"APPROVED".equals(candidate.lifecycle())) throw conflict("Policy lifecycle must be APPROVED");
+            UUID bindingId = UUID.randomUUID();
+            String distribution = "{\"available\":true,\"rolloutStage\":\"CANARY\",\"canaryTenantIds\":"
+                    + tenantIdsJson + ",\"pinnedVersion\":\"" + version + "\"}";
+            try {
+                jdbc.update("""
+                        insert into platform.ai_grid_policy_release_bindings
+                            (id,approval_decision_id,policy_id,policy_version,approved_package_digest,
+                             distribution_snapshot_json,target_tenant_ids_json,bound_by)
+                        values (:id,:approval,:policyId,:version,:digest,cast(:distribution as jsonb),
+                                cast(:targets as jsonb),:actor)
+                        """, new MapSqlParameterSource().addValue("id", bindingId).addValue("approval", approvalId)
+                        .addValue("policyId", policyId).addValue("version", version).addValue("digest", digest)
+                        .addValue("distribution", distribution).addValue("targets", tenantIdsJson)
+                        .addValue("actor", actor));
+            } catch (org.springframework.dao.DuplicateKeyException ex) {
+                throw conflict("This approved policy is already bound for release");
+            }
+            jdbc.update("""
+                    update platform.ai_grid_policy_versions set lifecycle='PUBLISHED', published_at=now()
+                     where policy_id=:policyId and version=:version and lifecycle='APPROVED'
+                    """, Map.of("policyId", policyId, "version", version));
+            jdbc.update("""
+                    insert into platform.ai_grid_policy_distribution
+                        (policy_id,available,default_selection,rollout_stage,canary_tenant_ids_json,pinned_version,updated_by)
+                    values (:policyId,true,:selection,'CANARY',cast(:tenants as jsonb),:version,:actor)
+                    on conflict (policy_id) do update set available=true, rollout_stage='CANARY',
+                        canary_tenant_ids_json=excluded.canary_tenant_ids_json, pinned_version=excluded.pinned_version,
+                        updated_by=excluded.updated_by, updated_at=now()
+                    """, new MapSqlParameterSource().addValue("policyId", policyId).addValue("selection", defaultSelection(policyId, version))
+                    .addValue("tenants", tenantIdsJson).addValue("version", version).addValue("actor", actor));
+            UUID rolloutId = UUID.randomUUID();
+            jdbc.update("""
+                    insert into platform.ai_grid_policy_rollouts
+                        (id,release_id,release_type,policy_id,previous_version,new_version,package_digest,
+                         distribution_snapshot_json,status)
+                    values (:id,:binding,'POLICY_VERSION',:policyId,null,:version,:digest,cast(:distribution as jsonb),'PENDING')
+                    """, new MapSqlParameterSource().addValue("id", rolloutId).addValue("binding", bindingId.toString())
+                    .addValue("policyId", policyId).addValue("version", version).addValue("digest", digest).addValue("distribution", distribution));
+            for (UUID tenantId : tenantIds) {
+                jdbc.update("""
+                        insert into platform.ai_grid_policy_rollout_tasks (id,rollout_id,tenant_id)
+                        values (:id,:rolloutId,:tenantId)
+                        """, Map.of("id", UUID.randomUUID(), "rolloutId", rolloutId, "tenantId", tenantId));
+            }
+            return new PolicyPublication(policyId, version, digest, approvalId, bindingId, rolloutId, tenantIds);
+        }));
+    }
+
+    public void revokeReleaseBinding(UUID bindingId, String reason, String actor) {
+        requireText(reason, "reason");
+        TenantContext.runAsPlatform(() -> transactions.execute(status -> {
+            int changed = jdbc.update("""
+                    update platform.ai_grid_policy_release_bindings set state='REVOKED', revoked_at=now(),
+                        revoked_by=:actor, revocation_reason=:reason where id=:id and state='ACTIVE'
+                    """, Map.of("id", bindingId, "actor", actor, "reason", reason.trim()));
+            if (changed == 0) throw notFound("Active release binding not found");
+            jdbc.update("""
+                    update platform.ai_grid_policy_rollout_tasks set status='CANCELLED',
+                        failure_detail='Cancelled: release binding revoked', completed_at=now(), updated_at=now()
+                     where rollout_id in (select id from platform.ai_grid_policy_rollouts where release_id=:binding)
+                       and status in ('PENDING','FAILED','WAITING_FOR_SNAPSHOT')
+                    """, Map.of("binding", bindingId.toString()));
+            return null;
+        }));
+    }
+
+    public String policyDigest(String policyId) {
+        String version = TenantContext.runAsPlatform(() -> singleCurrentVersion(policyId));
+        return policyDigest(policyId, version);
+    }
+
+    public ReleaseReadiness releaseReadiness(String policyId) {
+        String version = TenantContext.runAsPlatform(() -> singleCurrentVersion(policyId));
+        return releaseReadiness(policyId, version);
+    }
+
     public ReleaseReadiness releaseReadiness(String policyId, String version) {
         return TenantContext.runAsPlatform(() -> {
             PolicyCandidate candidate = policyCandidate(policyId, version);
@@ -913,16 +1057,38 @@ public class AiGridValidationGovernanceService {
 
     private void insertReleaseDecision(UUID id, String policyId, String version, String decision,
                                        AnswerKeyGate answerKey, PrecisionReview precision, String reason, String actor) {
+        insertReleaseDecision(id, policyId, version, decision, answerKey, precision, reason, actor, null);
+    }
+
+    private void insertReleaseDecision(UUID id, String policyId, String version, String decision,
+                                       AnswerKeyGate answerKey, PrecisionReview precision, String reason, String actor,
+                                       String approvedDigest) {
         jdbc.update("""
                 insert into platform.ai_grid_policy_release_decisions
                     (id, policy_id, policy_version, decision, answer_key_run_id,
-                     precision_review_id, reason, decided_by)
-                values (:id, :policyId, :version, :decision, :answerKey, :precision, :reason, :actor)
+                     precision_review_id, reason, decided_by, approved_package_digest)
+                values (:id, :policyId, :version, :decision, :answerKey, :precision, :reason, :actor, :digest)
                 """, new MapSqlParameterSource().addValue("id", id).addValue("policyId", policyId)
                 .addValue("version", version).addValue("decision", decision)
                 .addValue("answerKey", answerKey == null ? null : answerKey.runId())
                 .addValue("precision", precision == null ? null : precision.id())
-                .addValue("reason", reason).addValue("actor", actor));
+                .addValue("reason", reason).addValue("actor", actor).addValue("digest", approvedDigest));
+    }
+
+    private String singleCurrentVersion(String policyId) {
+        List<String> versions = jdbc.query("""
+                select version from platform.ai_grid_policy_versions
+                 where policy_id=:policyId and lifecycle not in ('DEPRECATED','RETIRED')
+                 order by created_at desc, version desc
+                """, Map.of("policyId", policyId), (rs, row) -> rs.getString(1));
+        if (versions.isEmpty()) throw notFound("AI Grid policy not found or unavailable");
+        if (versions.size() != 1) throw conflict("Policy-ID release operations require exactly one current technical version");
+        return versions.get(0);
+    }
+
+    private String defaultSelection(String policyId, String version) {
+        return jdbc.query("select default_selection from platform.ai_grid_policy_versions where policy_id=:policyId and version=:version",
+                Map.of("policyId", policyId, "version", version), rs -> rs.next() ? rs.getString(1) : null);
     }
 
     private AnswerKeyEnvironment mapEnvironment(java.sql.ResultSet rs) throws java.sql.SQLException {
@@ -1071,6 +1237,11 @@ public class AiGridValidationGovernanceService {
                                   UUID sourceAssessmentId, String sourceDecisionFingerprint, String provenanceState) {}
     public record ReleaseDecision(UUID id, String policyId, String policyVersion, boolean published, String reason,
                                   UUID answerKeyRunId, UUID precisionReviewId) {}
+    public record PolicyApproval(UUID approvalId, String policyId, String policyVersion, String packageDigest,
+                                 boolean approved, String reason) {}
+    public record PolicyPublication(String policyId, String policyVersion, String packageDigest, UUID approvalId,
+                                    UUID releaseBindingId, UUID rolloutId, List<UUID> targetTenantIds) {}
+    public record PublishCommand(List<UUID> targetTenantIds) {}
     public record ReleaseReadiness(String policyId, String policyVersion, String lifecycle, String severity,
                                    String catalogDigest, boolean ready, List<String> blockers,
                                    UUID answerKeyRunId, UUID precisionReviewId, String latestDecision,
