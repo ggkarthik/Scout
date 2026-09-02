@@ -551,6 +551,10 @@ public class AiGridValidationGovernanceService {
 
     /** Creates an immutable, digest-bound approval without exposing the policy to tenants. */
     public PolicyApproval approvePolicy(String policyId, String actor) {
+        return approvePolicy(policyId, null, actor);
+    }
+
+    public PolicyApproval approvePolicy(String policyId, String tenantTestNote, String actor) {
         return TenantContext.runAsPlatform(() -> transactions.execute(status -> {
             String version = singleCurrentVersion(policyId);
             PolicyCandidate candidate = policyCandidate(policyId, version);
@@ -578,8 +582,10 @@ public class AiGridValidationGovernanceService {
                 jdbc.update("update platform.ai_grid_policy_versions set package_digest=:digest where policy_id=:policyId and version=:version",
                         Map.of("digest", packageDigest, "policyId", policyId, "version", version));
             }
+            String approvalReason = "Answer-key and precision release gates passed"
+                    + (tenantTestNote == null || tenantTestNote.isBlank() ? "" : "; Tenant test result: " + tenantTestNote.trim());
             insertReleaseDecision(decisionId, policyId, version, "APPROVED", answerKey, precision,
-                    "Answer-key and precision release gates passed", actor, packageDigest);
+                    approvalReason, actor, packageDigest);
             jdbc.update("""
                     update platform.ai_grid_policy_versions set lifecycle='APPROVED', approved_by=:actor,
                         approved_at=coalesce(approved_at,now()) where policy_id=:policyId and version=:version
@@ -589,10 +595,43 @@ public class AiGridValidationGovernanceService {
         }));
     }
 
+    /** Deploys a validated package to explicit dev/test tenants without approving it. */
+    public DevDeployment deployToDevTenants(String policyId, List<UUID> targetTenantIds, String testNote, String actor) {
+        if (targetTenantIds == null || targetTenantIds.isEmpty()) throw badRequest("Select at least one dev/test tenant");
+        if (new LinkedHashSet<>(targetTenantIds).size() != targetTenantIds.size()) throw badRequest("Dev/test cohort contains duplicate tenant IDs");
+        List<Tenant> cohort = targetTenantIds.stream().map(tenants::requireTenantUuid).toList();
+        for (Tenant tenant : cohort) if (!"ACTIVE".equals(tenant.getStatus())) throw conflict("Dev/test cohort contains an inactive tenant");
+        requireText(testNote, "testNote");
+        return TenantContext.runAsPlatform(() -> transactions.execute(status -> {
+            String version = singleCurrentVersion(policyId);
+            PolicyCandidate candidate = policyCandidate(policyId, version);
+            if (!"VALIDATED".equals(candidate.lifecycle())) throw conflict("Only VALIDATED policies can be deployed to dev/test tenants");
+            String ids = "[" + targetTenantIds.stream().map(id -> "\"" + id + "\"").collect(java.util.stream.Collectors.joining(",")) + "]";
+            UUID deploymentId = UUID.randomUUID();
+            jdbc.update("""
+                    insert into platform.ai_grid_policy_dev_deployments
+                        (id,policy_id,policy_version,target_tenant_ids_json,test_note,deployed_by)
+                    values (:id,:policyId,:version,cast(:targets as jsonb),:note,:actor)
+                    """, new MapSqlParameterSource().addValue("id", deploymentId).addValue("policyId", policyId)
+                    .addValue("version", version).addValue("targets", ids).addValue("note", testNote.trim()).addValue("actor", actor));
+            jdbc.update("""
+                    update platform.ai_grid_policy_distribution
+                       set available=true, rollout_stage='DEV', canary_tenant_ids_json=cast(:targets as jsonb),
+                           pinned_version=:version, updated_by=:actor, updated_at=now()
+                     where policy_id=:policyId
+                    """, new MapSqlParameterSource().addValue("policyId", policyId).addValue("version", version)
+                    .addValue("targets", ids).addValue("actor", actor));
+            return new DevDeployment(deploymentId, policyId, version, targetTenantIds, testNote.trim());
+        }));
+    }
+
     /** Publishes an already-approved policy to an explicit active canary cohort. */
     public PolicyPublication publishApprovedPolicy(String policyId, PublishCommand command, String actor) {
-        List<UUID> tenantIds = command == null || command.targetTenantIds() == null || command.targetTenantIds().isEmpty()
-                ? List.of(tenants.getDefaultTenant().getId()) : command.targetTenantIds();
+        List<UUID> tenantIds = command != null && command.publishAll()
+                ? tenants.listTenants().stream().filter(t -> "ACTIVE".equals(t.getStatus())).map(Tenant::getId).toList()
+                : command == null || command.targetTenantIds() == null || command.targetTenantIds().isEmpty()
+                    ? List.of(tenants.getDefaultTenant().getId()) : command.targetTenantIds();
+        if (tenantIds.isEmpty()) throw conflict("No active tenants are available for publication");
         if (new LinkedHashSet<>(tenantIds).size() != tenantIds.size()) throw badRequest("CANARY cohort contains duplicate tenant IDs");
         List<Tenant> cohort = tenantIds.stream().map(tenants::requireTenantUuid).toList();
         for (Tenant tenant : cohort) {
@@ -1258,7 +1297,10 @@ public class AiGridValidationGovernanceService {
                                  boolean approved, String reason) {}
     public record PolicyPublication(String policyId, String policyVersion, String packageDigest, UUID approvalId,
                                     UUID releaseBindingId, UUID rolloutId, List<UUID> targetTenantIds) {}
-    public record PublishCommand(List<UUID> targetTenantIds) {}
+    public record PublishCommand(List<UUID> targetTenantIds, boolean publishAll) {
+        public PublishCommand(List<UUID> targetTenantIds) { this(targetTenantIds, false); }
+    }
+    public record DevDeployment(UUID id, String policyId, String policyVersion, List<UUID> targetTenantIds, String testNote) {}
     public record ReleaseReadiness(String policyId, String policyVersion, String lifecycle, String severity,
                                    String catalogDigest, boolean ready, List<String> blockers,
                                    UUID answerKeyRunId, UUID precisionReviewId, String latestDecision,

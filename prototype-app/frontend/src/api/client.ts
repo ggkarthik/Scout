@@ -1396,8 +1396,9 @@ export const api = {
   getPlatformAiGridPolicyReleaseReadiness: (policyId: string) => request<AiGridPolicyReleaseReadiness>(
     `/platform/ai-grid/validation/policies/${encodeURIComponent(policyId)}/release-readiness`,
   ),
-  approvePlatformAiGridPolicy: (policyId: string) => request<{ approved: boolean; reason?: string }>(`/platform/ai-grid/validation/policies/${encodeURIComponent(policyId)}/approve`, { method: 'POST' }),
-  publishPlatformAiGridPolicy: (policyId: string, targetTenantIds: string[]) => request(`/platform/ai-grid/validation/policies/${encodeURIComponent(policyId)}/publish`, { method: 'POST', body: JSON.stringify({ targetTenantIds }) }),
+  approvePlatformAiGridPolicy: (policyId: string, tenantTestNote?: string) => request<{ approved: boolean; reason?: string }>(`/platform/ai-grid/validation/policies/${encodeURIComponent(policyId)}/approve`, { method: 'POST', body: JSON.stringify({ tenantTestNote: tenantTestNote ?? '' }) }),
+  deployPlatformAiGridPolicyToDev: (policyId: string, targetTenantIds: string[], testNote: string) => request(`/platform/ai-grid/validation/policies/${encodeURIComponent(policyId)}/dev-deploy`, { method: 'POST', body: JSON.stringify({ targetTenantIds, testNote }) }),
+  publishPlatformAiGridPolicy: (policyId: string, targetTenantIds: string[], publishAll = false) => request(`/platform/ai-grid/validation/policies/${encodeURIComponent(policyId)}/publish`, { method: 'POST', body: JSON.stringify({ targetTenantIds, publishAll }) }),
   deprecatePlatformAiGridPolicy: (policyId: string, reason: string, successorPolicyId?: string) => request(`/platform/ai-grid/validation/policies/${encodeURIComponent(policyId)}/deprecate`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ reason, successorPolicyId }) }),
   revokePlatformAiGridReleaseBinding: (bindingId: string, reason: string) => request<void>(`/platform/ai-grid/validation/release-bindings/${encodeURIComponent(bindingId)}/revoke`, { method: 'POST', body: JSON.stringify({ reason }) }),
   getPlatformAiGridPhase1CertificationReadiness: () => request<AiGridPhase1CertificationReadiness>(

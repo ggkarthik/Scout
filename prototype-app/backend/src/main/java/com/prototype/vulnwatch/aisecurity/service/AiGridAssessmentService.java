@@ -296,9 +296,9 @@ public class AiGridAssessmentService {
                   from platform.ai_grid_policy_versions p
                   join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id and d.available=true
                 where (p.release_family in ('AGCF_PHASE_1', 'AGCF_PHASE_2') or p.release_family is null)
-                   and p.lifecycle in ('PUBLISHED', 'CANARY')
+                   and p.lifecycle in ('VALIDATED', 'APPROVED', 'PUBLISHED', 'CANARY')
                    and (d.rollout_stage = 'GENERAL_AVAILABILITY'
-                        or (d.rollout_stage = 'CANARY' and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
+                        or (d.rollout_stage in ('CANARY', 'DEV') and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
                  order by p.policy_id, p.published_at desc, p.version desc
                 """, Map.of("tenantId", tenant.getId().toString()), (rs, n) -> new Policy(rs.getString("policy_id"), rs.getString("version"), rs.getString("name"),
                 rs.getString("severity"), rs.getString("default_selection"), strings(rs.getString("artifact_types_json")),
