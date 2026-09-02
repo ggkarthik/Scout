@@ -221,7 +221,7 @@ class AiGridValidationGovernancePostgresIntegrationTest {
                 select lifecycle from platform.ai_grid_policy_versions
                  where policy_id = :policyId and version = :version
                 """, Map.of("policyId", policyId, "version", version), String.class)));
-        assertEquals(1, TenantContext.runAsPlatform(() -> jdbc.queryForObject("""
+        assertEquals(2, TenantContext.runAsPlatform(() -> jdbc.queryForObject("""
                 select count(*) from platform.ai_grid_policy_release_decisions
                  where policy_id = :policyId and policy_version = :version
                 """, Map.of("policyId", policyId, "version", version), Integer.class)));

@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -50,7 +51,8 @@ public class AiGridPolicyDeprecationService {
         if (command == null) throw badRequest("Deprecation command is required");
         require(command.reason(), "reason");
         require(command.idempotencyKey(), "idempotencyKey");
-        return TenantContext.runAsPlatform(() -> transactions.execute(status -> {
+        AtomicBoolean created = new AtomicBoolean(false);
+        Deprecation deprecation = TenantContext.runAsPlatform(() -> transactions.execute(status -> {
             Deprecation existing = byIdempotencyKey(command.idempotencyKey());
             if (existing != null) {
                 if (!existing.policyId().equals(policyId)) throw conflict("Idempotency key belongs to another policy");
@@ -92,6 +94,10 @@ public class AiGridPolicyDeprecationService {
                      where t.status = 'ACTIVE' and t.deleted_at is null
                     on conflict (deprecation_id, tenant_id) do nothing
                     """, Map.of("id", id, "deprecationId", id.toString()));
+            created.set(true);
+            return byId(id);
+        }));
+        if (created.get()) {
             Tenant auditTenant = tenants.getDefaultTenant();
             tenantExecution.run(auditTenant, () -> {
                 audit.recordExplicitActor(auditTenant.getId(), actor, "PLATFORM_OWNER", "ai_grid.policy.deprecated",
@@ -99,8 +105,8 @@ public class AiGridPolicyDeprecationService {
                         "{\"successorPolicyId\":" + jsonString(blank(command.successorPolicyId())) + "}", "SUCCESS");
                 return null;
             });
-            return byId(id);
-        }));
+        }
+        return deprecation;
     }
 
     @Scheduled(fixedDelayString = "${app.ai-grid.policy-deprecation.delay-ms:5000}")
