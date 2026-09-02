@@ -26,20 +26,32 @@ public class PreJpaDefaultTenantMigrationConfiguration {
             platformFlyway.migrate();
             DataSource dataSource = platformFlyway.getConfiguration().getDataSource();
             JdbcTemplate jdbc = new JdbcTemplate(dataSource);
-            jdbc.update("""
-                    insert into platform.tenants (
-                        id,name,slug,schema_name,status,plan_code,created_at,updated_at,
-                        max_connector_count,max_service_account_count,max_daily_sbom_uploads,
-                        max_export_rows,max_daily_exposure_refreshes)
-                    values (?, 'Default Workspace', 'default-workspace', ?, 'ACTIVE', 'ENTERPRISE',
-                            now(), now(), 10, 25, 100, 50000, 25)
-                    on conflict (id) do nothing
-                    """, DEFAULT_TENANT_ID, DEFAULT_SCHEMA);
+            UUID tenantId = jdbc.query("""
+                    select id from platform.tenants
+                     where schema_name = ? or id = ?
+                     order by case when id = ? then 0 else 1 end
+                     limit 1
+                    """, ps -> {
+                        ps.setString(1, DEFAULT_SCHEMA);
+                        ps.setObject(2, DEFAULT_TENANT_ID);
+                        ps.setObject(3, DEFAULT_TENANT_ID);
+                    }, rs -> rs.next() ? rs.getObject(1, UUID.class) : null);
+            if (tenantId == null) {
+                tenantId = DEFAULT_TENANT_ID;
+                jdbc.update("""
+                        insert into platform.tenants (
+                            id,name,slug,schema_name,status,plan_code,created_at,updated_at,
+                            max_connector_count,max_service_account_count,max_daily_sbom_uploads,
+                            max_export_rows,max_daily_exposure_refreshes)
+                        values (?, 'Default Workspace', 'default-workspace', ?, 'ACTIVE', 'ENTERPRISE',
+                                now(), now(), 10, 25, 100, 50000, 25)
+                        """, tenantId, DEFAULT_SCHEMA);
+            }
             Flyway.configure().dataSource(dataSource).schemas(DEFAULT_SCHEMA).defaultSchema(DEFAULT_SCHEMA)
                     .table("tenant_schema_history").locations("classpath:db/migration/tenant")
                     .baselineOnMigrate(true).baselineVersion(MigrationVersion.fromVersion("41"))
                     .baselineDescription("legacy tenant schema baseline")
-                    .placeholders(Map.of("tenantId", DEFAULT_TENANT_ID.toString(), "tenantSchema", DEFAULT_SCHEMA))
+                    .placeholders(Map.of("tenantId", tenantId.toString(), "tenantSchema", DEFAULT_SCHEMA))
                     .validateOnMigrate(true).outOfOrder(false).load().migrate();
         };
     }
