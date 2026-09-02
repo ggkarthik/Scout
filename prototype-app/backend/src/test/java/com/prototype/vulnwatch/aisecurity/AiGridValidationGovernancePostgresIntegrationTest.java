@@ -271,6 +271,10 @@ class AiGridValidationGovernancePostgresIntegrationTest {
     @Test
     void deprecationIsIdempotentWhenTheSameRequestIsSubmittedConcurrently() throws Exception {
         String idempotencyKey = "deprecate-governance-policy-once";
+        TenantContext.runAsPlatform(() -> {
+            jdbc.update("delete from platform.ai_grid_policy_deprecations where policy_id = 'GOVERNANCE_DEPRECATION_POLICY'", Map.of());
+            jdbc.update("update platform.ai_grid_policy_versions set lifecycle = 'VALIDATED' where policy_id = 'GOVERNANCE_DEPRECATION_POLICY'", Map.of());
+        });
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
             var first = executor.submit(() -> TenantContext.runAsPlatform(() -> deprecations.deprecate(
