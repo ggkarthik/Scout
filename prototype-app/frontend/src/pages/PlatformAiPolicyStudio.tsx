@@ -32,6 +32,7 @@ export function PlatformAiPolicyStudio() {
   const [activePolicyId, setActivePolicyId] = React.useState<string | null>(null);
   const [approvalMessage, setApprovalMessage] = React.useState<string | null>(null);
   const [devMessage, setDevMessage] = React.useState<string | null>(null);
+  const [publishMessage, setPublishMessage] = React.useState<string | null>(null);
   const catalog = useQuery({ queryKey: ['platform-ai-grid-policies'], queryFn: () => api.listPlatformAiGridPolicies() });
   const shipping = useQuery({ queryKey: ['platform-ai-grid-shipping-status'], queryFn: api.getPlatformAiGridShippingStatus });
   const tenants = useQuery({ queryKey: ['platform-ai-grid-active-tenants'], queryFn: api.listTenants });
@@ -59,7 +60,8 @@ export function PlatformAiPolicyStudio() {
   });
   const publish = useMutation({
     mutationFn: ({ policyId, targetTenantIds, publishAll }: { policyId: string; targetTenantIds: string[]; publishAll: boolean }) => api.publishPlatformAiGridPolicy(policyId, targetTenantIds, publishAll),
-    onSuccess: invalidateLifecycle,
+    onSuccess: () => { setPublishMessage('Policy published successfully.'); void invalidateLifecycle(); },
+    onError: (error: Error) => setPublishMessage(`Policy publication failed: ${error.message}`),
   });
   const deprecate = useMutation({
     mutationFn: ({ policyId, reason }: { policyId: string; reason: string }) => api.deprecatePlatformAiGridPolicy(policyId, reason),
@@ -93,6 +95,7 @@ export function PlatformAiPolicyStudio() {
       {shipping.data?.blockers.length ? <p className="notice error">{shipping.data.blockers.join(' · ')}</p> : null}
       {approvalMessage ? <p className={`notice ${approvalMessage.startsWith('Policy approved') ? 'success' : 'error'}`}>{approvalMessage}</p> : null}
       {devMessage ? <p className={`notice ${devMessage.startsWith('Policy deployed') ? 'success' : 'error'}`}>{devMessage}</p> : null}
+      {publishMessage ? <p className={`notice ${publishMessage.startsWith('Policy published') ? 'success' : 'error'}`}>{publishMessage}</p> : null}
 
     <section className="panel policy-catalog-panel">
       <div className="panel-header policy-catalog-header"><div><h3>Policy catalog</h3><p className="panel-caption">Deploy to dev/test, approve with evidence, then publish to selected tenants or all active tenants. Default selection and tenant rollout are tracked independently.</p></div>

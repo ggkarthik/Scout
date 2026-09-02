@@ -609,6 +609,18 @@ public class AiGridValidationGovernanceService {
         return Boolean.TRUE.equals(exists);
     }
 
+    private boolean hasDevTestDeploymentForTenant(String policyId, String version, UUID tenantId) {
+        Boolean exists = TenantContext.runAsPlatform(() -> jdbc.queryForObject("""
+                select exists(
+                    select 1 from platform.ai_grid_policy_dev_deployments
+                     where policy_id=:policyId and policy_version=:version
+                       and target_tenant_ids_json @> cast(:tenantId as jsonb)
+                )
+                """, Map.of("policyId", policyId, "version", version,
+                "tenantId", "[\"" + tenantId + "\"]"), Boolean.class));
+        return Boolean.TRUE.equals(exists);
+    }
+
     /** Deploys a validated package to explicit dev/test tenants without approving it. */
     public DevDeployment deployToDevTenants(String policyId, List<UUID> targetTenantIds, String testNote, String actor) {
         if (targetTenantIds == null || targetTenantIds.isEmpty()) throw badRequest("Select at least one dev/test tenant");
@@ -648,13 +660,16 @@ public class AiGridValidationGovernanceService {
         if (tenantIds.isEmpty()) throw conflict("No active tenants are available for publication");
         if (new LinkedHashSet<>(tenantIds).size() != tenantIds.size()) throw badRequest("CANARY cohort contains duplicate tenant IDs");
         List<Tenant> cohort = tenantIds.stream().map(tenants::requireTenantUuid).toList();
+        String currentVersion = TenantContext.runAsPlatform(() -> singleCurrentVersion(policyId));
         for (Tenant tenant : cohort) {
             if (!"ACTIVE".equals(tenant.getStatus())) throw conflict("CANARY cohort contains an inactive tenant");
             UUID snapshotRunId = tenantExecution.run(tenant, () -> jdbc.query("""
                 select run_id from ai_grid_snapshot_manifests group by run_id
                  order by max(observed_at) desc limit 1
                 """, rs -> rs.next() ? rs.getObject(1, UUID.class) : null));
-            if (snapshotRunId == null) throw conflict("CANARY cohort tenant lacks a complete snapshot: " + tenant.getSlug());
+            if (snapshotRunId == null && !hasDevTestDeploymentForTenant(policyId, currentVersion, tenant.getId())) {
+                throw conflict("CANARY cohort tenant lacks a complete snapshot or dev/test deployment: " + tenant.getSlug());
+            }
         }
         boolean publishAll = command != null && command.publishAll();
         String rolloutStage = publishAll ? "GENERAL_AVAILABILITY" : "CANARY";
