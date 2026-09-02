@@ -720,6 +720,8 @@ public class AiGridValidationGovernanceService {
                             :packageDigest,:approval,:actor)
                     on conflict (policy_id) do update set available=true, rollout_stage=excluded.rollout_stage,
                         canary_tenant_ids_json=excluded.canary_tenant_ids_json, pinned_version=excluded.pinned_version,
+                        approved_package_digest=excluded.approved_package_digest,
+                        release_decision_id=excluded.release_decision_id,
                         updated_by=excluded.updated_by, updated_at=now()
                     """, new MapSqlParameterSource().addValue("policyId", policyId).addValue("selection", defaultSelection(policyId, version))
                     .addValue("stage", rolloutStage).addValue("canaryTenants", canaryTenantIdsJson).addValue("version", version).addValue("packageDigest", packageDigest)
