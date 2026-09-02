@@ -92,8 +92,13 @@ public class AiGridPolicyDeprecationService {
                      where t.status = 'ACTIVE' and t.deleted_at is null
                     on conflict (deprecation_id, tenant_id) do nothing
                     """, Map.of("id", id, "deprecationId", id.toString()));
-            audit.recordExplicitActor(null, actor, "PLATFORM_OWNER", "ai_grid.policy.deprecated", "ai_grid_policy",
-                    policyId, "{\"successorPolicyId\":" + jsonString(blank(command.successorPolicyId())) + "}", "SUCCESS");
+            Tenant auditTenant = tenants.getDefaultTenant();
+            tenantExecution.run(auditTenant, () -> {
+                audit.recordExplicitActor(auditTenant.getId(), actor, "PLATFORM_OWNER", "ai_grid.policy.deprecated",
+                        "ai_grid_policy", policyId,
+                        "{\"successorPolicyId\":" + jsonString(blank(command.successorPolicyId())) + "}", "SUCCESS");
+                return null;
+            });
             return byId(id);
         }));
     }
