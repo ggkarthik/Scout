@@ -134,6 +134,10 @@ public class AiGridCapabilityService {
     private List<String> capabilitiesFor(String provider, String resourceFamily) {
         String family = resourceFamily == null ? "" : resourceFamily.toUpperCase();
         if ("AWS".equalsIgnoreCase(provider)) {
+            if (family.contains("EFFECTIVE_ACCESS")) return List.of("AWS_EFFECTIVE_ACCESS");
+            if (family.contains("LINKED_DATA_STORES")) return List.of("AWS_LINKED_DATA_STORES");
+            if (family.contains("CONSUMPTION_TELEMETRY")) return List.of("AWS_CONSUMPTION_TELEMETRY");
+            if (family.contains("MODEL_DATA_PROVENANCE")) return List.of("AWS_MODEL_DATA_PROVENANCE");
             if (family.startsWith("BEDROCK_AGENTS")) return List.of("BEDROCK_AGENTS");
             if (family.startsWith("BEDROCK_GUARDRAILS")) return List.of("BEDROCK_GUARDRAILS");
             if (family.startsWith("BEDROCK_KNOWLEDGE") || family.startsWith("BEDROCK_DATA_")) return List.of("BEDROCK_KNOWLEDGE_BASES");
@@ -146,6 +150,11 @@ public class AiGridCapabilityService {
             if (family.startsWith("AWS_MACIE")) return List.of("MACIE_CLASSIFICATION");
         }
         if ("AZURE".equalsIgnoreCase(provider)) {
+            if (family.contains("EFFECTIVE_ACCESS")) return List.of("AZURE_EFFECTIVE_ACCESS");
+            if (family.contains("LINKED_DATA_STORES")) return List.of("AZURE_LINKED_DATA_STORES");
+            if (family.contains("SEARCH_MCP_SECURITY")) return List.of("AZURE_SEARCH_MCP_SECURITY");
+            if (family.contains("CONSUMPTION_TELEMETRY")) return List.of("AZURE_CONSUMPTION_TELEMETRY");
+            if (family.contains("MODEL_DATA_PROVENANCE")) return List.of("AZURE_MODEL_DATA_PROVENANCE");
             if (family.startsWith("AZURE_AI_ACCOUNTS")) return List.of("AI_ACCOUNTS");
             if (family.startsWith("AZURE_DIAGNOSTIC")) return List.of("DIAGNOSTIC_SETTINGS");
             if (family.startsWith("AZURE_RAI") || family.startsWith("AZURE_FOUNDRY_DEPLOYMENTS")) return List.of("FOUNDRY_DEPLOYMENTS_RAI");

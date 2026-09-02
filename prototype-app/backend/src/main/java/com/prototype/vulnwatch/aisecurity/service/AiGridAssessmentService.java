@@ -154,23 +154,6 @@ public class AiGridAssessmentService {
             upsertGap(tenant, runId, artifact.id(), policy.id(), "INCOMPLETE_SCOPE", missing);
             return findings.reconcile(tenant, result);
         }
-        AiGridGraphEvidenceResolver.DirectEvidence relationships = cache.directEvidence(artifact.id(),
-                relationshipTypes(policy), evaluationAsOf);
-        if (relationships.status() == AiGridGraphEvidenceResolver.Status.ABSENT) {
-            AiGridFindingService.AssessmentResult result = persist(tenant, runId, evaluationAsOf,
-                    policy, artifact, selection, "NOT_APPLICABLE", "READY",
-                    "NOT_APPLICABLE", "REQUIRED_RELATIONSHIP_ABSENT", relationships.issues(), Map.of());
-            resolveGap(tenant, artifact.id(), policy.id());
-            return findings.reconcile(tenant, result);
-        }
-        if (relationships.status() == AiGridGraphEvidenceResolver.Status.STALE) {
-            List<String> missing = relationships.issues().stream().map(type -> "relationship:" + type + ":STALE").toList();
-            AiGridFindingService.AssessmentResult result = persist(tenant, runId, evaluationAsOf,
-                    policy, artifact, selection, "APPLICABLE", "STALE", "NO_DECISION",
-                    "STALE_RELATIONSHIP_EVIDENCE", missing, Map.of());
-            upsertGap(tenant, runId, artifact.id(), policy.id(), "STALE_EVIDENCE", missing);
-            return findings.reconcile(tenant, result);
-        }
         Map<String, Fact> availableFacts = cache.facts().getOrDefault(artifact.id(), Map.of());
         List<FactIssue> factIssues = new ArrayList<>();
         Map<String, JsonNode> predicateFacts = new LinkedHashMap<>();
@@ -204,6 +187,27 @@ public class AiGridAssessmentService {
                     policy, artifact, selection, "APPLICABLE", readiness,
                     decision, decision.equals("ERROR") ? "FACT_COLLECTION_ERROR" : readiness, missing, evidence);
             upsertGap(tenant, runId, artifact.id(), policy.id(), gapState(readiness), missing);
+            return findings.reconcile(tenant, result);
+        }
+        // Graph access is deliberately after capability and fact readiness. A
+        // posture policy with no relationship contract must not pay for a graph
+        // query, and an unavailable capability must never trigger traversal.
+        AiGridGraphEvidenceResolver.DirectEvidence relationships = policy.requiredRelationships().isEmpty()
+                ? AiGridGraphEvidenceResolver.DirectEvidence.ready(List.of())
+                : cache.directEvidence(artifact.id(), relationshipTypes(policy), evaluationAsOf);
+        if (relationships.status() == AiGridGraphEvidenceResolver.Status.ABSENT) {
+            AiGridFindingService.AssessmentResult result = persist(tenant, runId, evaluationAsOf,
+                    policy, artifact, selection, "NOT_APPLICABLE", "READY",
+                    "NOT_APPLICABLE", "REQUIRED_RELATIONSHIP_ABSENT", relationships.issues(), Map.of());
+            resolveGap(tenant, artifact.id(), policy.id());
+            return findings.reconcile(tenant, result);
+        }
+        if (relationships.status() == AiGridGraphEvidenceResolver.Status.STALE) {
+            List<String> missing = relationships.issues().stream().map(type -> "relationship:" + type + ":STALE").toList();
+            AiGridFindingService.AssessmentResult result = persist(tenant, runId, evaluationAsOf,
+                    policy, artifact, selection, "APPLICABLE", "STALE", "NO_DECISION",
+                    "STALE_RELATIONSHIP_EVIDENCE", missing, Map.of());
+            upsertGap(tenant, runId, artifact.id(), policy.id(), "STALE_EVIDENCE", missing);
             return findings.reconcile(tenant, result);
         }
         DirectDecision direct = directDecision(policy, evaluationAsOf, predicateFacts, parameters, cache.facts(),
@@ -291,7 +295,7 @@ public class AiGridAssessmentService {
                        evaluation_mode,evaluation_definition_json::text,p.provider
                   from platform.ai_grid_policy_versions p
                   join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id and d.available=true
-                where (p.release_family = 'AGCF_PHASE_1' or p.release_family is null)
+                where (p.release_family in ('AGCF_PHASE_1', 'AGCF_PHASE_2') or p.release_family is null)
                    and p.lifecycle in ('PUBLISHED', 'CANARY')
                    and (d.rollout_stage = 'GENERAL_AVAILABILITY'
                         or (d.rollout_stage = 'CANARY' and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))

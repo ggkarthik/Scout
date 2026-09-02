@@ -27,7 +27,7 @@ class MigrationCatalogTest {
     void packagedCatalogResolvesPlatformAndTenantTargetsIndependently() {
         PackagedMigrationCatalog.Targets targets = PackagedMigrationCatalog.resolve();
 
-        assertEquals(96, targets.platformTarget());
+        assertEquals(97, targets.platformTarget());
         assertEquals(68, targets.tenantTarget());
     }
 

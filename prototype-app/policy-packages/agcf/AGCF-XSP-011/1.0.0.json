@@ -1,0 +1,79 @@
+{
+  "policyId": "AGCF-XSP-011",
+  "version": "1.0.0",
+  "name": "Secret-safe MCP auth classification plus effective high-impact tool permissions validates the path",
+  "description": "Evaluates secret-safe mcp auth classification plus effective high-impact tool permissions validates the path only from complete, fresh relationship evidence.",
+  "securityIntent": "Prevent the exposure condition described by AGCF-XSP-011.",
+  "remediationIntent": "Break the decisive relationship or correct the linked provider controls, then reassess with complete, fresh evidence.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-P2-XSP-011",
+  "provider": "MULTI_CLOUD",
+  "evaluationMode": "CORRELATION_PATH",
+  "evaluationDefinition": {
+    "mode": "CORRELATION_PATH",
+    "correlationPath": {
+      "correlationId": "XSP-011",
+      "correlationVersion": "1.0.0",
+      "decisiveFact": "exposure.mcp_auth_tool_path",
+      "maxDepth": 4,
+      "maxFanOut": 50
+    }
+  },
+  "baseEvidenceTiers": [
+    "E2"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "REQUIRED",
+  "releaseFamily": "AGCF_PHASE_2",
+  "wave": "PHASE_2",
+  "workflowClass": "VALIDATED_EXPOSURE",
+  "artifactTypes": [],
+  "nativeKinds": [
+    "MULTI_CLOUD_GRAPH"
+  ],
+  "requiredCapabilities": [
+    "MULTI_CLOUD_GRAPH"
+  ],
+  "requiredRelationships": [
+    "DIRECT_PROVIDER_RELATIONSHIP"
+  ],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [],
+  "reasonCode": "AGCF_P2_XSP_011",
+  "frameworkMappings": [
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM02",
+      "mappingType": "PARTIAL",
+      "rationale": "MULTI_CLOUD XSP evidence contributes directly to this risk but is not a certification claim."
+    },
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM03",
+      "mappingType": "PARTIAL",
+      "rationale": "MULTI_CLOUD XSP evidence contributes directly to this risk but is not a certification claim."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "IAM-18",
+      "mappingType": "PARTIAL",
+      "rationale": "MULTI_CLOUD XSP normalized evidence contributes to this control."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "DSP-17",
+      "mappingType": "PARTIAL",
+      "rationale": "MULTI_CLOUD XSP normalized evidence contributes to this control."
+    }
+  ],
+  "parameterDefinitions": [],
+  "certificationParameterProfile": null,
+  "packageSourceRef": "policy-packages/agcf/XSP-011/1.0.0.json",
+  "predecessorPolicyId": "AGCF-XSP-005"
+}

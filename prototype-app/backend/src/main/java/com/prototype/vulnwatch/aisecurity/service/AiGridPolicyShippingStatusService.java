@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.service.TenantContext;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,7 +39,7 @@ public class AiGridPolicyShippingStatusService {
                     "digest", entry.getValue())) == 1).count();
             long pending = count("select count(*) from platform.ai_grid_policy_rollout_tasks where status in ('PENDING','PROCESSING','WAITING_FOR_SNAPSHOT','FAILED')", Map.of());
             List<String> blockers = new java.util.ArrayList<>();
-            if (expected != 76) blockers.add("Expected 76 bundled policies but found " + expected);
+            if (expected != 159) blockers.add("Expected 159 bundled policies but found " + expected);
             if (installed != expected) blockers.add("Bundled catalog is not fully installed");
             if (digestMatched != expected) blockers.add("One or more bundled package digests are missing or invalid");
             return new ShippingStatus(expected, installed, published, distributed, digestMatched, pending, List.copyOf(blockers));
@@ -50,15 +52,20 @@ public class AiGridPolicyShippingStatusService {
     }
 
     private Map<String, String> bundledManifest() {
-        try (InputStream input = getClass().getClassLoader().getResourceAsStream("ai-grid/phase-1-manifest.json")) {
-            if (input == null) throw new IllegalStateException("Bundled AI Grid shipping manifest is missing");
-            JsonNode policies = mapper.readTree(input).path("policies");
-            Map<String, String> result = new HashMap<>();
-            for (JsonNode policy : policies) result.put(policy.path("policyId").asText() + "@" + policy.path("version").asText(), policy.path("digest").asText());
-            return result;
-        } catch (Exception ex) {
-            throw new IllegalStateException("Unable to read bundled AI Grid shipping manifest", ex);
+        Map<String, String> result = new HashMap<>();
+        for (String resource : List.of("ai-grid/phase-1-manifest.json", "ai-grid/phase-2-manifest.json")) {
+            try (InputStream input = getClass().getClassLoader().getResourceAsStream(resource)) {
+                if (input == null) {
+                    if (resource.endsWith("phase-2-manifest.json")) continue;
+                    throw new IllegalStateException("Bundled AI Grid shipping manifest is missing: " + resource);
+                }
+                JsonNode policies = mapper.readTree(new InputStreamReader(input, StandardCharsets.UTF_8)).path("policies");
+                for (JsonNode policy : policies) result.put(policy.path("policyId").asText() + "@" + policy.path("version").asText(), policy.path("digest").asText());
+            } catch (Exception ex) {
+                throw new IllegalStateException("Unable to read bundled AI Grid shipping manifest: " + resource, ex);
+            }
         }
+        return result;
     }
 
     public record ShippingStatus(long expectedPolicies, long installedPolicies, long publishedPolicies,

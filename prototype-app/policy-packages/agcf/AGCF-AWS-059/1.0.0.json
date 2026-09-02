@@ -1,0 +1,77 @@
+{
+  "policyId": "AGCF-AWS-059",
+  "version": "1.0.0",
+  "name": "Referenced model-serving artifact has high/critical vulnerabilities",
+  "description": "Evaluates whether referenced model-serving artifact has high/critical vulnerabilities using bounded, normalized provider evidence.",
+  "securityIntent": "Prevent the risk condition described by AGCF-AWS-059.",
+  "remediationIntent": "Correct the provider configuration or relationship and reassess with complete, fresh evidence.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-P2-AWS-059",
+  "provider": "AWS",
+  "evaluationMode": "ARTIFACT_FACTS",
+  "evaluationDefinition": {
+    "mode": "ARTIFACT_FACTS",
+    "artifactFacts": {
+      "predicate": {
+        "fact": "provenance.model_vulnerability_baseline_pass",
+        "eq": true
+      }
+    }
+  },
+  "baseEvidenceTiers": [
+    "E1"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "DISABLED",
+  "releaseFamily": "AGCF_PHASE_2",
+  "wave": "PHASE_2",
+  "workflowClass": "POSTURE_FINDING",
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AWS_AI_LINKED_RESOURCE"
+  ],
+  "requiredCapabilities": [
+    "AWS_MODEL_DATA_PROVENANCE"
+  ],
+  "requiredRelationships": [],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [
+    {
+      "factKey": "provenance.model_vulnerability_baseline_pass",
+      "valueType": "BOOLEAN",
+      "evidenceClasses": [
+        "CONFIGURATION"
+      ],
+      "maxAgeSeconds": 86400
+    }
+  ],
+  "reasonCode": "AGCF_P2_AWS_059",
+  "frameworkMappings": [
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM04",
+      "mappingType": "PARTIAL",
+      "rationale": "AWS MODEL evidence contributes directly to this risk but is not a certification claim."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "MDS-02",
+      "mappingType": "PARTIAL",
+      "rationale": "AWS MODEL normalized evidence contributes to this control."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "MDS-08",
+      "mappingType": "PARTIAL",
+      "rationale": "AWS MODEL normalized evidence contributes to this control."
+    }
+  ],
+  "parameterDefinitions": [],
+  "certificationParameterProfile": null,
+  "packageSourceRef": "policy-packages/agcf/AGCF-AWS-059/1.0.0.json"
+}

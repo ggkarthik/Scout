@@ -1,0 +1,70 @@
+{
+  "policyId": "AGCF-AWS-054",
+  "version": "1.0.0",
+  "name": "Bedrock throttling exceeds threshold without an effective alarm",
+  "description": "Evaluates whether bedrock throttling exceeds threshold without an effective alarm using bounded, normalized provider evidence.",
+  "securityIntent": "Prevent the risk condition described by AGCF-AWS-054.",
+  "remediationIntent": "Correct the provider configuration or relationship and reassess with complete, fresh evidence.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-P2-AWS-054",
+  "provider": "AWS",
+  "evaluationMode": "ARTIFACT_FACTS",
+  "evaluationDefinition": {
+    "mode": "ARTIFACT_FACTS",
+    "artifactFacts": {
+      "predicate": {
+        "fact": "consumption.bedrock_throttling_alarm_effective",
+        "eq": true
+      }
+    }
+  },
+  "baseEvidenceTiers": [
+    "E1"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "DISABLED",
+  "releaseFamily": "AGCF_PHASE_2",
+  "wave": "PHASE_2",
+  "workflowClass": "POSTURE_FINDING",
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AWS_AI_LINKED_RESOURCE"
+  ],
+  "requiredCapabilities": [
+    "AWS_CONSUMPTION_TELEMETRY"
+  ],
+  "requiredRelationships": [],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [
+    {
+      "factKey": "consumption.bedrock_throttling_alarm_effective",
+      "valueType": "BOOLEAN",
+      "evidenceClasses": [
+        "CONFIGURATION"
+      ],
+      "maxAgeSeconds": 86400
+    }
+  ],
+  "reasonCode": "AGCF_P2_AWS_054",
+  "frameworkMappings": [
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM06",
+      "mappingType": "PARTIAL",
+      "rationale": "AWS COST evidence contributes directly to this risk but is not a certification claim."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "LOG-14",
+      "mappingType": "PARTIAL",
+      "rationale": "AWS COST normalized evidence contributes to this control."
+    }
+  ],
+  "parameterDefinitions": [],
+  "certificationParameterProfile": null,
+  "packageSourceRef": "policy-packages/agcf/AGCF-AWS-054/1.0.0.json"
+}

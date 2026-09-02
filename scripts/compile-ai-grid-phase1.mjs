@@ -430,12 +430,12 @@ function parsePolicies(markdown) {
   });
 }
 
-async function walk(directory) {
+async function walk(directory, allowedPolicyIds = null) {
   const entries = await readdir(directory, { withFileTypes: true });
   const nested = await Promise.all(entries.map(async (entry) => {
     const path = join(directory, entry.name);
-    return entry.isDirectory() ? walk(path) : entry.name.endsWith('.json')
-      && !['phase-1-manifest.json', 'phase-2-catalog-contract.json'].includes(entry.name) ? [path] : [];
+    return entry.isDirectory() ? (allowedPolicyIds === null || allowedPolicyIds.has(entry.name) ? walk(path, allowedPolicyIds) : []) : entry.name.endsWith('.json')
+      && !['phase-1-manifest.json', 'phase-2-manifest.json', 'phase-2-catalog-contract.json'].includes(entry.name) ? [path] : [];
   }));
   return nested.flat();
 }
@@ -470,7 +470,7 @@ function validateTypedPredicate(node, factTypes, key) {
 }
 
 async function materialize(policies) {
-  await rm(packageRoot, { recursive: true, force: true });
+  await Promise.all(policies.map((policy) => rm(join(packageRoot, policy.policyId), { recursive: true, force: true })));
   const manifest = { release: 'AGCF_PHASE_1', policies: [] };
   for (const policy of policies) {
     const directory = join(packageRoot, policy.policyId);
@@ -508,7 +508,7 @@ async function writeShippingDigestBindings(policies) {
 async function validate(sourcePolicies) {
   const manifestBytes = await readFile(manifestPath, 'utf8');
   const manifest = JSON.parse(manifestBytes);
-  const files = await walk(packageRoot);
+  const files = await walk(packageRoot, new Set(sourcePolicies.map((policy) => policy.policyId)));
   const packages = await Promise.all(files.map(async (file) => ({
     file,
     policy: JSON.parse(await readFile(file, 'utf8')),
