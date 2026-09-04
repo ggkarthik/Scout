@@ -22,7 +22,7 @@ class TenantSchemaParityPostgresIntegrationTest {
 
     private static final LocalPostgresTestDatabase.DatabaseConfig DATABASE =
             LocalPostgresTestDatabase.provision("tenant_schema_staged_parity");
-    private static final UUID DEFAULT_ID = UUID.nameUUIDFromBytes("parity-default".getBytes());
+    private static final UUID DEFAULT_ID = UUID.fromString("e5fe0d29-1d64-4175-8ce6-c34f42b214cc");
     private static final UUID LEGACY_ID = UUID.nameUUIDFromBytes("parity-legacy".getBytes());
 
     @Test
@@ -30,7 +30,6 @@ class TenantSchemaParityPostgresIntegrationTest {
         platformFlyway().migrate();
 
         try (Connection connection = connection()) {
-            registerTenant(connection, DEFAULT_ID, "Default Workspace", "default-workspace", "tenant_default");
             TenantSchemaService schemas = new TenantSchemaService(
                     new JdbcTemplate(new SingleConnectionDataSource(connection, true)), "tenant_default");
             schemas.provisionOrReconcileSchemaFromTemplate("tenant_parity_legacy");
