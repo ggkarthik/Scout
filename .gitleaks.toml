@@ -21,3 +21,10 @@ paths = [
   '''^prototype-app/backend/src/test/java/com/prototype/vulnwatch/controller/TenantDeletionPostgresIntegrationTest\.java$''',
   '''^prototype-app/backend/src/test/java/com/prototype/vulnwatch/service/TestPersonaServiceTest\.java$'''
 ]
+
+[[allowlists]]
+description = "Generated public AI Grid catalog identifiers in the immutable platform V1 baseline"
+rules = ["generic-api-key"]
+paths = [
+  '''^prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema\.sql$'''
+]
