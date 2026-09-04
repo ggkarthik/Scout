@@ -4781,3 +4781,34 @@ PILOT	ai.security	f	\N	2026-09-03 07:14:18.782052+05:30	2026-09-03 07:14:18.7820
 --
 -- PostgreSQL database dump complete
 --
+-- Seed compatibility posture policies used by the non-customer workspace.
+INSERT INTO platform.ai_grid_policy_release_decisions
+    (id, policy_id, policy_version, package_digest, decision, reason, decided_by)
+SELECT md5('AI_GRID_LEGACY_COMPAT:' || policy_id || ':' || version || ':' || package_digest)::uuid,
+       policy_id, version, package_digest, 'APPROVED',
+       'Pre-Phase-1 legacy compatibility approval', 'ai-grid-legacy-compatibility'
+  FROM platform.ai_grid_policy_versions
+ WHERE policy_id NOT LIKE 'AGCF-%'
+   AND package_digest IS NOT NULL
+   AND coalesce(release_family, '') <> 'AGCF_PHASE_1'
+ON CONFLICT (id) DO NOTHING;
+
+UPDATE platform.ai_grid_policy_versions p
+   SET lifecycle = 'PUBLISHED', published_at = coalesce(published_at, now())
+ WHERE p.policy_id NOT LIKE 'AGCF-%'
+   AND p.package_digest IS NOT NULL
+   AND coalesce(p.release_family, '') <> 'AGCF_PHASE_1';
+
+INSERT INTO platform.ai_grid_policy_distribution
+    (policy_id, available, default_selection, rollout_stage, canary_tenant_ids_json,
+     pinned_version, updated_by, approved_package_digest, release_decision_id)
+SELECT p.policy_id, true, p.default_selection, 'GENERAL_AVAILABILITY', '[]'::jsonb,
+       p.version, 'ai-grid-legacy-compatibility', p.package_digest, r.id
+  FROM platform.ai_grid_policy_versions p
+  JOIN platform.ai_grid_policy_release_decisions r
+    ON r.policy_id = p.policy_id AND r.policy_version = p.version
+   AND r.package_digest = p.package_digest AND r.decision = 'APPROVED'
+ WHERE p.policy_id NOT LIKE 'AGCF-%'
+   AND p.package_digest IS NOT NULL
+   AND coalesce(p.release_family, '') <> 'AGCF_PHASE_1'
+ON CONFLICT (policy_id) DO NOTHING;

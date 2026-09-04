@@ -8828,4 +8828,23 @@ ALTER TABLE ${tenantSchema}.vulnerability_source_filter_configs ENABLE ROW LEVEL
 
 --
 -- PostgreSQL database dump complete
+-- Add tenant-parameterized access for newly provisioned schemas. The dump's
+-- default-workspace policies remain for compatibility; this permissive policy
+-- makes the same schema safe for its actual platform tenant ID.
+DO $$
+DECLARE table_record record;
+BEGIN
+    FOR table_record IN
+        SELECT table_name
+          FROM information_schema.columns
+         WHERE table_schema = '${tenantSchema}'
+           AND column_name = 'tenant_id'
+    LOOP
+        EXECUTE format(
+            'CREATE POLICY tenant_runtime_isolation ON %I.%I '
+            'USING (tenant_id = NULLIF(current_setting(''app.current_tenant_id'', true), '''')::uuid) '
+            'WITH CHECK (tenant_id = NULLIF(current_setting(''app.current_tenant_id'', true), '''')::uuid)',
+            '${tenantSchema}', table_record.table_name);
+    END LOOP;
+END $$;
 --
