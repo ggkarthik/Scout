@@ -3,6 +3,7 @@
 -- PostgreSQL database dump
 --
 
+ 
 
 -- Dumped from database version 17.9 (Homebrew)
 -- Dumped by pg_dump version 17.9 (Homebrew)
@@ -3882,7 +3883,48 @@ ALTER TABLE ONLY platform.tenant_schema_versions
 
 
 --
+-- Canonical AI Grid control-plane state required for the seeded non-customer workspace.
+INSERT INTO platform.ai_grid_policy_release_decisions
+    (id, policy_id, policy_version, package_digest, decision, reason, decided_by)
+SELECT md5('AI_GRID_V1_SHIPMENT:' || policy_id || ':' || version || ':' || package_digest)::uuid,
+       policy_id, version, package_digest, 'APPROVED',
+       'Source-controlled V1 initial package shipment', 'ai-grid-package-compiler'
+  FROM platform.ai_grid_policy_versions
+ WHERE package_digest IS NOT NULL
+   AND (package_source_ref LIKE 'policy-packages/agcf/%'
+        OR policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL')
+ON CONFLICT (id) DO NOTHING;
+
+UPDATE platform.ai_grid_policy_versions p
+   SET lifecycle = 'PUBLISHED', published_at = coalesce(published_at, now())
+ WHERE p.package_digest IS NOT NULL
+   AND (p.package_source_ref LIKE 'policy-packages/agcf/%' OR p.policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL');
+
+INSERT INTO platform.ai_grid_policy_distribution
+    (policy_id, available, default_selection, rollout_stage, canary_tenant_ids_json,
+     pinned_version, updated_by, approved_package_digest, release_decision_id)
+SELECT p.policy_id, true, p.default_selection, 'GENERAL_AVAILABILITY', '[]'::jsonb,
+       p.version, 'ai-grid-package-compiler', p.package_digest, r.id
+  FROM platform.ai_grid_policy_versions p
+  JOIN platform.ai_grid_policy_release_decisions r
+    ON r.policy_id = p.policy_id AND r.policy_version = p.version
+   AND r.package_digest = p.package_digest AND r.decision = 'APPROVED'
+ WHERE p.package_digest IS NOT NULL
+   AND (p.package_source_ref LIKE 'policy-packages/agcf/%'
+        OR p.policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL')
+ON CONFLICT (policy_id) DO NOTHING;
+
+INSERT INTO platform.ai_grid_policy_migration_ledger
+    (legacy_detector_id, legacy_detector_kind, disposition, successor_policy_ids_json,
+     closure_reason, rationale, approved_by)
+VALUES ('AWS_BEDROCK_WEAK_GUARDRAIL', 'POSTURE_POLICY', 'ONE_TO_ONE_REPLACEMENT',
+        '["AGCF-AWS-002"]'::jsonb, NULL,
+        'Equivalent guardrail-strength evidence is preserved by the governed adapter.',
+        'ai-grid-phase-1')
+ON CONFLICT (legacy_detector_id) DO NOTHING;
+
 -- PostgreSQL database dump complete
+
 --
 
 
@@ -4665,6 +4707,44 @@ PILOT	Pilot	ACTIVE	Legacy pilot plan retained for compatibility	2026-09-03 07:14
 --
 -- Data for Name: plan_entitlements; Type: TABLE DATA; Schema: platform; Owner: -
 --
+
+-- Materialize digest-bound AI Grid defaults after all policy catalog data has loaded.
+INSERT INTO platform.ai_grid_policy_release_decisions
+    (id, policy_id, policy_version, package_digest, decision, reason, decided_by)
+SELECT md5('AI_GRID_V1_SHIPMENT:' || policy_id || ':' || version || ':' || package_digest)::uuid,
+       policy_id, version, package_digest, 'APPROVED',
+       'Source-controlled V1 initial package shipment', 'ai-grid-package-compiler'
+  FROM platform.ai_grid_policy_versions
+ WHERE package_digest IS NOT NULL
+   AND (package_source_ref LIKE 'policy-packages/agcf/%' OR policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL')
+ON CONFLICT (id) DO NOTHING;
+
+UPDATE platform.ai_grid_policy_versions p
+   SET lifecycle = 'PUBLISHED', published_at = coalesce(published_at, now())
+ WHERE p.package_digest IS NOT NULL
+   AND (p.package_source_ref LIKE 'policy-packages/agcf/%' OR p.policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL');
+
+INSERT INTO platform.ai_grid_policy_distribution
+    (policy_id, available, default_selection, rollout_stage, canary_tenant_ids_json,
+     pinned_version, updated_by, approved_package_digest, release_decision_id)
+SELECT p.policy_id, true, p.default_selection, 'GENERAL_AVAILABILITY', '[]'::jsonb,
+       p.version, 'ai-grid-package-compiler', p.package_digest, r.id
+  FROM platform.ai_grid_policy_versions p
+  JOIN platform.ai_grid_policy_release_decisions r
+    ON r.policy_id = p.policy_id AND r.policy_version = p.version
+   AND r.package_digest = p.package_digest AND r.decision = 'APPROVED'
+ WHERE p.package_digest IS NOT NULL
+   AND (p.package_source_ref LIKE 'policy-packages/agcf/%' OR p.policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL')
+ON CONFLICT (policy_id) DO NOTHING;
+
+INSERT INTO platform.ai_grid_policy_migration_ledger
+    (legacy_detector_id, legacy_detector_kind, disposition, successor_policy_ids_json,
+     closure_reason, rationale, approved_by)
+VALUES ('AWS_BEDROCK_WEAK_GUARDRAIL', 'POSTURE_POLICY', 'ONE_TO_ONE_REPLACEMENT',
+        '["AGCF-AWS-002"]'::jsonb, NULL,
+        'Equivalent guardrail-strength evidence is preserved by the governed adapter.',
+        'ai-grid-phase-1')
+ON CONFLICT (legacy_detector_id) DO NOTHING;
 
 COPY platform.plan_entitlements (plan_code, entitlement_key, enabled, config_json, created_at, updated_at) FROM stdin;
 PRO	ai.investigation_summary	t	\N	2026-09-03 07:14:18.734178+05:30	2026-09-03 07:14:18.734178+05:30
