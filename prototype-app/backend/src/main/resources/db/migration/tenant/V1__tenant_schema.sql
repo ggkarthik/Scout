@@ -8832,7 +8832,8 @@ INSERT INTO ${tenantSchema}.ai_grid_budget_config
     (tenant_id, enforcement_mode, daily_scan_limit, daily_provider_api_call_limit,
      daily_new_snapshot_bytes_limit, daily_processing_ms_limit, retained_snapshot_bytes_limit,
      warning_ratio, updated_by, reason)
-VALUES ('${tenantId}'::uuid, 'OBSERVE', 24, 10000, 1073741824, 3600000, 10737418240,
+VALUES ((SELECT id FROM platform.tenants WHERE schema_name = '${tenantSchema}' LIMIT 1),
+        'OBSERVE', 24, 10000, 1073741824, 3600000, 10737418240,
         0.80, 'ai-grid-bootstrap', 'Initial observable AI Grid budget')
 ON CONFLICT (tenant_id) DO NOTHING;
 
