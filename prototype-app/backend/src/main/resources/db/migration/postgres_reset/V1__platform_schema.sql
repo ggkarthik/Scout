@@ -1488,6 +1488,18 @@ CREATE TABLE platform.tenants (
 );
 
 
+-- Canonical non-customer workspace required by application startup and CI fixtures.
+INSERT INTO platform.tenants (
+    id, name, slug, schema_name, status, plan_code, created_at, updated_at,
+    max_connector_count, max_service_account_count, max_daily_sbom_uploads,
+    max_export_rows, max_daily_exposure_refreshes
+)
+VALUES (
+    'e5fe0d29-1d64-4175-8ce6-c34f42b214cc', 'Default Workspace', 'default-workspace',
+    'tenant_default', 'ACTIVE', 'ENTERPRISE', now(), now(), 10, 25, 100, 50000, 25
+);
+
+
 --
 -- Name: vex_assertions; Type: TABLE; Schema: platform; Owner: -
 --
