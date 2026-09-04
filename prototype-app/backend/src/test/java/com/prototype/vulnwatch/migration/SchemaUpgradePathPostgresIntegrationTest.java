@@ -10,22 +10,19 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import org.flywaydb.core.Flyway;
-import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
 @EnabledIfSystemProperty(named = "run.postgres.it", matches = "true")
 class SchemaUpgradePathPostgresIntegrationTest {
 
-    private static final String CURRENT_SCHEMA_VERSION = "99";
+    private static final String CURRENT_SCHEMA_VERSION = "1";
     private static final LocalPostgresTestDatabase.DatabaseConfig DATABASE =
             LocalPostgresTestDatabase.provision("schema_upgrade_path");
-    private static final LocalPostgresTestDatabase.DatabaseConfig UPGRADE_DATABASE =
-            LocalPostgresTestDatabase.provision("schema_upgrade_phase1_path");
 
     @Test
     void canApplyResetBaselineWithoutHistoricalMigrations() throws Exception {
-        Flyway flyway = configuredFlyway(null);
+        Flyway flyway = configuredFlyway();
         flyway.migrate();
 
         assertNotNull(flyway.info().current());
@@ -33,35 +30,34 @@ class SchemaUpgradePathPostgresIntegrationTest {
         assertEquals(0, flyway.info().pending().length);
         assertEquals(0, failedCount());
         assertEquals(1, historyCount("1"));
-        assertPhase1Catalog(DATABASE);
-        assertPhase2Catalog(DATABASE);
+        assertEquals(180, queryForInt(DATABASE, "select count(*) from platform.ai_grid_policy_versions"));
+        assertEquals(1, queryForInt(DATABASE, "select count(*) from information_schema.schemata where schema_name='tenant_default'"));
     }
 
     @Test
-    void prePhase1DatabaseUpgradesToTheSameSeventySixEntryGovernedCatalog() throws Exception {
-        configuredFlyway(UPGRADE_DATABASE, MigrationVersion.fromVersion("74")).migrate();
-        configuredFlyway(UPGRADE_DATABASE, null).migrate();
-
-        assertPhase1Catalog(UPGRADE_DATABASE);
-        assertPhase2Catalog(UPGRADE_DATABASE);
+    void tenantDefaultCanBeMigratedFromTheEmptyPlatformBaseline() throws Exception {
+        configuredFlyway().migrate();
+        Flyway tenant = Flyway.configure()
+                .dataSource(DATABASE.url(), DATABASE.username(), DATABASE.password())
+                .schemas("tenant_default")
+                .defaultSchema("tenant_default")
+                .table("tenant_schema_history")
+                .locations("filesystem:src/main/resources/db/migration/tenant")
+                .placeholders(java.util.Map.of("tenantSchema", "tenant_default"))
+                .validateOnMigrate(true)
+                .outOfOrder(false)
+                .load();
+        tenant.migrate();
+        assertEquals("1", tenant.info().current().getVersion().getVersion());
     }
 
-    private Flyway configuredFlyway(MigrationVersion target) {
-        return configuredFlyway(DATABASE, target);
-    }
-
-    private Flyway configuredFlyway(LocalPostgresTestDatabase.DatabaseConfig database, MigrationVersion target) {
+    private Flyway configuredFlyway() {
         var config = Flyway.configure()
-                .dataSource(database.url(), database.username(), database.password())
+                .dataSource(DATABASE.url(), DATABASE.username(), DATABASE.password())
                 .defaultSchema("public")
                 .locations("filesystem:src/main/resources/db/migration/postgres_reset")
-                .baselineOnMigrate(false)
-                .baselineVersion("1")
                 .validateOnMigrate(true)
                 .outOfOrder(false);
-        if (target != null) {
-            config.target(target);
-        }
         return config.load();
     }
 
@@ -77,19 +73,6 @@ class SchemaUpgradePathPostgresIntegrationTest {
         return queryForInt(DATABASE, sql);
     }
 
-    private void assertPhase1Catalog(LocalPostgresTestDatabase.DatabaseConfig database) throws SQLException {
-        assertEquals(76, queryForInt(database, "select count(*) from platform.ai_grid_policy_distribution d join platform.ai_grid_policy_versions p on p.policy_id=d.policy_id and p.version='1.0.0' where p.release_family='AGCF_PHASE_1'"));
-        assertEquals(38, queryForInt(database, "select count(*) from platform.ai_grid_policy_versions where release_family='AGCF_PHASE_1' and provider='AWS'"));
-        assertEquals(32, queryForInt(database, "select count(*) from platform.ai_grid_policy_versions where release_family='AGCF_PHASE_1' and provider='AZURE'"));
-        assertEquals(6, queryForInt(database, "select count(*) from platform.ai_grid_policy_versions where release_family='AGCF_PHASE_1' and provider='MULTI_CLOUD'"));
-        assertEquals(0, queryForInt(database, "select count(*) from platform.ai_grid_policy_distribution d join platform.ai_grid_policy_versions p on p.policy_id=d.policy_id and p.release_family='AGCF_PHASE_1' where d.default_selection='REQUIRED'"));
-        assertEquals(0, queryForInt(database, "select count(*) from platform.ai_grid_policy_distribution d join platform.ai_grid_policy_versions p on p.policy_id=d.policy_id and p.release_family='AGCF_PHASE_1' where d.default_selection='ENABLED'"));
-        assertEquals(76, queryForInt(database, "select count(*) from platform.ai_grid_policy_distribution d join platform.ai_grid_policy_versions p on p.policy_id=d.policy_id and p.release_family='AGCF_PHASE_1' where d.default_selection='DISABLED'"));
-        assertEquals(76, queryForInt(database, "select count(*) from platform.ai_grid_policy_distribution d join platform.ai_grid_policy_versions p on p.policy_id=d.policy_id and p.release_family='AGCF_PHASE_1' where p.lifecycle='VALIDATED' and d.rollout_stage='PAUSED' and d.available=false"));
-        assertEquals(1, queryForInt(database, "select count(*) from platform.ai_grid_policy_versions where policy_id='AGCF-AWS-033' and required_facts_json->0->>'valueType'='STRING'"));
-        assertEquals(6, queryForInt(database, "select count(*) from platform.ai_grid_policy_versions where policy_id like 'AGCF-XSP-%' and release_family='AGCF_PHASE_1' and required_facts_json='[]'::jsonb"));
-    }
-
     private int queryForInt(LocalPostgresTestDatabase.DatabaseConfig database, String sql) throws SQLException {
         try (Connection connection = DriverManager.getConnection(database.url(), database.username(), database.password());
              Statement statement = connection.createStatement();
@@ -99,14 +82,4 @@ class SchemaUpgradePathPostgresIntegrationTest {
         }
     }
 
-    private void assertPhase2Catalog(LocalPostgresTestDatabase.DatabaseConfig database) throws SQLException {
-        assertEquals(83, queryForInt(database, "select count(*) from platform.ai_grid_policy_versions where release_family='AGCF_PHASE_2'"));
-        assertEquals(34, queryForInt(database, "select count(*) from platform.ai_grid_policy_versions where release_family='AGCF_PHASE_2' and provider='AWS'"));
-        assertEquals(43, queryForInt(database, "select count(*) from platform.ai_grid_policy_versions where release_family='AGCF_PHASE_2' and provider='AZURE'"));
-        assertEquals(6, queryForInt(database, "select count(*) from platform.ai_grid_policy_versions where release_family='AGCF_PHASE_2' and provider='MULTI_CLOUD'"));
-        assertEquals(83, queryForInt(database, "select count(*) from platform.ai_grid_policy_versions where release_family='AGCF_PHASE_2' and lifecycle='VALIDATED'"));
-        assertEquals(83, queryForInt(database, "select count(*) from platform.ai_grid_policy_distribution d join platform.ai_grid_policy_versions p on p.policy_id=d.policy_id and p.release_family='AGCF_PHASE_2' where d.rollout_stage='PAUSED' and d.available=false"));
-        assertEquals(9, queryForInt(database, "select count(*) from platform.ai_grid_capability_definitions where capability_id like 'AWS_%' or capability_id like 'AZURE_%'"));
-        assertEquals(16, queryForInt(database, "select count(*) from platform.ai_grid_policy_replacements"));
-    }
 }

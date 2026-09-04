@@ -20,8 +20,6 @@ import org.junit.jupiter.api.Test;
 class PostgresResetMigrationGuardTest {
 
     private static final String HEADER = "-- migration-guard: platform-only";
-    private static final String V46_SHA256 =
-            "ce5b27f49fa2a7512adcdc2fdd503f57b2744dc7f310068323f552445abeebbf";
     private static final Pattern VERSION = Pattern.compile("^V(\\d+)__.+\\.sql$");
     private static final Pattern TENANT_DEFAULT = Pattern.compile(
             "(?i)(?:\\\"tenant_default\\\"|tenant_default)\\s*\\.");
@@ -56,7 +54,7 @@ class PostgresResetMigrationGuardTest {
     }
 
     @Test
-    void platformMigrationsAfterV46AreStrictlyPlatformOnly() throws Exception {
+    void platformMigrationsAreStrictlyPlatformOnlyAndSubstantive() throws Exception {
         Path migrationDir = Path.of("src/main/resources/db/migration/postgres_reset");
         List<String> failures = new ArrayList<>();
         try (var files = Files.list(migrationDir)) {
@@ -66,16 +64,35 @@ class PostgresResetMigrationGuardTest {
                     failures.add("malformed filename: " + migration.getFileName());
                     continue;
                 }
-                int version = Integer.parseInt(matcher.group(1));
-                if (version < 46) {
+                String sql = Files.readString(migration);
+                if (withoutComments(sql).isBlank()) {
+                    failures.add(migration.getFileName() + ": comment-only migration");
                     continue;
                 }
-                if (version == 46) {
-                    assertThat(sha256(migration)).isEqualTo(V46_SHA256);
+                if (Integer.parseInt(matcher.group(1)) == 1) {
+                    if (!sql.startsWith(HEADER) || sql.contains("${tenantId}") || sql.contains("${tenantSchema}")) {
+                        failures.add(migration.getFileName() + ": reset baseline contains tenant placeholders or missing header");
+                    }
                     continue;
                 }
-                for (String violation : violations(Files.readString(migration))) {
+                for (String violation : violations(sql)) {
                     failures.add(migration.getFileName() + ": " + violation);
+                }
+            }
+        }
+        assertThat(failures).isEmpty();
+    }
+
+    @Test
+    void tenantMigrationsHaveNumericNamesAndSubstantiveSql() throws Exception {
+        Path migrationDir = Path.of("src/main/resources/db/migration/tenant");
+        List<String> failures = new ArrayList<>();
+        try (var files = Files.list(migrationDir)) {
+            for (Path migration : files.filter(path -> path.getFileName().toString().endsWith(".sql")).toList()) {
+                if (!VERSION.matcher(migration.getFileName().toString()).matches()) {
+                    failures.add("malformed filename: " + migration.getFileName());
+                } else if (withoutComments(Files.readString(migration)).isBlank()) {
+                    failures.add("comment-only migration: " + migration.getFileName());
                 }
             }
         }

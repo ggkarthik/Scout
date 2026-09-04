@@ -12,7 +12,6 @@ import java.sql.Statement;
 import java.util.Map;
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
-import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -27,8 +26,8 @@ class TenantSchemaParityPostgresIntegrationTest {
     private static final UUID LEGACY_ID = UUID.nameUUIDFromBytes("parity-legacy".getBytes());
 
     @Test
-    void v41TemplateAndLegacyCloneReachIdenticalPackagedTenantTarget() throws Exception {
-        platformFlyway(MigrationVersion.fromVersion("41")).migrate();
+    void freshAndProvisionedTenantsReachIdenticalPackagedTenantTarget() throws Exception {
+        platformFlyway().migrate();
 
         try (Connection connection = connection()) {
             registerTenant(connection, DEFAULT_ID, "Default Workspace", "default-workspace", "tenant_default");
@@ -38,7 +37,6 @@ class TenantSchemaParityPostgresIntegrationTest {
             registerTenant(connection, LEGACY_ID, "Parity Legacy", "parity-legacy", "tenant_parity_legacy");
         }
 
-        platformFlyway(null).migrate();
         int target = PackagedMigrationCatalog.resolve().tenantTarget();
         assertEquals(target, migrateTenant("tenant_default", DEFAULT_ID));
         assertEquals(target, migrateTenant("tenant_parity_legacy", LEGACY_ID));
@@ -61,8 +59,6 @@ class TenantSchemaParityPostgresIntegrationTest {
                 .defaultSchema(schema)
                 .table("tenant_schema_history")
                 .locations("filesystem:src/main/resources/db/migration/tenant")
-                .baselineOnMigrate(true)
-                .baselineVersion(MigrationVersion.fromVersion("41"))
                 .placeholders(Map.of("tenantId", tenantId.toString(), "tenantSchema", schema))
                 .validateOnMigrate(true)
                 .outOfOrder(false)
@@ -71,16 +67,13 @@ class TenantSchemaParityPostgresIntegrationTest {
         return Integer.parseInt(flyway.info().current().getVersion().getVersion());
     }
 
-    private Flyway platformFlyway(MigrationVersion target) {
+    private Flyway platformFlyway() {
         var configuration = Flyway.configure()
                 .dataSource(DATABASE.url(), DATABASE.username(), DATABASE.password())
                 .defaultSchema("public")
                 .locations("filesystem:src/main/resources/db/migration/postgres_reset")
                 .validateOnMigrate(true)
                 .outOfOrder(false);
-        if (target != null) {
-            configuration.target(target);
-        }
         return configuration.load();
     }
 

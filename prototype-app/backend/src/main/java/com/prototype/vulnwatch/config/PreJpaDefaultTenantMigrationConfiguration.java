@@ -5,7 +5,6 @@ import java.util.Map;
 import java.util.UUID;
 import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
-import org.flywaydb.core.api.MigrationVersion;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.flyway.FlywayMigrationStrategy;
 import org.springframework.context.annotation.Bean;
@@ -49,8 +48,6 @@ public class PreJpaDefaultTenantMigrationConfiguration {
             }
             Flyway.configure().dataSource(dataSource).schemas(DEFAULT_SCHEMA).defaultSchema(DEFAULT_SCHEMA)
                     .table("tenant_schema_history").locations("classpath:db/migration/tenant")
-                    .baselineOnMigrate(true).baselineVersion(MigrationVersion.fromVersion("41"))
-                    .baselineDescription("legacy tenant schema baseline")
                     .placeholders(Map.of("tenantId", tenantId.toString(), "tenantSchema", DEFAULT_SCHEMA))
                     .validateOnMigrate(true).outOfOrder(false).load().migrate();
         };

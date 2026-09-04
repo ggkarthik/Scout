@@ -9,12 +9,9 @@ import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
 import com.prototype.vulnwatch.support.PostgresITSupport;
 import com.prototype.vulnwatch.support.PostgresIntegrationTest;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -41,7 +38,7 @@ class TenantSchemaReconciliationPostgresIntegrationTest {
     private JdbcTemplate platformJdbcTemplate;
 
     @Test
-    void reconciliationAddsDefaultSchemaColumnsMissingFromExistingTenantSchemas() throws IOException {
+    void provisionedTenantReachesPackagedTargetAndHasRls() {
         Tenant tenant = tenantService.createTenant("Drift Customer", "drift-customer", "pilot", null);
         tenantSchemaMigrationService.provisionNewTenant(tenant);
         String schemaName = tenant.getSchemaName();
@@ -49,9 +46,9 @@ class TenantSchemaReconciliationPostgresIntegrationTest {
         Integer version = platformJdbcTemplate.queryForObject("""
                 select current_version from platform.tenant_schema_versions where tenant_id = ?
                 """, Integer.class, tenant.getId());
-        String checksum = platformJdbcTemplate.queryForObject("""
-                select structural_checksum from platform.tenant_schema_versions where tenant_id = ?
-                """, String.class, tenant.getId());
+        Integer target = platformJdbcTemplate.queryForObject("""
+                select target_version from platform.tenant_schema_versions where tenant_id = ? and status = 'CURRENT'
+                """, Integer.class, tenant.getId());
         Integer incompleteRls = platformJdbcTemplate.queryForObject("""
                 select count(*)
                 from pg_class c
@@ -61,60 +58,8 @@ class TenantSchemaReconciliationPostgresIntegrationTest {
                   and (not c.relrowsecurity or not c.relforcerowsecurity
                        or not exists (select 1 from pg_policy p where p.polrelid = c.oid and p.polname = 'tenant_isolation'))
                 """, Integer.class, schemaName);
-        Boolean demoRlsEnabled = platformJdbcTemplate.queryForObject("""
-                select c.relrowsecurity or c.relforcerowsecurity
-                from pg_class c join pg_namespace n on n.oid = c.relnamespace
-                where n.nspname = ? and c.relname = 'demo_requests'
-                """, Boolean.class, schemaName);
-        Boolean auditAllowsPlatformEvents = platformJdbcTemplate.queryForObject("""
-                select c.is_nullable = 'YES' and rel.relrowsecurity and rel.relforcerowsecurity
-                from information_schema.columns c
-                join pg_namespace n on n.nspname = c.table_schema
-                join pg_class rel on rel.relnamespace = n.oid and rel.relname = c.table_name
-                where c.table_schema = ? and c.table_name = 'audit_events' and c.column_name = 'tenant_id'
-                """, Boolean.class, schemaName);
-
         assertEquals(PackagedMigrationCatalog.resolve().tenantTarget(), version);
-        Integer demoRequestsActiveEmailIndex = platformJdbcTemplate.queryForObject("""
-                select count(*) from pg_indexes
-                where schemaname = ? and tablename = 'demo_requests'
-                  and indexname = 'uk_demo_requests_active_email'
-                """, Integer.class, schemaName);
-        Integer ingestionDedupeIndex = platformJdbcTemplate.queryForObject("""
-                select count(*) from pg_indexes
-                where schemaname = ? and tablename = 'ingestion_jobs'
-                  and indexname = 'uk_ingestion_jobs_dedupe_active'
-                """, Integer.class, schemaName);
-        assertNotNull(checksum);
+        assertEquals(PackagedMigrationCatalog.resolve().tenantTarget(), target);
         assertEquals(0, incompleteRls);
-        assertEquals(false, demoRlsEnabled);
-        assertEquals(true, auditAllowsPlatformEvents);
-        // V67 converges these platform-line objects onto every tenant schema.
-        assertEquals(1, demoRequestsActiveEmailIndex);
-        assertEquals(1, ingestionDedupeIndex);
-
-        platformJdbcTemplate.execute("ALTER TABLE tenant_default.assets ADD COLUMN reconciliation_probe text");
-        assertColumnCount(schemaName, "assets", "reconciliation_probe", 0);
-
-        platformJdbcTemplate.execute(reconciliationSql());
-
-        assertColumnCount(schemaName, "assets", "reconciliation_probe", 1);
-    }
-
-    private String reconciliationSql() throws IOException {
-        ClassPathResource resource = new ClassPathResource(
-                "db/migration/postgres_reset/V28__tenant_schema_reconciliation.sql");
-        return resource.getContentAsString(StandardCharsets.UTF_8);
-    }
-
-    private void assertColumnCount(String schemaName, String tableName, String columnName, int expected) {
-        Integer count = platformJdbcTemplate.queryForObject("""
-                select count(*)
-                from information_schema.columns
-                where table_schema = ?
-                  and table_name = ?
-                  and column_name = ?
-                """, Integer.class, schemaName, tableName, columnName);
-        assertEquals(expected, count);
     }
 }

@@ -17,7 +17,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
-import org.flywaydb.core.api.MigrationVersion;
 import org.flywaydb.core.api.output.RepairResult;
 import org.flywaydb.core.api.output.ValidateResult;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -31,6 +30,7 @@ public final class ProductionBootstrapCli {
     private static final String DEFAULT_TENANT_SLUG = "default-workspace";
     private static final String DEFAULT_TENANT_SCHEMA = "tenant_default";
     private static final String LOCK_NAME = "scout-production-bootstrap";
+    // Retained only for backward-compatible opt-in repair code; normal bootstrap never invokes it.
     private static final String REPAIRABLE_TENANT_MIGRATION_VERSION = "45";
     private static final int REPAIRABLE_TENANT_MIGRATION_CHECKSUM = -1614728776;
     private static final int CURRENT_TENANT_MIGRATION_CHECKSUM = 1898972758;
@@ -68,14 +68,6 @@ public final class ProductionBootstrapCli {
                         }
                         TenantSchema defaultTenant = ensureDefaultTenant(connection);
                         phases.add(Phase.success("default_tenant_registration", defaultTenant.schemaName()));
-                        int repairedTenantCount = repairTenantV45ChecksumsIfApproved(connection, config);
-                        if (repairedTenantCount > 0) {
-                            phases.add(Phase.success("tenant_v45_checksum_repair", "count=" + repairedTenantCount));
-                        }
-                        int reconciledTenantCount = reconcileMissingV45SchemaObjects(connection);
-                        if (reconciledTenantCount > 0) {
-                            phases.add(Phase.success("tenant_v45_schema_reconciliation", "count=" + reconciledTenantCount));
-                        }
                         migrateTenant(config, defaultTenant);
                         String templateChecksum = fingerprint(connection, defaultTenant.schemaName());
                         markCurrent(connection, defaultTenant, templateChecksum, runId);
@@ -586,9 +578,6 @@ public final class ProductionBootstrapCli {
                 .defaultSchema(tenant.schemaName())
                 .table("tenant_schema_history")
                 .locations("classpath:db/migration/tenant")
-                .baselineOnMigrate(true)
-                .baselineVersion(MigrationVersion.fromVersion("41"))
-                .baselineDescription("legacy tenant schema baseline")
                 .placeholders(java.util.Map.of(
                         "tenantId", tenant.tenantId().toString(),
                         "tenantSchema", tenant.schemaName()))

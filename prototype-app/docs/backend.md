@@ -606,7 +606,7 @@ Only registered when `app.test-personas.enabled=true`.
 | POST | `/auth/support-grants/{grantId}/accept` | Platform owner accepts an offered grant |
 | POST | `/tenants/{tenantId}/platform-memberships` | Grant a platform membership directly |
 
-Distinct from — and layers on top of — the existing `tenant_support_grants` table/`TenantSupportGrant` lifecycle: the new piece is that a *tenant* can initiate the grant, not only the platform owner requesting access. Added with `V45__tenant_access_membership_provenance.sql`.
+Distinct from — and layers on top of — the existing `tenant_support_grants` table/`TenantSupportGrant` lifecycle: the new piece is that a *tenant* can initiate the grant, not only the platform owner requesting access. This capability is included in the tenant V1 baseline.
 
 **ServiceAccountController — `/api/service-accounts`**
 
@@ -820,7 +820,7 @@ Full narrative: `docs/business-logic-guide.md#ai-security--ai-grid-pipeline`. Sc
 
 Per-tenant DDL now runs on its own Flyway line, separate from the platform's startup migration:
 
-- **`TenantSchemaMigrationService`** — drives the rollout: acquire a Postgres advisory lock (`scout-tenant-schema-migrator`) → migrate the `tenant_default` template and compute a SHA-256 structural fingerprint (normalized column/constraint/index/sequence/RLS-policy dump) → migrate a canary tenant → migrate remaining tenants in batches of 10, comparing each tenant's fingerprint against the template and halting the batch on drift. Runs against `classpath:db/migration/tenant`, its own `tenant_schema_history` table per schema, baselined at version 41. Also drives `provisionNewTenant(tenant)` for on-demand provisioning of a single new tenant.
+- **`TenantSchemaMigrationService`** — drives the rollout: acquire a Postgres advisory lock (`scout-tenant-schema-migrator`) → migrate the `tenant_default` template and compute a SHA-256 structural fingerprint → migrate a canary tenant → migrate remaining tenants in batches of 10, comparing each tenant's fingerprint against the template and halting the batch on drift. Runs against `classpath:db/migration/tenant`, with its own `tenant_schema_history` table per schema, starting at V1. Also drives `provisionNewTenant(tenant)` for on-demand provisioning of a single new tenant.
 - **`TenantSchemaStatusService`** — reads/writes `platform.tenant_schema_versions` (list for the Platform Console, `readinessFailures(minVersion)` for the health indicator, `markMigrating`/`markCurrent`/`markFailure` called by the migration service).
 - **`TenantSchemaReadinessHealthIndicator`** — actuator `HealthIndicator`, only registered when `app.tenancy.enforce-schema-version=true`; reports `DOWN` with an `unreadyTenantCount` detail if any `ACTIVE` tenant is below `app.tenancy.minimum-compatible-schema-version` (default 44).
 - **`TenantSchemaMigratorRunner`** — a legacy/test-only `ApplicationReadyEvent` listener, gated behind `app.schema-migration.legacy-test-runner-enabled=true` (off by default); superseded in production by `ProductionBootstrapCli` below but still used by some integration tests.

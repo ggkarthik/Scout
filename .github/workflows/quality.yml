@@ -1,6 +1,7 @@
 name: Quality
 
 on:
+  merge_group:
   pull_request:
   push:
     branches:
@@ -8,6 +9,20 @@ on:
       - master
 
 jobs:
+  migration-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate migration filenames, ownership, and append-only changes
+        env:
+          MIGRATION_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: python3 .github/scripts/validate-migrations.py
+      - name: Run migration catalog tests
+        working-directory: prototype-app/backend
+        run: mvn -q -Dtest=MigrationCatalogTest,PostgresResetMigrationGuardTest test
+
   migration-boundaries:
     runs-on: ubuntu-latest
     steps:
