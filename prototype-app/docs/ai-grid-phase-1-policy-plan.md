@@ -348,3 +348,4 @@ Do not use “OWASP compliant,” “AICM certified,” “all OWASP risks cover
 ## Final recommendation
 
 Approve the 76-policy catalog as the Phase 1 scope. Treat E0, E1, and E2 as one production release commitment because all rely on metadata the connectors already collect. Treat the connector-enhancement tables as a separately measured next-target backlog, with early focus on effective IAM/RBAC, backing-store network/encryption, runtime consumption metrics, model/data provenance, and safe Search/MCP auth classification. This yields broad posture coverage now without pretending cloud configuration can prove prompt-injection resistance, hidden-context protection, output safety, or runtime behavior.
+

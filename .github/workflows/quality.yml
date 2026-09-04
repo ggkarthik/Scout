@@ -27,6 +27,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Prevent migration history rewrites and version collisions
+        if: github.event_name != 'push'
+        run: python3 .github/scripts/check-migration-integrity.py
       - name: Enforce tenant migration ownership
         run: python3 .github/scripts/check-tenant-ddl.py
       - name: Validate schema migrator environment boundary

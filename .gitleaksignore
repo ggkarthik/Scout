@@ -75,3 +75,46 @@
 2b7162fe3a73bff9a859a11407a782d344213634:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V76__seed_ai_grid_phase_1_catalog.sql:generic-api-key:242
 2b7162fe3a73bff9a859a11407a782d344213634:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V76__seed_ai_grid_phase_1_catalog.sql:generic-api-key:243
 2b7162fe3a73bff9a859a11407a782d344213634:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V76__seed_ai_grid_phase_1_catalog.sql:generic-api-key:244
+
+# Exact GitHub Actions Gitleaks 8.24 false-positive fingerprints for public,
+# generated AI Grid catalog identifiers in the V1 baseline. Each entry is
+# commit, path, rule, and line scoped; do not replace these with a broad exemption.
+
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4514
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4515
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4518
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4520
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4521
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4522
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4523
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4524
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4528
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4529
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4530
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4531
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4532
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4533
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4535
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4541
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4542
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4544
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4554
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4558
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4559
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4560
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4561
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4565
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4566
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4568
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4569
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4574
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4575
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4576
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4577
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4578
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4579
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4580
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4581
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4582
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4583
+72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4770
