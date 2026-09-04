@@ -945,7 +945,7 @@ public class AiSecurityApiService {
                  where p.lifecycle in ('PUBLISHED', 'CANARY', 'DEPRECATED')
                    and (d.available=true or p.lifecycle='DEPRECATED')
                    and (d.rollout_stage='GENERAL_AVAILABILITY'
-                        or (d.rollout_stage='CANARY' and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
+                        or (d.rollout_stage in ('CANARY','DEV') and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
                  order by p.policy_id,p.version
                 """, Map.of("tenantId", tenant.getId().toString()), (rs, n) -> catalogDefinition(rs));
     }
@@ -960,7 +960,7 @@ public class AiSecurityApiService {
                  where p.policy_id=:id and p.lifecycle in ('PUBLISHED', 'CANARY', 'DEPRECATED')
                    and (d.available=true or p.lifecycle='DEPRECATED')
                    and (d.rollout_stage='GENERAL_AVAILABILITY'
-                        or (d.rollout_stage='CANARY' and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
+                        or (d.rollout_stage in ('CANARY','DEV') and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
                  order by p.version limit 1
                 """, Map.of("id", policyId, "tenantId", tenant.getId().toString()), (rs, n) -> catalogDefinition(rs));
         return definitions.stream().findFirst();

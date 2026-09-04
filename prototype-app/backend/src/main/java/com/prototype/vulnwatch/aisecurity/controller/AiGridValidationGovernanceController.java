@@ -180,8 +180,14 @@ public class AiGridValidationGovernanceController {
     }
 
     @PostMapping("/policies/{policyId}/approve")
-    public PolicyApproval approve(@PathVariable String policyId) {
-        return governance.approvePolicy(policyId, actor());
+    public PolicyApproval approve(@PathVariable String policyId, @RequestBody(required = false) ApprovalCommand command) {
+        return governance.approvePolicy(policyId, command == null ? null : command.tenantTestNote(), actor());
+    }
+
+    @PostMapping("/policies/{policyId}/dev-deploy")
+    public AiGridValidationGovernanceService.DevDeployment devDeploy(@PathVariable String policyId,
+                                                                      @RequestBody DevDeployCommand command) {
+        return governance.deployToDevTenants(policyId, command.targetTenantIds(), command.testNote(), actor());
     }
 
     @PostMapping("/policies/{policyId}/publish")
@@ -240,4 +246,6 @@ public class AiGridValidationGovernanceController {
 
     public record BiasCommand(boolean passed, String rationale) {}
     public record RevokeCommand(String reason) {}
+    public record ApprovalCommand(String tenantTestNote) {}
+    public record DevDeployCommand(List<UUID> targetTenantIds, String testNote) {}
 }

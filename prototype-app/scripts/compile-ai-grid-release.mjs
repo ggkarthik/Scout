@@ -2,8 +2,13 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
-const args = new Map(process.argv.slice(2).filter((_, i, all) => i % 2 === 0)
-  .map((key, i) => [key, process.argv.slice(2)[i * 2 + 1]]));
+const args = new Map();
+for (let index = 2; index < process.argv.length; index += 1) {
+  const key = process.argv[index];
+  const next = process.argv[index + 1];
+  args.set(key, next && !next.startsWith('--') ? next : true);
+  if (next && !next.startsWith('--')) index += 1;
+}
 const required = (key) => {
   const value = args.get(key);
   if (!value) throw new Error(`${key} is required`);
@@ -29,6 +34,23 @@ if (phase2) {
   const replacements = source.replacements.map(({ successorPolicyId }) => successorPolicyId);
   expected = [...ranges, ...replacements].sort();
   if (expected.length !== 83 || new Set(expected).size !== 83) throw new Error('Phase 2 contract must resolve to 83 unique policy IDs');
+  if (!Array.isArray(source.policies) || source.policies.length !== 83) {
+    throw new Error('Phase 2 catalog contract must contain exactly 83 explicit policy entries');
+  }
+  if (JSON.stringify(source.policies.map(({ policyId: id }) => id).sort()) !== JSON.stringify(expected)) {
+    throw new Error('Phase 2 explicit policy entries do not match the governed ID set');
+  }
+  const replacementBySuccessor = new Map(source.replacements.map((replacement) => [replacement.successorPolicyId, replacement.predecessorPolicyId]));
+  const objectives = new Set();
+  for (const entry of source.policies) {
+    if (entry.version !== '1.0.0' || entry.lifecycle !== 'VALIDATED' || entry.releaseStatus !== 'PAUSED'
+        || entry.releaseFamily !== 'AGCF_PHASE_2') throw new Error(`Invalid Phase 2 source state: ${entry.policyId}`);
+    if (!entry.controlObjectiveId || objectives.has(entry.controlObjectiveId)) throw new Error(`Duplicate or missing control objective: ${entry.policyId}`);
+    objectives.add(entry.controlObjectiveId);
+    const predecessor = replacementBySuccessor.get(entry.policyId);
+    if (predecessor && entry.predecessorPolicyId !== predecessor) throw new Error(`Replacement predecessor mismatch: ${entry.policyId}`);
+    if (!predecessor && entry.predecessorPolicyId) throw new Error(`Unexpected predecessor on non-replacement: ${entry.policyId}`);
+  }
 } else {
   expected = source.policies.map((policy) => policy.policyId).sort();
 }
@@ -38,8 +60,28 @@ const compiled = expected.map((id) => {
   if (!existsSync(file)) throw new Error(`Missing package: ${file}`);
   const policy = readJson(file);
   if (policy.policyId !== id || policy.version !== '1.0.0') throw new Error(`Package identity mismatch: ${file}`);
-  if (phase2 && (policy.lifecycle === 'PUBLISHED' || policy.releaseStatus === 'GENERAL_AVAILABILITY')) {
-    throw new Error(`Phase 2 source must install paused and validated, not published: ${id}`);
+  if (phase2 && (policy.lifecycle !== 'VALIDATED' || policy.releaseStatus !== 'PAUSED' || policy.releaseFamily !== 'AGCF_PHASE_2')) {
+    throw new Error(`Phase 2 source must install as VALIDATED/PAUSED in AGCF_PHASE_2: ${id}`);
+  }
+  if (phase2) {
+    const declared = source.policies.find((entry) => entry.policyId === id);
+    if (!declared) throw new Error(`Missing declared source entry: ${id}`);
+    if (declared.predecessorPolicyId !== policy.predecessorPolicyId) throw new Error(`Package predecessor mismatch: ${id}`);
+  }
+  if (!policy.controlObjectiveId || !policy.provider || !policy.evaluationMode || !policy.evaluationDefinition) {
+    throw new Error(`Package is missing executable policy metadata: ${id}`);
+  }
+  if (!Array.isArray(policy.requiredCapabilities) || policy.requiredCapabilities.length === 0) {
+    throw new Error(`Package has no required capability: ${id}`);
+  }
+  if (!Array.isArray(policy.requiredFacts) || (policy.evaluationMode === 'CORRELATION_PATH' && policy.requiredFacts.length !== 0)) {
+    throw new Error(`Package has an invalid fact contract: ${id}`);
+  }
+  if (policy.evaluationMode === 'CORRELATION_PATH' && !policy.evaluationDefinition.correlationPath) {
+    throw new Error(`Correlation package has no correlation contract: ${id}`);
+  }
+  if (policy.evaluationMode !== 'CORRELATION_PATH' && !policy.evaluationDefinition.artifactFacts?.predicate) {
+    throw new Error(`Posture package has no bounded predicate: ${id}`);
   }
   if (!Array.isArray(policy.frameworkMappings) || policy.frameworkMappings.length === 0) {
     throw new Error(`Package has no framework mappings: ${id}`);

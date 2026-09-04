@@ -54,7 +54,7 @@ class PostgresResetMigrationGuardTest {
     }
 
     @Test
-    void platformMigrationsAfterTheConsolidatedBaselineAreStrictlyPlatformOnly() throws Exception {
+    void platformMigrationsAreStrictlyPlatformOnlyAndSubstantive() throws Exception {
         Path migrationDir = Path.of("src/main/resources/db/migration/postgres_reset");
         List<String> failures = new ArrayList<>();
         try (var files = Files.list(migrationDir)) {
@@ -64,16 +64,35 @@ class PostgresResetMigrationGuardTest {
                     failures.add("malformed filename: " + migration.getFileName());
                     continue;
                 }
-                int version = Integer.parseInt(matcher.group(1));
-                // V1 is the reviewed, consolidated platform bootstrap. It retains
-                // historical tenant_default bootstrap statements needed before the
-                // independent tenant migration line runs. New platform migrations
-                // must be platform-only.
-                if (version == 1) {
+                String sql = Files.readString(migration);
+                if (withoutComments(sql).isBlank()) {
+                    failures.add(migration.getFileName() + ": comment-only migration");
                     continue;
                 }
-                for (String violation : violations(Files.readString(migration))) {
+                if (Integer.parseInt(matcher.group(1)) == 1) {
+                    if (!sql.startsWith(HEADER) || sql.contains("${tenantId}") || sql.contains("${tenantSchema}")) {
+                        failures.add(migration.getFileName() + ": reset baseline contains tenant placeholders or missing header");
+                    }
+                    continue;
+                }
+                for (String violation : violations(sql)) {
                     failures.add(migration.getFileName() + ": " + violation);
+                }
+            }
+        }
+        assertThat(failures).isEmpty();
+    }
+
+    @Test
+    void tenantMigrationsHaveNumericNamesAndSubstantiveSql() throws Exception {
+        Path migrationDir = Path.of("src/main/resources/db/migration/tenant");
+        List<String> failures = new ArrayList<>();
+        try (var files = Files.list(migrationDir)) {
+            for (Path migration : files.filter(path -> path.getFileName().toString().endsWith(".sql")).toList()) {
+                if (!VERSION.matcher(migration.getFileName().toString()).matches()) {
+                    failures.add("malformed filename: " + migration.getFileName());
+                } else if (withoutComments(Files.readString(migration)).isBlank()) {
+                    failures.add("comment-only migration: " + migration.getFileName());
                 }
             }
         }

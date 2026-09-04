@@ -183,6 +183,17 @@ public class TenantSchemaService {
         provisionOrReconcileSchemaFromTemplate(normalized);
     }
 
+    /** Creates an empty tenant schema so the tenant Flyway V1 is authoritative. */
+    public void provisionEmptySchema(String schemaName) {
+        String normalized = sanitizeSchemaName(schemaName);
+        if (defaultSchemaName.equals(normalized) || "platform".equals(normalized)) {
+            throw new IllegalArgumentException("Refusing to provision protected schema: " + normalized);
+        }
+        if (!schemaExists(normalized)) {
+            platformJdbcTemplate.execute("CREATE SCHEMA " + quotedIdentifier(normalized));
+        }
+    }
+
     public void provisionOrReconcileSchemaFromTemplate(String schemaName) {
         String normalized = sanitizeSchemaName(schemaName);
         if (defaultSchemaName.equals(normalized) || "platform".equals(normalized)) {

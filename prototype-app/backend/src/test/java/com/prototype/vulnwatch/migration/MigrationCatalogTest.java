@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test;
 class MigrationCatalogTest {
 
     private static final Path MIGRATION_DIR = Path.of("src/main/resources/db/migration/postgres_reset");
+    private static final Path TENANT_MIGRATION_DIR = Path.of("src/main/resources/db/migration/tenant");
     private static final Pattern VERSION_PATTERN = Pattern.compile("^V(\\d+)__.+\\.sql$");
 
     @Test
@@ -81,6 +82,19 @@ class MigrationCatalogTest {
                 "Unexpected duplicate migration bodies found: " + unexpectedDuplicateBodies
         );
         assertTrue(!migrations.isEmpty(), "Expected at least one migration in the reset catalog.");
+        assertCatalogIsValid(TENANT_MIGRATION_DIR);
+    }
+
+    private static void assertCatalogIsValid(Path directory) throws IOException {
+        List<MigrationFile> migrations = Files.list(directory)
+                .filter(path -> path.getFileName().toString().endsWith(".sql"))
+                .map(MigrationCatalogTest::toMigrationFile)
+                .toList();
+        assertTrue(!migrations.isEmpty(), "Expected at least one tenant migration.");
+        assertTrue(migrations.stream().map(MigrationFile::version).distinct().count() == migrations.size(),
+                "Duplicate tenant migration versions found.");
+        assertTrue(migrations.stream().allMatch(migration -> !migration.normalizedSql().isBlank()),
+                "Tenant migrations must contain substantive SQL.");
     }
 
     private static MigrationFile toMigrationFile(Path path) {

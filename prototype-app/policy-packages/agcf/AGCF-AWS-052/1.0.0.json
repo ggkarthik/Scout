@@ -1,0 +1,70 @@
+{
+  "policyId": "AGCF-AWS-052",
+  "version": "1.0.0",
+  "name": "Bedrock quota-utilization alarm is absent",
+  "description": "Evaluates whether bedrock quota-utilization alarm is absent using bounded, normalized provider evidence.",
+  "securityIntent": "Prevent the risk condition described by AGCF-AWS-052.",
+  "remediationIntent": "Correct the provider configuration or relationship and reassess with complete, fresh evidence.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-P2-AWS-052",
+  "provider": "AWS",
+  "evaluationMode": "ARTIFACT_FACTS",
+  "evaluationDefinition": {
+    "mode": "ARTIFACT_FACTS",
+    "artifactFacts": {
+      "predicate": {
+        "fact": "consumption.bedrock_quota_alarm_configured",
+        "eq": true
+      }
+    }
+  },
+  "baseEvidenceTiers": [
+    "E1"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "DISABLED",
+  "releaseFamily": "AGCF_PHASE_2",
+  "wave": "PHASE_2",
+  "workflowClass": "POSTURE_FINDING",
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AWS_AI_LINKED_RESOURCE"
+  ],
+  "requiredCapabilities": [
+    "AWS_CONSUMPTION_TELEMETRY"
+  ],
+  "requiredRelationships": [],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [
+    {
+      "factKey": "consumption.bedrock_quota_alarm_configured",
+      "valueType": "BOOLEAN",
+      "evidenceClasses": [
+        "CONFIGURATION"
+      ],
+      "maxAgeSeconds": 86400
+    }
+  ],
+  "reasonCode": "AGCF_P2_AWS_052",
+  "frameworkMappings": [
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM06",
+      "mappingType": "PARTIAL",
+      "rationale": "AWS COST evidence contributes directly to this risk but is not a certification claim."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "LOG-14",
+      "mappingType": "PARTIAL",
+      "rationale": "AWS COST normalized evidence contributes to this control."
+    }
+  ],
+  "parameterDefinitions": [],
+  "certificationParameterProfile": null,
+  "packageSourceRef": "policy-packages/agcf/AGCF-AWS-052/1.0.0.json"
+}

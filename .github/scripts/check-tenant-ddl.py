@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 import re
@@ -78,10 +77,13 @@ def main() -> int:
         if not match:
             failures.append(f"malformed migration filename: {migration.name}")
             continue
-        version = int(match.group(1))
-        # V1 is the reviewed consolidated bootstrap. New platform migrations
-        # must be platform-only.
-        if version == 1:
+        if not sql_without_comments(migration.read_text()).strip():
+            failures.append(f"{migration.name}: comment-only migration")
+            continue
+        if int(match.group(1)) == 1:
+            sql = migration.read_text()
+            if not sql.startswith(HEADER) or "${tenantId}" in sql or "${tenantSchema}" in sql:
+                failures.append(f"{migration.name}: reset baseline contains tenant placeholders or missing header")
             continue
         for violation in violations(migration.read_text()):
             failures.append(f"{migration.name}: {violation}")

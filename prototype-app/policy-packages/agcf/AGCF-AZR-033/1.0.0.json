@@ -1,0 +1,77 @@
+{
+  "policyId": "AGCF-AZR-033",
+  "version": "1.0.0",
+  "name": "Effective AI principal permissions exceed the approved matrix",
+  "description": "Evaluates whether effective ai principal permissions exceed the approved matrix using bounded, normalized provider evidence.",
+  "securityIntent": "Prevent the risk condition described by AGCF-AZR-033.",
+  "remediationIntent": "Correct the provider configuration or relationship and reassess with complete, fresh evidence.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-P2-AZURE-033",
+  "provider": "AZURE",
+  "evaluationMode": "ARTIFACT_FACTS",
+  "evaluationDefinition": {
+    "mode": "ARTIFACT_FACTS",
+    "artifactFacts": {
+      "predicate": {
+        "fact": "identity.effective_access_exceeds_approved_matrix",
+        "eq": true
+      }
+    }
+  },
+  "baseEvidenceTiers": [
+    "E1"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "DISABLED",
+  "releaseFamily": "AGCF_PHASE_2",
+  "wave": "PHASE_2",
+  "workflowClass": "POSTURE_FINDING",
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AZURE_AI_LINKED_RESOURCE"
+  ],
+  "requiredCapabilities": [
+    "AZURE_EFFECTIVE_ACCESS"
+  ],
+  "requiredRelationships": [],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [
+    {
+      "factKey": "identity.effective_access_exceeds_approved_matrix",
+      "valueType": "BOOLEAN",
+      "evidenceClasses": [
+        "CONFIGURATION"
+      ],
+      "maxAgeSeconds": 86400
+    }
+  ],
+  "reasonCode": "AGCF_P2_AZURE_033",
+  "frameworkMappings": [
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM03",
+      "mappingType": "PARTIAL",
+      "rationale": "AZURE IAM evidence contributes directly to this risk but is not a certification claim."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "IAM-05",
+      "mappingType": "PARTIAL",
+      "rationale": "AZURE IAM normalized evidence contributes to this control."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "IAM-18",
+      "mappingType": "PARTIAL",
+      "rationale": "AZURE IAM normalized evidence contributes to this control."
+    }
+  ],
+  "parameterDefinitions": [],
+  "certificationParameterProfile": null,
+  "packageSourceRef": "policy-packages/agcf/AGCF-AZR-033/1.0.0.json"
+}

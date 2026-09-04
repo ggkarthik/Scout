@@ -73,6 +73,46 @@ public class AwsAiGridFactProducer implements AiGridFactProducer {
         AiGridFactProducerSupport.copy(input, "inboundAuthType", "mcp.inbound_auth_type", facts);
         AiGridFactProducerSupport.copy(input, "outboundAuthType", "mcp.outbound_auth_type", facts);
         AiGridFactProducerSupport.copy(input, "status", "mcp.target_status", facts);
+        // Phase 2 normalized facts are deliberately scalar classifications.  The
+        // connector may derive them from bounded IAM, S3, telemetry, registry, or
+        // SageMaker calls; this producer never persists provider policy bodies.
+        String[][] phase2Attributes = {
+                {"effectiveAccessExceedsApprovedMatrix", "identity.effective_access_exceeds_approved_matrix"},
+                {"crossAccountSensitiveAccess", "identity.cross_account_sensitive_access_observed"},
+                {"unapprovedPrivilegedRoleAccess", "identity.unapproved_privileged_role_access"},
+                {"restrictionControlsIncomplete", "identity.restriction_controls_incomplete"},
+                {"s3EffectiveBlockPublicAccessIncomplete", "data.s3_effective_block_public_access_incomplete"},
+                {"s3DefaultEncryptionConfigured", "data.s3_default_encryption_configured"},
+                {"s3CustomerManagedKeyConfigured", "data.s3_customer_managed_key_configured"},
+                {"s3UnapprovedCrossAccountPrincipal", "data.s3_unapproved_cross_account_principal"},
+                {"s3TlsEnforced", "data.s3_tls_enforced"},
+                {"vectorStorePublicNetworkAccess", "data.vector_store_public_network_access"},
+                {"vectorStoreEncryptionConfigured", "data.vector_store_encryption_configured"},
+                {"vectorStorePrincipalBoundaryConfigured", "data.vector_store_principal_boundary_configured"},
+                {"bedrockBudgetConfigured", "consumption.bedrock_budget_configured"},
+                {"bedrockQuotaAlarmConfigured", "consumption.bedrock_quota_alarm_configured"},
+                {"bedrockQuotaUtilizationExceedsThreshold", "consumption.bedrock_quota_utilization_exceeds_threshold"},
+                {"bedrockThrottlingAlarmEffective", "consumption.bedrock_throttling_alarm_effective"},
+                {"bedrockUsageExceedsThreshold", "consumption.bedrock_usage_exceeds_threshold"},
+                {"modelSignatureAttestationPresent", "provenance.model_signature_attestation_present"},
+                {"modelApprovedRegistryLineage", "provenance.model_approved_registry_lineage"},
+                {"modelSbomCoveragePresent", "provenance.model_sbom_coverage_present"},
+                {"modelVulnerabilityBaselinePass", "provenance.model_vulnerability_baseline_pass"},
+                {"datasetVersionChecksumPinned", "provenance.dataset_version_checksum_pinned"},
+                {"datasetLineagePresent", "provenance.dataset_lineage_present"},
+                {"datasetChangedAfterApproval", "provenance.dataset_changed_after_approval"},
+                {"endpointPublicWithoutAdequateAuth", "mcp.endpoint_public_without_adequate_auth"},
+                {"endpointTlsBaselinePass", "mcp.endpoint_tls_baseline_pass"},
+                {"sagemakerNetworkIsolationEnabled", "model.sagemaker_network_isolation_enabled"},
+                {"sagemakerStorageCustomerManagedKey", "model.sagemaker_storage_customer_managed_key"},
+                {"sagemakerRootAccessEnabled", "model.sagemaker_root_access_enabled"},
+                {"sagemakerImageBaselinePass", "model.sagemaker_image_baseline_pass"},
+                {"effectivePublicAccess", "data.s3_effective_public_access"},
+                {"effectivePublicContentAccess", "data.s3_effective_public_content_access"},
+                {"inboundAuthAuthoritative", "mcp.inbound_auth_authoritative"},
+                {"outboundAuthAuthoritative", "mcp.outbound_auth_authoritative"},
+        };
+        for (String[] mapping : phase2Attributes) AiGridFactProducerSupport.copy(input, mapping[0], mapping[1], facts);
         String kmsKey = input.attributes().path("kmsKeyArn").asText("");
         if (kmsKey.isBlank()) kmsKey = input.attributes().path("modelKmsKeyArn").asText("");
         if (input.attributes().has("kmsKeyArn") || input.attributes().has("modelKmsKeyArn")) {

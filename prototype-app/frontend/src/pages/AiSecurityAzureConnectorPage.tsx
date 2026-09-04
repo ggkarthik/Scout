@@ -12,6 +12,7 @@ export function AiSecurityAzureConnectorPage() {
   const runsQuery = useQuery({
     queryKey: ['ai-security-runs', 'AZURE'],
     queryFn: () => api.listAiSecurityRuns('AZURE'),
+    refetchInterval: 3000,
   });
   const latestRunId = runsQuery.data?.[0]?.id;
   const latestSuccessfulRun = runsQuery.data?.find((run) => run.status === 'COMPLETED');
@@ -28,6 +29,7 @@ export function AiSecurityAzureConnectorPage() {
   const [subscriptionIds, setSubscriptionIds] = React.useState('');
   const [region, setRegion] = React.useState('eastus2');
   const [testResult, setTestResult] = React.useState<AiSecurityAzureConnectionTest | null>(null);
+  const [runMessage, setRunMessage] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     const config = configQuery.data;
@@ -61,7 +63,11 @@ export function AiSecurityAzureConnectorPage() {
   });
   const runMutation = useMutation({
     mutationFn: api.runAiSecurityAzureFoundryConfig,
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['ai-security-runs', 'AZURE'] }),
+    onSuccess: (result: { jobId: string; status: string; message: string }) => {
+      setRunMessage(`${result.message} Status: ${result.status}.`);
+      void queryClient.invalidateQueries({ queryKey: ['ai-security-runs', 'AZURE'] });
+    },
+    onError: (error: Error) => setRunMessage(`Execution failed: ${error.message}`),
   });
 
   const error = saveMutation.error ?? testMutation.error ?? runMutation.error;
@@ -121,6 +127,7 @@ export function AiSecurityAzureConnectorPage() {
               {!testResult.success && testResult.code && <small>Code: {testResult.code}</small>}
             </div>
           )}
+          {runMessage && <div className={`notice ${runMessage.startsWith('Execution failed') ? 'error' : 'success'}`}>{runMessage}</div>}
           <div className="ai-connector-actions">
             <button
               className="btn btn-secondary"

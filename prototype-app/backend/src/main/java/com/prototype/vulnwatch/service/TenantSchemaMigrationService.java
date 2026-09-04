@@ -17,7 +17,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
-import org.flywaydb.core.api.MigrationVersion;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -75,7 +74,7 @@ public class TenantSchemaMigrationService {
             }
             if (reportOnly) {
                 results.add(new SchemaResult(templateTenant.getId(), templateTenant.getSchemaName(),
-                        "REPORT_ONLY", 0, templateFingerprint, null));
+                        "REPORT_ONLY", 1, templateFingerprint, null));
                 boolean clean = results.stream().noneMatch(SchemaResult::failed);
                 return report(runId, startedAt, results, clean, clean ? null : "structural_drift");
             }
@@ -121,7 +120,7 @@ public class TenantSchemaMigrationService {
             // Provisioning can be interrupted after the schema clone commits but
             // before Flyway and the tenant status complete. Reconcile the existing
             // schema so retrying the operation is safe.
-            schemaService.provisionOrReconcileSchemaFromTemplate(tenant.getSchemaName());
+            schemaService.provisionEmptySchema(tenant.getSchemaName());
             SchemaResult result = migrateOne(tenant, runId);
             if (result.failed()) {
                 throw new IllegalStateException(result.failureMessage());
@@ -151,18 +150,18 @@ public class TenantSchemaMigrationService {
             String before = structuralFingerprint(schema);
             if (reportOnly) {
                 String status = before.equals(templateFingerprint) ? "BASELINEABLE" : "DRIFTED";
-                return new SchemaResult(tenant.getId(), schema, status, 0, before,
+                return new SchemaResult(tenant.getId(), schema, status, 1, before,
                         before.equals(templateFingerprint) ? null : "Structural drift requires reconciliation");
             }
             schemaService.reconcileSafeDifferences(schema);
             String after = structuralFingerprint(schema);
             if (!after.equals(templateFingerprint)) {
                 statusService.markFailure(tenant.getId(), schema, "DRIFTED", "STRUCTURAL_DRIFT",
-                        "Schema does not match the normalized tenant template", runId);
+                        "Schema does not match the normalized tenant baseline template", runId);
                 return new SchemaResult(tenant.getId(), schema, "DRIFTED", 0, after,
-                        "Schema does not match the normalized tenant template");
+                        "Schema does not match the normalized tenant baseline template");
             }
-            return new SchemaResult(tenant.getId(), schema, "BASELINEABLE", 0, after, null);
+            return new SchemaResult(tenant.getId(), schema, "BASELINEABLE", 1, after, null);
         } catch (RuntimeException ex) {
             if (!reportOnly) {
                 statusService.markFailure(tenant.getId(), schema, "DRIFTED", "RECONCILIATION_FAILED",
@@ -185,12 +184,6 @@ public class TenantSchemaMigrationService {
                     .defaultSchema(schema)
                     .table("tenant_schema_history")
                     .locations("classpath:db/migration/tenant")
-                    .baselineOnMigrate(true)
-                    // tenant schemas are cloned from the already-migrated template;
-                    // only the template itself must execute the consolidated V1.
-                    .baselineVersion(MigrationVersion.fromVersion(
-                            schemaService.defaultSchemaName().equals(schema) ? "0" : "1"))
-                    .baselineDescription("tenant template bootstrap")
                     .placeholders(placeholders)
                     .validateOnMigrate(true)
                     .outOfOrder(false)

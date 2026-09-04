@@ -220,10 +220,10 @@ public class AiGridApiService {
                        where r.policy_id = p.policy_id and r.policy_version = p.version
                        order by r.computed_at desc, r.run_id desc limit 1
                   ) readiness on true
-                 where p.release_family = 'AGCF_PHASE_1'
-                   and p.lifecycle in ('PUBLISHED', 'CANARY') and d.available = true
-                   and (d.rollout_stage = 'GENERAL_AVAILABILITY'
-                        or (d.rollout_stage = 'CANARY' and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
+                 where p.release_family in ('AGCF_PHASE_1', 'AGCF_PHASE_2')
+                   and p.lifecycle in ('VALIDATED', 'APPROVED', 'PUBLISHED', 'CANARY') and d.available = true
+                   and ((d.rollout_stage = 'GENERAL_AVAILABILITY')
+                        or (d.rollout_stage in ('CANARY', 'DEV') and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
                  order by p.policy_id, p.published_at desc, p.version desc
                 """, Map.of("tenantId", tenant.getId().toString()), (rs, n) -> new PolicyView(rs.getString("policy_id"), rs.getString("version"),
                 rs.getString("name"), rs.getString("severity"), rs.getString("lifecycle"),
@@ -264,10 +264,11 @@ public class AiGridApiService {
             List<String> defaults = jdbc.query("""
                     select d.default_selection from platform.ai_grid_policy_distribution d
                      where d.policy_id = :id and d.available = true
-                       and (d.rollout_stage = 'GENERAL_AVAILABILITY'
-                            or (d.rollout_stage = 'CANARY' and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
+                       and ((d.rollout_stage = 'GENERAL_AVAILABILITY')
+                        or (d.rollout_stage in ('CANARY', 'DEV') and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
                        and exists (select 1 from platform.ai_grid_policy_versions p
-                                    where p.policy_id=d.policy_id and p.lifecycle='PUBLISHED')
+                                    where p.policy_id=d.policy_id
+                                      and p.lifecycle in ('VALIDATED','APPROVED','CANARY','PUBLISHED'))
                     """, Map.of("id", policyId, "tenantId", tenant.getId().toString()), (rs, n) -> rs.getString(1));
             if (defaults.isEmpty()) {
                 throw new org.springframework.web.server.ResponseStatusException(

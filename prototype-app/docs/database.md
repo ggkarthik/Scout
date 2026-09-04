@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-18
 
-The runtime database is PostgreSQL, with Flyway-managed reset-line bootstrap under `backend/src/main/resources/db/migration/postgres_reset`. The legacy numbered migration history has been removed from the active development line — a prior drift-repair effort reset and renumbered the whole migration line, consolidating everything up to that point into the `V1__platform_and_default_tenant_schemas.sql` baseline (60+ tables). Current latest platform-line migration is `V73__ai_grid_knowledge_mcp_normalized_facts.sql`. As of V42, per-tenant schema DDL (including RLS enforcement) has moved to a second, independent Flyway line under `db/migration/tenant/`, applied once per tenant schema by `TenantSchemaMigrationService` / `ProductionBootstrapCli` rather than by the application's own startup Flyway run — see [Tenant Schema Control Plane](#tenant-schema-control-plane). Current latest tenant-line migration is `V64__ai_artifact_unknown_sensitivity.sql`. Nearly everything from platform `V47` / tenant `V45` onward is AI Security / AI Grid schema (see [AI Security / AI Grid Tables](#ai-security--ai-grid-tables)) — those tables are read/written via `JdbcTemplate`/`NamedParameterJdbcTemplate` directly, **not** through JPA entities or Spring Data repositories like the rest of this document's tables. H2 is retained only as an offline archive format for legacy data snapshots.
+The runtime database is PostgreSQL, with two independent Flyway V1 baselines: `postgres_reset/V1__platform_schema.sql` owns `public`, `platform`, and the empty `tenant_default` schema; `tenant/V1__tenant_schema.sql` owns tenant tables, indexes, constraints, RLS policies, and tenant-safe seeds. Tenant V1 is applied once per tenant schema by `TenantSchemaMigrationService` / `ProductionBootstrapCli`.
 
 ---
 
@@ -11,7 +11,7 @@ The runtime database is PostgreSQL, with Flyway-managed reset-line bootstrap und
 - **Database name (local):** `vulnwatch`
 - **JDBC URL default:** `jdbc:postgresql://localhost:5432/vulnwatch`
 - **Migration directories:** `backend/src/main/resources/db/migration/postgres_reset/` (platform/`public` schema) and `backend/src/main/resources/db/migration/tenant/` (per-tenant schema, applied by the tenant schema control plane, not by the application's own startup Flyway run)
-- **Flyway baseline migration:** `V1__platform_and_default_tenant_schemas.sql`
+- **Flyway baselines:** `postgres_reset/V1__platform_schema.sql` and `tenant/V1__tenant_schema.sql`
 - **All statements:** `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` (idempotent replay via psql is safe)
 - **`ddl-auto`:** `none` (Flyway owns all DDL; Hibernate never creates or alters tables)
 
@@ -1187,14 +1187,14 @@ mvn -q \
 
 ## Tenant Schema Control Plane
 
-As of V42, there are **two independent Flyway migration lines**, never applied by the same Flyway instance:
+There are **two independent Flyway migration lines**, never applied by the same Flyway instance:
 
 | Line | Location | Applies to | History table | Notes |
 |---|---|---|---|---|
 | Platform/reset | `postgres_reset/` | `public` schema only (plus the `tenant_default` template, which lives under `public` for baselining purposes) | `public.flyway_schema_history` | Each file must open with a `-- migration-guard: platform-only` comment; `PostgresResetMigrationGuardTest` enforces this so tenant-schema DDL can't leak into the shared line by accident. |
-| Tenant | `tenant/` | Every tenant schema (`tenant_default` and each `tenant_<id>`), one Flyway run per schema | `<schema>.tenant_schema_history` | Files may reference `${tenantId}` / `${tenantSchema}` Flyway placeholders, validated by `TenantSchemaMigrationService`/`ProductionBootstrapCli` before substitution. Baselined at version 41 (the version at which the tenant line was split out) so pre-existing tenant schemas don't try to replay history that predates the split. |
+| Tenant | `tenant/` | Every tenant schema (`tenant_default` and each `tenant_<id>`), one Flyway run per schema | `<schema>.tenant_schema_history` | Tenant V1 owns the complete tenant schema and may use `${tenantId}` / `${tenantSchema}` placeholders. |
 
-Current latest: `postgres_reset/V73__ai_grid_knowledge_mcp_normalized_facts.sql` and `tenant/V64__ai_artifact_unknown_sensitivity.sql`. The non-AI-Grid platform-line migrations most recently added are `V45__tenant_access_membership_provenance.sql` (backs `TenantSupportAccessController`'s break-glass support-grant workflow) and `V46__demo_request_active_email_uniqueness.sql`; everything else from platform `V47` / tenant `V45` onward is AI Security / AI Grid schema — see [AI Security / AI Grid Tables](#ai-security--ai-grid-tables).
+Current latest: `postgres_reset/V1__platform_schema.sql` and `tenant/V1__tenant_schema.sql`.
 
 **Rollout mechanics** (`TenantSchemaMigrationService.migrateAll()`, mirrored by `ProductionBootstrapCli` for the standalone production bootstrap path):
 1. Hold a Postgres advisory lock (`scout-tenant-schema-migrator` / `scout-production-bootstrap`, 30s timeout) so only one migration run proceeds at a time.

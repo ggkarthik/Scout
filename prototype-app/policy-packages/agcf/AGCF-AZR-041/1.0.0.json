@@ -1,0 +1,77 @@
+{
+  "policyId": "AGCF-AZR-041",
+  "version": "1.0.0",
+  "name": "Search connection lacks required CMK protection",
+  "description": "Evaluates whether search connection lacks required cmk protection using bounded, normalized provider evidence.",
+  "securityIntent": "Prevent the risk condition described by AGCF-AZR-041.",
+  "remediationIntent": "Correct the provider configuration or relationship and reassess with complete, fresh evidence.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-P2-AZURE-041",
+  "provider": "AZURE",
+  "evaluationMode": "ARTIFACT_FACTS",
+  "evaluationDefinition": {
+    "mode": "ARTIFACT_FACTS",
+    "artifactFacts": {
+      "predicate": {
+        "fact": "search.connection_customer_managed_key",
+        "eq": true
+      }
+    }
+  },
+  "baseEvidenceTiers": [
+    "E1"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "DISABLED",
+  "releaseFamily": "AGCF_PHASE_2",
+  "wave": "PHASE_2",
+  "workflowClass": "POSTURE_FINDING",
+  "artifactTypes": [],
+  "nativeKinds": [
+    "AZURE_AI_LINKED_RESOURCE"
+  ],
+  "requiredCapabilities": [
+    "AZURE_SEARCH_MCP_SECURITY"
+  ],
+  "requiredRelationships": [],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [
+    {
+      "factKey": "search.connection_customer_managed_key",
+      "valueType": "BOOLEAN",
+      "evidenceClasses": [
+        "CONFIGURATION"
+      ],
+      "maxAgeSeconds": 86400
+    }
+  ],
+  "reasonCode": "AGCF_P2_AZURE_041",
+  "frameworkMappings": [
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM02",
+      "mappingType": "PARTIAL",
+      "rationale": "AZURE STORE evidence contributes directly to this risk but is not a certification claim."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "DSP-17",
+      "mappingType": "PARTIAL",
+      "rationale": "AZURE STORE normalized evidence contributes to this control."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "I&S-03",
+      "mappingType": "PARTIAL",
+      "rationale": "AZURE STORE normalized evidence contributes to this control."
+    }
+  ],
+  "parameterDefinitions": [],
+  "certificationParameterProfile": null,
+  "packageSourceRef": "policy-packages/agcf/AGCF-AZR-041/1.0.0.json"
+}

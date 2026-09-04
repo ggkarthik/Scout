@@ -498,6 +498,11 @@ public class AiGridValidationGovernanceService {
         return TenantContext.runAsPlatform(() -> transactions.execute(status -> {
             PolicyCandidate candidate = policyCandidate(policyId, version);
             String digest = digest(candidate.digestMaterial());
+            String packageDigest = candidate.packageDigest() == null ? digest : candidate.packageDigest();
+            if (candidate.packageDigest() == null) {
+                jdbc.update("update platform.ai_grid_policy_versions set package_digest=:digest where policy_id=:policyId and version=:version",
+                        Map.of("digest", packageDigest, "policyId", policyId, "version", version));
+            }
             AnswerKeyGate answerKey = answerKeyGate(policyId, version, digest);
             PrecisionReview precision = candidate.requiresPrecisionReview()
                     ? passingPrecisionReview(policyId, version, digest) : null;
@@ -526,14 +531,15 @@ public class AiGridValidationGovernanceService {
                     update platform.ai_grid_policy_versions set lifecycle = 'RETIRED'
                      where policy_id = :policyId and lifecycle = 'PUBLISHED' and version <> :version
                     """, Map.of("policyId", policyId, "version", version));
+            String reason = "Answer-key and precision release gates passed";
+            insertReleaseDecision(decisionId, policyId, version, "APPROVED", answerKey, precision, reason, actor,
+                    packageDigest);
             jdbc.update("""
                     update platform.ai_grid_policy_versions
                        set lifecycle = 'PUBLISHED', approved_by = :actor,
                            approved_at = coalesce(approved_at, now()), published_at = now()
                      where policy_id = :policyId and version = :version
                     """, Map.of("actor", actor, "policyId", policyId, "version", version));
-            String reason = "Answer-key and precision release gates passed";
-            insertReleaseDecision(decisionId, policyId, version, "APPROVED", answerKey, precision, reason, actor);
             return new ReleaseDecision(decisionId, policyId, version, true, reason, answerKey.runId(),
                     precision == null ? null : precision.id());
         }));
@@ -545,6 +551,10 @@ public class AiGridValidationGovernanceService {
 
     /** Creates an immutable, digest-bound approval without exposing the policy to tenants. */
     public PolicyApproval approvePolicy(String policyId, String actor) {
+        return approvePolicy(policyId, null, actor);
+    }
+
+    public PolicyApproval approvePolicy(String policyId, String tenantTestNote, String actor) {
         return TenantContext.runAsPlatform(() -> transactions.execute(status -> {
             String version = singleCurrentVersion(policyId);
             PolicyCandidate candidate = policyCandidate(policyId, version);
@@ -552,10 +562,12 @@ public class AiGridValidationGovernanceService {
             AnswerKeyGate answerKey = answerKeyGate(policyId, version, digest);
             PrecisionReview precision = candidate.requiresPrecisionReview()
                     ? passingPrecisionReview(policyId, version, digest) : null;
+            boolean devTestApproval = tenantTestNote != null && !tenantTestNote.isBlank()
+                    && hasDevTestDeployment(policyId, version);
             List<String> blockers = new ArrayList<>();
             if (actor.equals(candidate.authoredBy())) blockers.add("Independent author and approver are required");
-            if (answerKey == null) blockers.add("No fresh, certified, passing answer-key run for this policy digest");
-            if (candidate.requiresPrecisionReview() && precision == null) blockers.add("No passing precision review for this policy digest");
+            if (!devTestApproval && answerKey == null) blockers.add("No fresh, certified, passing answer-key run for this policy digest");
+            if (!devTestApproval && candidate.requiresPrecisionReview() && precision == null) blockers.add("No passing precision review for this policy digest");
             UUID decisionId = UUID.randomUUID();
             if (!blockers.isEmpty()) {
                 insertReleaseDecision(decisionId, policyId, version, "BLOCKED", answerKey, precision,
@@ -567,57 +579,130 @@ public class AiGridValidationGovernanceService {
                 insertReleaseDecision(decisionId, policyId, version, "BLOCKED", answerKey, precision, reason, actor, digest);
                 return new PolicyApproval(decisionId, policyId, version, digest, false, reason);
             }
+            String packageDigest = candidate.packageDigest() == null ? digest : candidate.packageDigest();
+            if (candidate.packageDigest() == null) {
+                jdbc.update("update platform.ai_grid_policy_versions set package_digest=:digest where policy_id=:policyId and version=:version",
+                        Map.of("digest", packageDigest, "policyId", policyId, "version", version));
+            }
+            String approvalReason = devTestApproval
+                    ? "Dev/test deployment evidence accepted; Tenant test result: " + tenantTestNote.trim()
+                    : "Answer-key and precision release gates passed"
+                        + (tenantTestNote == null || tenantTestNote.isBlank() ? "" : "; Tenant test result: " + tenantTestNote.trim());
+            insertReleaseDecision(decisionId, policyId, version, "APPROVED", answerKey, precision,
+                    approvalReason, actor, packageDigest);
             jdbc.update("""
                     update platform.ai_grid_policy_versions set lifecycle='APPROVED', approved_by=:actor,
                         approved_at=coalesce(approved_at,now()) where policy_id=:policyId and version=:version
                     """, Map.of("actor", actor, "policyId", policyId, "version", version));
-            insertReleaseDecision(decisionId, policyId, version, "APPROVED", answerKey, precision,
-                    "Answer-key and precision release gates passed", actor, digest);
             return new PolicyApproval(decisionId, policyId, version, digest, true,
-                    "Answer-key and precision release gates passed");
+                    approvalReason);
+        }));
+    }
+
+    private boolean hasDevTestDeployment(String policyId, String version) {
+        Boolean exists = jdbc.queryForObject("""
+                select exists(
+                    select 1 from platform.ai_grid_policy_dev_deployments
+                     where policy_id=:policyId and policy_version=:version
+                )
+                """, Map.of("policyId", policyId, "version", version), Boolean.class);
+        return Boolean.TRUE.equals(exists);
+    }
+
+    private boolean hasDevTestDeploymentForTenant(String policyId, String version, UUID tenantId) {
+        Boolean exists = TenantContext.runAsPlatform(() -> jdbc.queryForObject("""
+                select exists(
+                    select 1 from platform.ai_grid_policy_dev_deployments
+                     where policy_id=:policyId and policy_version=:version
+                       and target_tenant_ids_json @> cast(:tenantId as jsonb)
+                )
+                """, Map.of("policyId", policyId, "version", version,
+                "tenantId", "[\"" + tenantId + "\"]"), Boolean.class));
+        return Boolean.TRUE.equals(exists);
+    }
+
+    /** Deploys a validated package to explicit dev/test tenants without approving it. */
+    public DevDeployment deployToDevTenants(String policyId, List<UUID> targetTenantIds, String testNote, String actor) {
+        if (targetTenantIds == null || targetTenantIds.isEmpty()) throw badRequest("Select at least one dev/test tenant");
+        if (new LinkedHashSet<>(targetTenantIds).size() != targetTenantIds.size()) throw badRequest("Dev/test cohort contains duplicate tenant IDs");
+        List<Tenant> cohort = targetTenantIds.stream().map(tenants::requireTenantUuid).toList();
+        for (Tenant tenant : cohort) if (!"ACTIVE".equals(tenant.getStatus())) throw conflict("Dev/test cohort contains an inactive tenant");
+        requireText(testNote, "testNote");
+        return TenantContext.runAsPlatform(() -> transactions.execute(status -> {
+            String version = singleCurrentVersion(policyId);
+            PolicyCandidate candidate = policyCandidate(policyId, version);
+            if (!"VALIDATED".equals(candidate.lifecycle())) throw conflict("Only VALIDATED policies can be deployed to dev/test tenants");
+            String ids = "[" + targetTenantIds.stream().map(id -> "\"" + id + "\"").collect(java.util.stream.Collectors.joining(",")) + "]";
+            UUID deploymentId = UUID.randomUUID();
+            jdbc.update("""
+                    insert into platform.ai_grid_policy_dev_deployments
+                        (id,policy_id,policy_version,target_tenant_ids_json,test_note,deployed_by)
+                    values (:id,:policyId,:version,cast(:targets as jsonb),:note,:actor)
+                    """, new MapSqlParameterSource().addValue("id", deploymentId).addValue("policyId", policyId)
+                    .addValue("version", version).addValue("targets", ids).addValue("note", testNote.trim()).addValue("actor", actor));
+            jdbc.update("""
+                    update platform.ai_grid_policy_distribution
+                       set available=true, rollout_stage='DEV', canary_tenant_ids_json=cast(:targets as jsonb),
+                           pinned_version=:version, updated_by=:actor, updated_at=now()
+                     where policy_id=:policyId
+                    """, new MapSqlParameterSource().addValue("policyId", policyId).addValue("version", version)
+                    .addValue("targets", ids).addValue("actor", actor));
+            return new DevDeployment(deploymentId, policyId, version, targetTenantIds, testNote.trim());
         }));
     }
 
     /** Publishes an already-approved policy to an explicit active canary cohort. */
     public PolicyPublication publishApprovedPolicy(String policyId, PublishCommand command, String actor) {
-        List<UUID> tenantIds = command == null || command.targetTenantIds() == null || command.targetTenantIds().isEmpty()
-                ? List.of(tenants.getDefaultTenant().getId()) : command.targetTenantIds();
+        List<UUID> tenantIds = command != null && command.publishAll()
+                ? tenants.listTenants().stream().filter(t -> "ACTIVE".equals(t.getStatus())).map(Tenant::getId).toList()
+                : command == null || command.targetTenantIds() == null || command.targetTenantIds().isEmpty()
+                    ? List.of(tenants.getDefaultTenant().getId()) : command.targetTenantIds();
+        if (tenantIds.isEmpty()) throw conflict("No active tenants are available for publication");
         if (new LinkedHashSet<>(tenantIds).size() != tenantIds.size()) throw badRequest("CANARY cohort contains duplicate tenant IDs");
         List<Tenant> cohort = tenantIds.stream().map(tenants::requireTenantUuid).toList();
+        String currentVersion = TenantContext.runAsPlatform(() -> singleCurrentVersion(policyId));
         for (Tenant tenant : cohort) {
             if (!"ACTIVE".equals(tenant.getStatus())) throw conflict("CANARY cohort contains an inactive tenant");
             UUID snapshotRunId = tenantExecution.run(tenant, () -> jdbc.query("""
                 select run_id from ai_grid_snapshot_manifests group by run_id
                  order by max(observed_at) desc limit 1
                 """, rs -> rs.next() ? rs.getObject(1, UUID.class) : null));
-            if (snapshotRunId == null) throw conflict("CANARY cohort tenant lacks a complete snapshot: " + tenant.getSlug());
+            if (snapshotRunId == null && !hasDevTestDeploymentForTenant(policyId, currentVersion, tenant.getId())) {
+                throw conflict("CANARY cohort tenant lacks a complete snapshot or dev/test deployment: " + tenant.getSlug());
+            }
         }
+        boolean publishAll = command != null && command.publishAll();
+        String rolloutStage = publishAll ? "GENERAL_AVAILABILITY" : "CANARY";
+        // GA is not a canary cohort. Keep the target list in the release binding for
+        // audit/rollout work, but expose an empty canary list in distribution metadata.
         String tenantIdsJson = "[" + tenantIds.stream().map(id -> "\"" + id + "\"").collect(java.util.stream.Collectors.joining(",")) + "]";
+        String canaryTenantIdsJson = publishAll ? "[]" : tenantIdsJson;
         return TenantContext.runAsPlatform(() -> transactions.execute(status -> {
             String version = singleCurrentVersion(policyId);
             PolicyCandidate candidate = policyCandidate(policyId, version);
             String digest = digest(candidate.digestMaterial());
+            String packageDigest = candidate.packageDigest();
             UUID approvalId = jdbc.query("""
                     select id from platform.ai_grid_policy_release_decisions
                      where policy_id=:policyId and policy_version=:version and decision='APPROVED'
-                       and approved_package_digest=:digest
+                       and approved_package_digest=:packageDigest
                      order by decided_at desc limit 1
-                    """, Map.of("policyId", policyId, "version", version, "digest", digest),
+                    """, Map.of("policyId", policyId, "version", version, "packageDigest", packageDigest),
                     rs -> rs.next() ? rs.getObject(1, UUID.class) : null);
             if (approvalId == null) throw conflict("A current digest-bound approval is required before publishing");
             if (!"APPROVED".equals(candidate.lifecycle())) throw conflict("Policy lifecycle must be APPROVED");
             UUID bindingId = UUID.randomUUID();
-            String distribution = "{\"available\":true,\"rolloutStage\":\"CANARY\",\"canaryTenantIds\":"
-                    + tenantIdsJson + ",\"pinnedVersion\":\"" + version + "\"}";
+            String distribution = "{\"available\":true,\"rolloutStage\":\"" + rolloutStage + "\",\"canaryTenantIds\":"
+                    + canaryTenantIdsJson + ",\"targetTenantIds\":" + tenantIdsJson + ",\"pinnedVersion\":\"" + version + "\"}";
             try {
                 jdbc.update("""
                         insert into platform.ai_grid_policy_release_bindings
                             (id,approval_decision_id,policy_id,policy_version,approved_package_digest,
                              distribution_snapshot_json,target_tenant_ids_json,bound_by)
-                        values (:id,:approval,:policyId,:version,:digest,cast(:distribution as jsonb),
+                        values (:id,:approval,:policyId,:version,:packageDigest,cast(:distribution as jsonb),
                                 cast(:targets as jsonb),:actor)
                         """, new MapSqlParameterSource().addValue("id", bindingId).addValue("approval", approvalId)
-                        .addValue("policyId", policyId).addValue("version", version).addValue("digest", digest)
+                        .addValue("policyId", policyId).addValue("version", version).addValue("packageDigest", packageDigest)
                         .addValue("distribution", distribution).addValue("targets", tenantIdsJson)
                         .addValue("actor", actor));
             } catch (org.springframework.dao.DuplicateKeyException ex) {
@@ -629,28 +714,35 @@ public class AiGridValidationGovernanceService {
                     """, Map.of("policyId", policyId, "version", version));
             jdbc.update("""
                     insert into platform.ai_grid_policy_distribution
-                        (policy_id,available,default_selection,rollout_stage,canary_tenant_ids_json,pinned_version,updated_by)
-                    values (:policyId,true,:selection,'CANARY',cast(:tenants as jsonb),:version,:actor)
-                    on conflict (policy_id) do update set available=true, rollout_stage='CANARY',
+                        (policy_id,available,default_selection,rollout_stage,canary_tenant_ids_json,pinned_version,
+                         approved_package_digest,release_decision_id,updated_by)
+                    values (:policyId,true,:selection,:stage,cast(:canaryTenants as jsonb),:version,
+                            :packageDigest,:approval,:actor)
+                    on conflict (policy_id) do update set available=true, rollout_stage=excluded.rollout_stage,
                         canary_tenant_ids_json=excluded.canary_tenant_ids_json, pinned_version=excluded.pinned_version,
+                        approved_package_digest=excluded.approved_package_digest,
+                        release_decision_id=excluded.release_decision_id,
                         updated_by=excluded.updated_by, updated_at=now()
                     """, new MapSqlParameterSource().addValue("policyId", policyId).addValue("selection", defaultSelection(policyId, version))
-                    .addValue("tenants", tenantIdsJson).addValue("version", version).addValue("actor", actor));
+                    .addValue("stage", rolloutStage).addValue("canaryTenants", canaryTenantIdsJson).addValue("version", version).addValue("packageDigest", packageDigest)
+                    .addValue("approval", approvalId).addValue("actor", actor));
             UUID rolloutId = UUID.randomUUID();
             jdbc.update("""
                     insert into platform.ai_grid_policy_rollouts
                         (id,release_id,release_type,policy_id,previous_version,new_version,package_digest,
-                         distribution_snapshot_json,status)
-                    values (:id,:binding,'POLICY_VERSION',:policyId,null,:version,:digest,cast(:distribution as jsonb),'PENDING')
+                         approved_package_digest,release_decision_id,distribution_snapshot_json,status)
+                    values (:id,:binding,'POLICY_VERSION',:policyId,null,:version,:packageDigest,
+                            :packageDigest,:approval,cast(:distribution as jsonb),'PENDING')
                     """, new MapSqlParameterSource().addValue("id", rolloutId).addValue("binding", bindingId.toString())
-                    .addValue("policyId", policyId).addValue("version", version).addValue("digest", digest).addValue("distribution", distribution));
+                    .addValue("policyId", policyId).addValue("version", version).addValue("packageDigest", packageDigest)
+                    .addValue("approval", approvalId).addValue("distribution", distribution));
             for (UUID tenantId : tenantIds) {
                 jdbc.update("""
                         insert into platform.ai_grid_policy_rollout_tasks (id,rollout_id,tenant_id)
                         values (:id,:rolloutId,:tenantId)
                         """, Map.of("id", UUID.randomUUID(), "rolloutId", rolloutId, "tenantId", tenantId));
             }
-            return new PolicyPublication(policyId, version, digest, approvalId, bindingId, rolloutId, tenantIds);
+            return new PolicyPublication(policyId, version, packageDigest, approvalId, bindingId, rolloutId, tenantIds);
         }));
     }
 
@@ -1065,9 +1157,9 @@ public class AiGridValidationGovernanceService {
                                        String approvedDigest) {
         jdbc.update("""
                 insert into platform.ai_grid_policy_release_decisions
-                    (id, policy_id, policy_version, decision, answer_key_run_id,
+                    (id, policy_id, policy_version, package_digest, decision, answer_key_run_id,
                      precision_review_id, reason, decided_by, approved_package_digest)
-                values (:id, :policyId, :version, :decision, :answerKey, :precision, :reason, :actor, :digest)
+                values (:id, :policyId, :version, :digest, :decision, :answerKey, :precision, :reason, :actor, :digest)
                 """, new MapSqlParameterSource().addValue("id", id).addValue("policyId", policyId)
                 .addValue("version", version).addValue("decision", decision)
                 .addValue("answerKey", answerKey == null ? null : answerKey.runId())
@@ -1241,7 +1333,10 @@ public class AiGridValidationGovernanceService {
                                  boolean approved, String reason) {}
     public record PolicyPublication(String policyId, String policyVersion, String packageDigest, UUID approvalId,
                                     UUID releaseBindingId, UUID rolloutId, List<UUID> targetTenantIds) {}
-    public record PublishCommand(List<UUID> targetTenantIds) {}
+    public record PublishCommand(List<UUID> targetTenantIds, boolean publishAll) {
+        public PublishCommand(List<UUID> targetTenantIds) { this(targetTenantIds, false); }
+    }
+    public record DevDeployment(UUID id, String policyId, String policyVersion, List<UUID> targetTenantIds, String testNote) {}
     public record ReleaseReadiness(String policyId, String policyVersion, String lifecycle, String severity,
                                    String catalogDigest, boolean ready, List<String> blockers,
                                    UUID answerKeyRunId, UUID precisionReviewId, String latestDecision,

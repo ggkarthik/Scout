@@ -4,7 +4,7 @@ import { api } from '../api/client';
 import type { AiGridPolicyDistribution, AiGridPolicySelection } from '../features/ai-security/types';
 
 const DEFAULTS: AiGridPolicySelection[] = ['REQUIRED', 'ENABLED', 'DISABLED'];
-const ROLLOUTS: AiGridPolicyDistribution['rolloutStage'][] = ['GENERAL_AVAILABILITY', 'CANARY', 'PAUSED', 'RETIRED'];
+const ROLLOUTS: AiGridPolicyDistribution['rolloutStage'][] = ['GENERAL_AVAILABILITY', 'CANARY', 'DEV', 'PAUSED', 'RETIRED'];
 
 function owaspMappings(value?: string): string {
   try {
@@ -15,7 +15,7 @@ function owaspMappings(value?: string): string {
 }
 
 function rolloutLabel(stage: AiGridPolicyDistribution['rolloutStage']): string {
-  return stage === 'GENERAL_AVAILABILITY' ? 'General availability' : stage.charAt(0) + stage.slice(1).toLowerCase();
+  return stage === 'GENERAL_AVAILABILITY' ? 'General availability' : stage === 'DEV' ? 'Dev / test' : stage.charAt(0) + stage.slice(1).toLowerCase();
 }
 
 function statusClass(value: string): string {
@@ -30,7 +30,10 @@ export function PlatformAiPolicyStudio() {
   const [owasp, setOwasp] = React.useState('ALL');
   const [query, setQuery] = React.useState('');
   const [activePolicyId, setActivePolicyId] = React.useState<string | null>(null);
-  const catalog = useQuery({ queryKey: ['platform-ai-grid-policies'], queryFn: () => api.listPlatformAiGridPolicies({ releaseFamily: 'AGCF_PHASE_1' }) });
+  const [approvalMessage, setApprovalMessage] = React.useState<string | null>(null);
+  const [devMessage, setDevMessage] = React.useState<string | null>(null);
+  const [publishMessage, setPublishMessage] = React.useState<string | null>(null);
+  const catalog = useQuery({ queryKey: ['platform-ai-grid-policies'], queryFn: () => api.listPlatformAiGridPolicies() });
   const shipping = useQuery({ queryKey: ['platform-ai-grid-shipping-status'], queryFn: api.getPlatformAiGridShippingStatus });
   const tenants = useQuery({ queryKey: ['platform-ai-grid-active-tenants'], queryFn: api.listTenants });
   const rollouts = useQuery({ queryKey: ['platform-ai-grid-policy-rollouts'], queryFn: api.listPlatformAiGridPolicyRollouts });
@@ -40,15 +43,25 @@ export function PlatformAiPolicyStudio() {
     client.invalidateQueries({ queryKey: ['platform-ai-grid-policy-rollouts'] }),
   ]);
   const approve = useMutation({
-    mutationFn: api.approvePlatformAiGridPolicy,
-    onSuccess: () => void Promise.all([
-      client.invalidateQueries({ queryKey: ['platform-ai-grid-policies'] }),
-      client.invalidateQueries({ queryKey: ['platform-ai-grid-shipping-status'] }),
-    ]),
+    mutationFn: ({ policyId, note }: { policyId: string; note: string }) => api.approvePlatformAiGridPolicy(policyId, note),
+    onSuccess: (result: { approved?: boolean; reason?: string }) => {
+      setApprovalMessage(result.approved ? 'Policy approved successfully.' : `Approval blocked: ${result.reason ?? 'release gates have not passed.'}`);
+      void Promise.all([
+        client.invalidateQueries({ queryKey: ['platform-ai-grid-policies'] }),
+        client.invalidateQueries({ queryKey: ['platform-ai-grid-shipping-status'] }),
+      ]);
+    },
+    onError: (error: Error) => setApprovalMessage(`Approval failed: ${error.message}`),
+  });
+  const devDeploy = useMutation({
+    mutationFn: ({ policyId, targetTenantIds, note }: { policyId: string; targetTenantIds: string[]; note: string }) => api.deployPlatformAiGridPolicyToDev(policyId, targetTenantIds, note),
+    onSuccess: () => { setDevMessage('Policy deployed to the selected dev/test tenants.'); void invalidateLifecycle(); },
+    onError: (error: Error) => setDevMessage(`Dev/test deployment failed: ${error.message}`),
   });
   const publish = useMutation({
-    mutationFn: ({ policyId, targetTenantIds }: { policyId: string; targetTenantIds: string[] }) => api.publishPlatformAiGridPolicy(policyId, targetTenantIds),
-    onSuccess: invalidateLifecycle,
+    mutationFn: ({ policyId, targetTenantIds, publishAll }: { policyId: string; targetTenantIds: string[]; publishAll: boolean }) => api.publishPlatformAiGridPolicy(policyId, targetTenantIds, publishAll),
+    onSuccess: () => { setPublishMessage('Policy published successfully.'); void invalidateLifecycle(); },
+    onError: (error: Error) => setPublishMessage(`Policy publication failed: ${error.message}`),
   });
   const deprecate = useMutation({
     mutationFn: ({ policyId, reason }: { policyId: string; reason: string }) => api.deprecatePlatformAiGridPolicy(policyId, reason),
@@ -79,10 +92,13 @@ export function PlatformAiPolicyStudio() {
       <strong>{shipping.data?.blockers.length ? `${shipping.data.blockers.length} blocker${shipping.data.blockers.length === 1 ? '' : 's'}` : 'Ready to ship'}</strong>
     </div></header>
     <ShippingSummary status={shipping.data} />
-    {shipping.data?.blockers.length ? <p className="notice error">{shipping.data.blockers.join(' · ')}</p> : null}
+      {shipping.data?.blockers.length ? <p className="notice error">{shipping.data.blockers.join(' · ')}</p> : null}
+      {approvalMessage ? <p className={`notice ${approvalMessage.startsWith('Policy approved') ? 'success' : 'error'}`}>{approvalMessage}</p> : null}
+      {devMessage ? <p className={`notice ${devMessage.startsWith('Policy deployed') ? 'success' : 'error'}`}>{devMessage}</p> : null}
+      {publishMessage ? <p className={`notice ${publishMessage.startsWith('Policy published') ? 'success' : 'error'}`}>{publishMessage}</p> : null}
 
     <section className="panel policy-catalog-panel">
-      <div className="panel-header policy-catalog-header"><div><h3>Policy catalog</h3><p className="panel-caption">Approve a validated policy, publish it to an explicit tenant canary cohort, or deprecate it through its policy-ID lifecycle.</p></div>
+      <div className="panel-header policy-catalog-header"><div><h3>Policy catalog</h3><p className="panel-caption">Deploy to dev/test, approve with evidence, then publish to selected tenants or all active tenants. Default selection and tenant rollout are tracked independently.</p></div>
         <span className="policy-results-count">{policies.length} of {catalog.data?.length ?? 0} policies</span></div>
       <div className="policy-filter-bar" aria-label="Policy catalog filters">
         <label className="policy-search"><span>Find policy</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, ID, provider, or OWASP mapping" /></label>
@@ -95,24 +111,25 @@ export function PlatformAiPolicyStudio() {
       {catalog.isLoading ? <p role="status">Loading shipped policies…</p> : null}
       {catalog.isError ? <p className="notice error">The policy catalog could not be loaded.</p> : null}
       <div className="policy-management-layout">
-        <div className="table-scroll policy-catalog-table"><table className="data-table"><thead><tr><th>Policy</th><th>Framework mapping</th><th>Availability</th><th>Tenant default</th><th>Rollout</th><th aria-label="Actions" /></tr></thead>
-          <tbody>{policies.length === 0 ? <tr><td colSpan={6} className="policy-empty-cell">No policies match the selected filters.</td></tr> : policies.map((policy) => <tr key={policy.policyId} className={activePolicyId === policy.policyId ? 'policy-catalog-row active' : 'policy-catalog-row'}>
-            <td><strong>{policy.name}</strong><br /><small>{policy.policyId} · {policy.provider} · {policy.severity} · v{policy.version}</small></td>
+        <div className="table-scroll policy-catalog-table"><table className="data-table"><thead><tr><th>Policy</th><th>Framework mapping</th><th>Availability</th><th>Default selection</th><th>Rollout</th><th>Lifecycle</th><th aria-label="Actions" /></tr></thead>
+          <tbody>{policies.length === 0 ? <tr><td colSpan={7} className="policy-empty-cell">No policies match the selected filters.</td></tr> : policies.map((policy) => <tr key={policy.policyId} className={activePolicyId === policy.policyId ? 'policy-catalog-row active' : 'policy-catalog-row'}>
+            <td><strong>{policy.name}</strong><br /><small>{policy.policyId} · {policy.provider} · {policy.severity}</small></td>
             <td>{owaspMappings(policy.frameworkMappingsJson)}</td><td><span className={statusClass(policy.available ? 'available' : 'unavailable')}>{policy.available ? 'Available' : 'Unavailable'}</span></td>
-            <td><span className={statusClass(policy.defaultSelection)}>{policy.defaultSelection}</span></td><td><span className={statusClass(policy.rolloutStage)}>{rolloutLabel(policy.rolloutStage)}</span></td>
+            <td><span className={statusClass(policy.defaultSelection)}>{policy.defaultSelection}</span><br /><small>Tenant default</small></td><td><span className={statusClass(policy.rolloutStage)}>{rolloutLabel(policy.rolloutStage)}</span></td><td><span className={statusClass(policy.lifecycle)}>{policy.lifecycle}</span></td>
             <td><button type="button" className="btn btn-secondary btn-sm" aria-label={`Manage ${policy.name}`} onClick={() => setActivePolicyId(policy.policyId)}>Manage</button></td>
           </tr>)}</tbody></table></div>
         <PolicyConfigurationPanel key={activePolicy?.policyId ?? 'empty'} policy={activePolicy} tenantIds={activeTenantIds}
-          saving={approve.isPending || publish.isPending || deprecate.isPending}
-          onClose={() => setActivePolicyId(null)} onApprove={(policy) => approve.mutate(policy.policyId)}
-          onPublish={(policy, targetTenantIds) => publish.mutate({ policyId: policy.policyId, targetTenantIds })}
+          saving={approve.isPending || devDeploy.isPending || publish.isPending || deprecate.isPending}
+          onClose={() => setActivePolicyId(null)} onApprove={(policy, note) => approve.mutate({ policyId: policy.policyId, note })}
+          onDevDeploy={(policy, targetTenantIds, note) => devDeploy.mutate({ policyId: policy.policyId, targetTenantIds, note })}
+          onPublish={(policy, targetTenantIds, publishAll) => publish.mutate({ policyId: policy.policyId, targetTenantIds, publishAll })}
           onDeprecate={(policy, reason) => deprecate.mutate({ policyId: policy.policyId, reason })} />
       </div>
     </section>
 
-    <section className="panel policy-rollout-panel"><div className="panel-header"><div><h3>Approval-bound rollout queue</h3><p className="panel-caption">Each rollout is created by one policy approval and carries its exact digest and release-decision binding.</p></div><span className="policy-results-count">{rollouts.data?.filter((item) => item.status !== 'COMPLETED' && item.status !== 'CANCELED').length ?? 0} active</span></div>
-      <div className="table-scroll"><table className="data-table"><thead><tr><th>Policy</th><th>Version</th><th>Approved digest</th><th>Decision</th><th>State</th><th>Created</th><th>Action</th></tr></thead><tbody>
-        {rollouts.isLoading ? <tr><td colSpan={7}>Loading rollout jobs…</td></tr> : (rollouts.data ?? []).length === 0 ? <tr><td colSpan={7}>No rollout jobs are waiting.</td></tr> : (rollouts.data ?? []).map((item) => <tr key={item.id}><td><strong>{item.policyId}</strong></td><td>{item.newVersion}</td><td className="mono">{item.approvedDigest ?? '—'}</td><td className="mono">{item.releaseDecisionId ?? '—'}</td><td><span className={statusClass(item.status)}>{item.status}</span></td><td>{new Date(item.createdAt).toLocaleString()}</td><td><button type="button" className="btn btn-secondary btn-sm" onClick={() => retry.mutate(item.id)} disabled={retry.isPending || item.status === 'COMPLETED' || item.status === 'CANCELED'}>{item.status === 'COMPLETED' ? 'Complete' : item.status === 'CANCELED' ? 'Canceled' : 'Retry'}</button></td></tr>)}
+    <section className="panel policy-rollout-panel"><div className="panel-header"><div><h3>Canary rollout queue</h3><p className="panel-caption">Each canary rollout is created by one policy approval and carries its exact digest and release-decision binding.</p></div><span className="policy-results-count">{rollouts.data?.filter((item) => item.status !== 'COMPLETED' && item.status !== 'CANCELED').length ?? 0} active</span></div>
+      <div className="table-scroll"><table className="data-table"><thead><tr><th>Policy</th><th>Approved digest</th><th>Decision</th><th>State</th><th>Created</th><th>Action</th></tr></thead><tbody>
+        {rollouts.isLoading ? <tr><td colSpan={6}>Loading rollout jobs…</td></tr> : (rollouts.data ?? []).length === 0 ? <tr><td colSpan={6}>No rollout jobs are waiting.</td></tr> : (rollouts.data ?? []).map((item) => <tr key={item.id}><td><strong>{item.policyId}</strong></td><td className="mono">{item.approvedDigest ?? '—'}</td><td className="mono">{item.releaseDecisionId ?? '—'}</td><td><span className={statusClass(item.status)}>{item.status}</span></td><td>{new Date(item.createdAt).toLocaleString()}</td><td><button type="button" className="btn btn-secondary btn-sm" onClick={() => retry.mutate(item.id)} disabled={retry.isPending || item.status === 'COMPLETED' || item.status === 'CANCELED'}>{item.status === 'COMPLETED' ? 'Complete' : item.status === 'CANCELED' ? 'Canceled' : 'Retry'}</button></td></tr>)}
       </tbody></table></div>
     </section>
   </section>;
@@ -123,18 +140,21 @@ function ShippingSummary({ status }: { status?: { expectedPolicies: number; inst
   return <section className="summary-strip policy-shipping-summary" aria-label="Shipping summary"><span><strong>{value('expectedPolicies')}</strong> catalog packages</span><span><strong>{value('installedPolicies')}</strong> installed</span><span><strong>{value('publishedPolicies')}</strong> published</span><span><strong>{value('distributedPolicies')}</strong> distributed</span><span><strong>{value('digestMatchedPolicies')}</strong> digest verified</span><span><strong>{value('rolloutPendingTenants')}</strong> tenant jobs pending</span></section>;
 }
 
-function PolicyConfigurationPanel({ policy, tenantIds, saving, onClose, onApprove, onPublish, onDeprecate }: { policy: AiGridPolicyDistribution | null; tenantIds: string[]; saving: boolean; onClose: () => void; onApprove: (policy: AiGridPolicyDistribution) => void; onPublish: (policy: AiGridPolicyDistribution, targetTenantIds: string[]) => void; onDeprecate: (policy: AiGridPolicyDistribution, reason: string) => void }) {
+function PolicyConfigurationPanel({ policy, tenantIds, saving, onClose, onApprove, onDevDeploy, onPublish, onDeprecate }: { policy: AiGridPolicyDistribution | null; tenantIds: string[]; saving: boolean; onClose: () => void; onApprove: (policy: AiGridPolicyDistribution, note: string) => void; onDevDeploy: (policy: AiGridPolicyDistribution, targetTenantIds: string[], note: string) => void; onPublish: (policy: AiGridPolicyDistribution, targetTenantIds: string[], publishAll: boolean) => void; onDeprecate: (policy: AiGridPolicyDistribution, reason: string) => void }) {
   const [cohort, setCohort] = React.useState<string[]>([]);
   const [deprecationReason, setDeprecationReason] = React.useState('');
+  const [testNote, setTestNote] = React.useState('');
+  const [publishScope, setPublishScope] = React.useState<'SELECTED' | 'ALL'>('SELECTED');
   const detail = useQuery({ queryKey: ['platform-ai-grid-policy-detail', policy?.policyId, policy?.version], queryFn: () => api.getPlatformAiGridPolicyDetail(policy!.policyId, policy!.version), enabled: policy != null });
   if (!policy) return <aside className="policy-configuration-empty"><span className="ai-security-kicker">Lifecycle</span><h4>Select a policy</h4><p>Choose <strong>Manage</strong> beside a policy to approve, publish to a canary cohort, or deprecate it.</p></aside>;
-  return <aside className="policy-configuration-panel" aria-label={`${policy.name} configuration`}><div className="policy-configuration-heading"><div><span className="ai-security-kicker">Configuration</span><h4>{policy.name}</h4><p>{policy.policyId} · v{policy.version}</p></div><button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>Close</button></div>
-    <div className="policy-detail-summary"><span className={statusClass(policy.severity)}>{policy.severity}</span><span>{detail.data?.description ?? 'Loading policy intent…'}</span></div>
-    <div className="policy-config-fields"><label>Canary tenants<select multiple value={cohort} aria-label={`${policy.policyId} canary tenants`} onChange={(event) => setCohort(Array.from(event.target.selectedOptions, (option) => option.value))}>{tenantIds.map((id) => <option key={id} value={id}>{id}</option>)}</select><small>Choose one or more active tenants. Publishing never targets only the Default Workspace unless a caller intentionally uses the no-body API fallback.</small></label>
+  return <aside className="policy-configuration-panel" aria-label={`${policy.name} configuration`}><div className="policy-configuration-heading"><div><span className="ai-security-kicker">Configuration</span><h4>{policy.name}</h4><p>{policy.policyId}</p></div><button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>Close</button></div>
+    <div className="policy-detail-summary"><span className={statusClass(policy.severity)}>{policy.severity}</span><span>{detail.data?.description ?? 'Loading policy intent…'}</span><dl><dt>Lifecycle</dt><dd>{policy.lifecycle}</dd><dt>Rollout</dt><dd>{rolloutLabel(policy.rolloutStage)}</dd><dt>Tenant default</dt><dd>{policy.defaultSelection}</dd></dl></div>
+    <div className="policy-config-fields"><label>Dev/test tenants<select multiple value={cohort} aria-label={`${policy.policyId} dev test tenants`} onChange={(event) => setCohort(Array.from(event.target.selectedOptions, (option) => option.value))}>{tenantIds.map((id) => <option key={id} value={id}>{id}</option>)}</select><small>Select tenants for pre-approval testing.</small></label>
+      <label>Tenant test result / approval note<textarea value={testNote} onChange={(event) => setTestNote(event.target.value)} placeholder="Describe the dev/test result before approval" /></label>
       <label>Deprecation reason<input value={deprecationReason} onChange={(event) => setDeprecationReason(event.target.value)} placeholder="Why this policy is being retired" /></label>
     </div>
-    {cohort.length === 0 ? <p className="notice error">Choose at least one tenant before publishing a canary.</p> : null}
-    <div className="button-row"><button type="button" className="btn btn-secondary" disabled={saving || policy.lifecycle !== 'VALIDATED'} onClick={() => onApprove(policy)}>{saving ? 'Working…' : 'Approve policy'}</button><button type="button" className="btn btn-primary" disabled={saving || policy.lifecycle !== 'APPROVED' || cohort.length === 0} onClick={() => onPublish(policy, cohort)}>{saving ? 'Working…' : 'Publish canary'}</button><button type="button" className="btn btn-secondary" disabled={saving || policy.lifecycle === 'DEPRECATED' || deprecationReason.trim() === ''} onClick={() => onDeprecate(policy, deprecationReason.trim())}>{saving ? 'Working…' : 'Deprecate policy'}</button></div>
+    {cohort.length === 0 ? <p className="notice error">Choose at least one dev/test tenant.</p> : null}
+    <div className="button-row"><button type="button" className="btn btn-secondary" disabled={saving || policy.lifecycle !== 'VALIDATED' || cohort.length === 0 || testNote.trim() === ''} onClick={() => onDevDeploy(policy, cohort, testNote.trim())}>{saving ? 'Working…' : 'Deploy to dev/test'}</button><button type="button" className="btn btn-secondary" disabled={saving || policy.lifecycle !== 'VALIDATED' || testNote.trim() === ''} onClick={() => onApprove(policy, testNote.trim())}>{saving ? 'Working…' : 'Approve policy'}</button><label>Publish scope<select value={publishScope} onChange={(event) => setPublishScope(event.target.value as 'SELECTED' | 'ALL')}><option value="SELECTED">Selected tenants</option><option value="ALL">All active tenants</option></select></label><button type="button" className="btn btn-primary" disabled={saving || policy.lifecycle !== 'APPROVED' || (publishScope === 'SELECTED' && cohort.length === 0)} onClick={() => onPublish(policy, publishScope === 'ALL' ? [] : cohort, publishScope === 'ALL')}>{saving ? 'Working…' : 'Publish policy'}</button><button type="button" className="btn btn-secondary" disabled={saving || policy.lifecycle === 'DEPRECATED' || deprecationReason.trim() === ''} onClick={() => onDeprecate(policy, deprecationReason.trim())}>{saving ? 'Working…' : 'Deprecate policy'}</button></div>
     <details className="policy-technical-details"><summary>Policy implementation details</summary><dl><dt>Control objective</dt><dd>{detail.data?.controlObjectiveId ?? policy.controlObjectiveId ?? '—'}</dd><dt>Evaluation mode</dt><dd>{detail.data?.evaluationMode ?? policy.evaluationMode ?? '—'}</dd><dt>Source</dt><dd>{detail.data?.packageSourceRef ?? 'Loading…'}</dd></dl></details>
   </aside>;
 }

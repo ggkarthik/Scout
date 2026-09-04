@@ -13,7 +13,8 @@ public record AiGridPolicyPackage(
         List<String> artifactTypes, List<String> requiredCapabilities, List<String> requiredRelationships,
         List<String> requiredResourceFamilies, List<FactRequirement> requiredFacts,
         List<FrameworkMapping> frameworkMappings, List<ParameterDefinition> parameterDefinitions,
-        CertificationParameterProfile certificationParameterProfile, String packageSourceRef) {
+        CertificationParameterProfile certificationParameterProfile, String packageSourceRef,
+        String predecessorPolicyId) {
     public record EvaluationDefinition(String mode, JsonNode artifactFacts, JsonNode directRelationship,
                                        JsonNode correlationPath) {}
     public record FactRequirement(String factKey, String valueType, List<String> evidenceClasses, long maxAgeSeconds) {}

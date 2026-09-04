@@ -102,7 +102,7 @@ export type AiGridPolicyDistribution = {
   policyId: string;
   available: boolean;
   defaultSelection: AiGridPolicySelection;
-  rolloutStage: 'GENERAL_AVAILABILITY' | 'CANARY' | 'PAUSED' | 'RETIRED';
+  rolloutStage: 'GENERAL_AVAILABILITY' | 'CANARY' | 'DEV' | 'PAUSED' | 'RETIRED';
   canaryTenantIdsJson: string;
   pinnedVersion: string | null;
   updatedBy: string;

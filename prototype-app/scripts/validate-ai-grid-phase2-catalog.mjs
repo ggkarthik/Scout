@@ -10,6 +10,7 @@ if (contract.catalogVersion !== 1) fail('catalogVersion must be 1');
 if (contract.technicalVersion !== '1.0.0') fail('all Phase 2 packages must be 1.0.0');
 if (!Array.isArray(contract.newPolicyRanges) || !Array.isArray(contract.replacements)) fail('ranges and replacements are required');
 if (JSON.stringify(contract).includes('"digest"')) fail('catalog contract must not contain package digests');
+if (!Array.isArray(contract.policies) || contract.policies.length !== 83) fail('exactly 83 explicit policy entries are required');
 
 const expectedRanges = new Map([
   ['AGCF-AWS', [39, 68]],
@@ -48,4 +49,14 @@ for (const replacement of contract.replacements) {
 if (successors.size !== expectedSuccessors.size) fail('replacement successor set is incomplete');
 const total = newIds.size + successors.size;
 if (total !== 83) fail(`expected 83 Phase 2 packages, found ${total}`);
+const entries = new Map(contract.policies.map((policy) => [policy.policyId, policy]));
+if (entries.size !== 83) fail('explicit policy IDs must be unique');
+for (const policy of entries.values()) {
+  if (policy.version !== '1.0.0' || policy.lifecycle !== 'VALIDATED' || policy.releaseStatus !== 'PAUSED') fail(`${policy.policyId} must be 1.0.0 VALIDATED/PAUSED`);
+  if (policy.releaseFamily !== 'AGCF_PHASE_2' || !policy.provider || !policy.name || !policy.description) fail(`${policy.policyId} is missing package metadata`);
+  if (!policy.requiredCapabilities?.length || !policy.requiredFacts || !policy.evaluationDefinition || !policy.frameworkMappings?.length) fail(`${policy.policyId} is missing executable contract metadata`);
+}
+for (const replacement of contract.replacements) {
+  if (entries.get(replacement.successorPolicyId)?.predecessorPolicyId !== replacement.predecessorPolicyId) fail(`replacement metadata mismatch for ${replacement.successorPolicyId}`);
+}
 console.log(`Phase 2 catalog contract valid: ${newIds.size} new + ${successors.size} replacements = ${total}`);

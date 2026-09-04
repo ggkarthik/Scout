@@ -78,6 +78,52 @@ public class AzureAiGridFactProducer implements AiGridFactProducer {
                     "tags.environment+tags.criticality"));
         }
         AiGridFactProducerSupport.copy(input, "raiPolicyName", "guardrail.rai_policy_reference_configured", facts);
+        String[][] phase2Attributes = {
+                {"effectiveAccessExceedsApprovedMatrix", "identity.effective_access_exceeds_approved_matrix"},
+                {"sensitiveAccessOutsideApprovedScope", "identity.sensitive_access_outside_approved_scope"},
+                {"canElevateAccess", "identity.can_elevate_access"},
+                {"highImpactWildcardPermission", "identity.high_impact_wildcard_permission"},
+                {"roleAssignmentStale", "identity.role_assignment_stale"},
+                {"pimActivationRequiredMissing", "identity.pim_activation_required_missing"},
+                {"accessReviewMissingOrStale", "identity.access_review_missing_or_stale"},
+                {"dataSourceSecretAuthentication", "search.data_source_secret_authentication"},
+                {"connectionCustomerManagedKey", "search.connection_customer_managed_key"},
+                {"permissionFilteringConfigured", "search.permission_filtering_configured"},
+                {"documentAuthorizationConfigured", "search.document_authorization_configured"},
+                {"tenantPartitioningConfigured", "search.tenant_partitioning_configured"},
+                {"retrievalModeApproved", "search.retrieval_mode_approved"},
+                {"encryptionCustomerManagedKey", "search.encryption_customer_managed_key"},
+                {"outboundSharedPrivateLinkConfigured", "search.outbound_shared_private_link_configured"},
+                {"storagePublicBlobAccess", "data.storage_public_blob_access"},
+                {"storageSharedKeyAccess", "data.storage_shared_key_access"},
+                {"storageSecureTransferTlsBaseline", "data.storage_secure_transfer_tls_baseline"},
+                {"storageCustomerManagedKey", "data.storage_customer_managed_key"},
+                {"storagePrivateNetworkBoundary", "data.storage_private_network_boundary"},
+                {"azureBudgetConfigured", "consumption.azure_budget_configured"},
+                {"azureQuotaAlertConfigured", "consumption.azure_quota_alert_configured"},
+                {"azureQuotaUtilizationExceedsThreshold", "consumption.azure_quota_utilization_exceeds_threshold"},
+                {"azureThrottlingCapacityExceedsThreshold", "consumption.azure_throttling_capacity_exceeds_threshold"},
+                {"azureUsageExceedsThreshold", "consumption.azure_usage_exceeds_threshold"},
+                {"modelSignatureAttestationPresent", "provenance.model_signature_attestation_present"},
+                {"modelApprovedRegistryLineage", "provenance.model_approved_registry_lineage"},
+                {"modelSbomCoveragePresent", "provenance.model_sbom_coverage_present"},
+                {"deploymentImageVulnerabilityBaselinePass", "provenance.deployment_image_vulnerability_baseline_pass"},
+                {"datasetVersionChecksumPinned", "provenance.dataset_version_checksum_pinned"},
+                {"mlflowDatasetLineagePresent", "provenance.mlflow_dataset_lineage_present"},
+                {"azureMlManagedNetworkEnabled", "model.azure_ml_managed_network_enabled"},
+                {"azureMlOutboundEgressRestricted", "model.azure_ml_outbound_egress_restricted"},
+                {"botPublicWithoutStrongAuth", "mcp.bot_public_without_strong_auth"},
+                {"botManagedIdentityConfigured", "mcp.bot_managed_identity_configured"},
+                {"botTlsBaselinePass", "mcp.bot_tls_baseline_pass"},
+                {"foundryPrivateEndpointConfigured", "mcp.foundry_private_endpoint_configured"},
+                {"effectivePublicNetworkExposure", "network.effective_public_network_exposure"},
+                {"effectivePrivateEndpointRequirement", "network.effective_private_endpoint_requirement"},
+                {"foundryAuthAuthoritative", "mcp.foundry_auth_authoritative"},
+                {"effectivePrivilegedScope", "identity.effective_privileged_scope"},
+                {"effectiveRoleConstraints", "identity.effective_role_constraints"},
+                {"authoritativeSensitivityState", "data.authoritative_sensitivity_state"},
+        };
+        for (String[] mapping : phase2Attributes) AiGridFactProducerSupport.copy(input, mapping[0], mapping[1], facts);
         return List.copyOf(facts);
     }
 }
