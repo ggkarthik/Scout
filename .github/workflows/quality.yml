@@ -92,6 +92,8 @@ jobs:
 
   backend-postgres:
     runs-on: ubuntu-latest
+    env:
+      APP_PLATFORM_OWNER_BOOTSTRAP_ENABLED: "false"
     services:
       postgres:
         image: postgres:16
