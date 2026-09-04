@@ -116,7 +116,8 @@ public final class ProductionBootstrapCli {
         Instant completedAt = Instant.now();
         System.out.println(report(runId, startedAt, completedAt, success, failureCode, failureMessage, phases));
         if (!success) {
-            System.exit(1);
+            throw new BootstrapFailure(failureCode == null ? "bootstrap_failed" : failureCode,
+                    failureMessage == null ? "Production bootstrap failed" : failureMessage);
         }
     }
 
