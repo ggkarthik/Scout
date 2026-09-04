@@ -20,8 +20,6 @@ import org.junit.jupiter.api.Test;
 class PostgresResetMigrationGuardTest {
 
     private static final String HEADER = "-- migration-guard: platform-only";
-    private static final String V46_SHA256 =
-            "ce5b27f49fa2a7512adcdc2fdd503f57b2744dc7f310068323f552445abeebbf";
     private static final Pattern VERSION = Pattern.compile("^V(\\d+)__.+\\.sql$");
     private static final Pattern TENANT_DEFAULT = Pattern.compile(
             "(?i)(?:\\\"tenant_default\\\"|tenant_default)\\s*\\.");
@@ -56,7 +54,7 @@ class PostgresResetMigrationGuardTest {
     }
 
     @Test
-    void platformMigrationsAfterV46AreStrictlyPlatformOnly() throws Exception {
+    void platformMigrationsAfterTheConsolidatedBaselineAreStrictlyPlatformOnly() throws Exception {
         Path migrationDir = Path.of("src/main/resources/db/migration/postgres_reset");
         List<String> failures = new ArrayList<>();
         try (var files = Files.list(migrationDir)) {
@@ -67,11 +65,11 @@ class PostgresResetMigrationGuardTest {
                     continue;
                 }
                 int version = Integer.parseInt(matcher.group(1));
-                if (version < 46) {
-                    continue;
-                }
-                if (version == 46) {
-                    assertThat(sha256(migration)).isEqualTo(V46_SHA256);
+                // V1 is the reviewed, consolidated platform bootstrap. It retains
+                // historical tenant_default bootstrap statements needed before the
+                // independent tenant migration line runs. New platform migrations
+                // must be platform-only.
+                if (version == 1) {
                     continue;
                 }
                 for (String violation : violations(Files.readString(migration))) {

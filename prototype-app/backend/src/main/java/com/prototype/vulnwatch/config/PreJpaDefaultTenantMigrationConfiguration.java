@@ -37,8 +37,8 @@ public class PreJpaDefaultTenantMigrationConfiguration {
                     """, DEFAULT_TENANT_ID, DEFAULT_SCHEMA);
             Flyway.configure().dataSource(dataSource).schemas(DEFAULT_SCHEMA).defaultSchema(DEFAULT_SCHEMA)
                     .table("tenant_schema_history").locations("classpath:db/migration/tenant")
-                    .baselineOnMigrate(true).baselineVersion(MigrationVersion.fromVersion("41"))
-                    .baselineDescription("legacy tenant schema baseline")
+                    .baselineOnMigrate(true).baselineVersion(MigrationVersion.fromVersion("0"))
+                    .baselineDescription("tenant template bootstrap")
                     .placeholders(Map.of("tenantId", DEFAULT_TENANT_ID.toString(), "tenantSchema", DEFAULT_SCHEMA))
                     .validateOnMigrate(true).outOfOrder(false).load().migrate();
         };

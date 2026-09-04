@@ -14,7 +14,6 @@ PLATFORM_MIGRATIONS = ROOT / "prototype-app/backend/src/main/resources/db/migrat
 FIXTURES = ROOT / ".github/scripts/fixtures/tenant-migration-guard-cases.json"
 VERSION = re.compile(r"^V(\d+)__.+\.sql$")
 HEADER = "-- migration-guard: platform-only"
-V46_SHA256 = "ce5b27f49fa2a7512adcdc2fdd503f57b2744dc7f310068323f552445abeebbf"
 
 
 def sql_without_comments(sql: str) -> str:
@@ -80,12 +79,9 @@ def main() -> int:
             failures.append(f"malformed migration filename: {migration.name}")
             continue
         version = int(match.group(1))
-        if version < 46:
-            continue
-        if version == 46:
-            digest = hashlib.sha256(migration.read_bytes()).hexdigest()
-            if digest != V46_SHA256:
-                failures.append(f"{migration.name}: immutable V46 checksum changed ({digest})")
+        # V1 is the reviewed consolidated bootstrap. New platform migrations
+        # must be platform-only.
+        if version == 1:
             continue
         for violation in violations(migration.read_text()):
             failures.append(f"{migration.name}: {violation}")

@@ -587,8 +587,9 @@ public final class ProductionBootstrapCli {
                 .table("tenant_schema_history")
                 .locations("classpath:db/migration/tenant")
                 .baselineOnMigrate(true)
-                .baselineVersion(MigrationVersion.fromVersion("41"))
-                .baselineDescription("legacy tenant schema baseline")
+                .baselineVersion(MigrationVersion.fromVersion(
+                        DEFAULT_TENANT_SCHEMA.equals(tenant.schemaName()) ? "0" : "1"))
+                .baselineDescription("tenant template bootstrap")
                 .placeholders(java.util.Map.of(
                         "tenantId", tenant.tenantId().toString(),
                         "tenantSchema", tenant.schemaName()))

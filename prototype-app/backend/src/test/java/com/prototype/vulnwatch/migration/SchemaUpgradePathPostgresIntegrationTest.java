@@ -10,22 +10,19 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import org.flywaydb.core.Flyway;
-import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
 @EnabledIfSystemProperty(named = "run.postgres.it", matches = "true")
 class SchemaUpgradePathPostgresIntegrationTest {
 
-    private static final String CURRENT_SCHEMA_VERSION = "94";
+    private static final String CURRENT_SCHEMA_VERSION = "1";
     private static final LocalPostgresTestDatabase.DatabaseConfig DATABASE =
             LocalPostgresTestDatabase.provision("schema_upgrade_path");
-    private static final LocalPostgresTestDatabase.DatabaseConfig UPGRADE_DATABASE =
-            LocalPostgresTestDatabase.provision("schema_upgrade_phase1_path");
 
     @Test
     void canApplyResetBaselineWithoutHistoricalMigrations() throws Exception {
-        Flyway flyway = configuredFlyway(null);
+        Flyway flyway = configuredFlyway();
         flyway.migrate();
 
         assertNotNull(flyway.info().current());
@@ -37,29 +34,15 @@ class SchemaUpgradePathPostgresIntegrationTest {
     }
 
     @Test
-    void prePhase1DatabaseUpgradesToTheSameSeventySixEntryGovernedCatalog() throws Exception {
-        configuredFlyway(UPGRADE_DATABASE, MigrationVersion.fromVersion("74")).migrate();
-        configuredFlyway(UPGRADE_DATABASE, null).migrate();
-
-        assertPhase1Catalog(UPGRADE_DATABASE);
-    }
-
-    private Flyway configuredFlyway(MigrationVersion target) {
-        return configuredFlyway(DATABASE, target);
-    }
-
-    private Flyway configuredFlyway(LocalPostgresTestDatabase.DatabaseConfig database, MigrationVersion target) {
+    private Flyway configuredFlyway() {
         var config = Flyway.configure()
-                .dataSource(database.url(), database.username(), database.password())
+                .dataSource(DATABASE.url(), DATABASE.username(), DATABASE.password())
                 .defaultSchema("public")
                 .locations("filesystem:src/main/resources/db/migration/postgres_reset")
                 .baselineOnMigrate(false)
                 .baselineVersion("1")
                 .validateOnMigrate(true)
                 .outOfOrder(false);
-        if (target != null) {
-            config.target(target);
-        }
         return config.load();
     }
 
@@ -76,6 +59,11 @@ class SchemaUpgradePathPostgresIntegrationTest {
     }
 
     private void assertPhase1Catalog(LocalPostgresTestDatabase.DatabaseConfig database) throws SQLException {
+        assertEquals(2, queryForInt(database, """
+                select count(*) from information_schema.columns
+                 where table_schema = 'platform' and table_name = 'ai_grid_policy_distribution'
+                   and column_name in ('approved_package_digest', 'release_decision_id')
+                """));
         assertEquals(76, queryForInt(database, "select count(*) from platform.ai_grid_policy_distribution d join platform.ai_grid_policy_versions p on p.policy_id=d.policy_id and p.version='1.0.0' where p.release_family='AGCF_PHASE_1'"));
         assertEquals(38, queryForInt(database, "select count(*) from platform.ai_grid_policy_versions where release_family='AGCF_PHASE_1' and provider='AWS'"));
         assertEquals(32, queryForInt(database, "select count(*) from platform.ai_grid_policy_versions where release_family='AGCF_PHASE_1' and provider='AZURE'"));
