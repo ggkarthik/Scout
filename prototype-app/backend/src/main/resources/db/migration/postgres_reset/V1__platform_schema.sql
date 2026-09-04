@@ -3914,6 +3914,14 @@ SELECT p.policy_id, true, p.default_selection, 'GENERAL_AVAILABILITY', '[]'::jso
         OR p.policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL')
 ON CONFLICT (policy_id) DO NOTHING;
 
+INSERT INTO platform.ai_grid_release_manifest_items
+    (release_id, subject_type, subject_id, subject_version)
+VALUES
+    ('R2', 'CORRELATION', 'R2_EXTERNAL_SENSITIVE_ACCESS', '1.0.0'),
+    ('R2', 'CORRELATION', 'R2_EXCESSIVE_TOOL_PRIVILEGE', '1.0.0'),
+    ('R2', 'CORRELATION', 'R2_UNTRUSTED_AUTONOMOUS_EXECUTION', '1.0.0')
+ON CONFLICT DO NOTHING;
+
 INSERT INTO platform.ai_grid_policy_migration_ledger
     (legacy_detector_id, legacy_detector_kind, disposition, successor_policy_ids_json,
      closure_reason, rationale, approved_by)

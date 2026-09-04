@@ -598,7 +598,10 @@ public final class ProductionBootstrapCli {
         SingleConnectionDataSource dataSource = new SingleConnectionDataSource(connection, true);
         TenantSchemaService schemaService = new TenantSchemaService(
                 new JdbcTemplate(dataSource), DEFAULT_TENANT_SCHEMA);
-        schemaService.provisionOrReconcileSchemaFromTemplate(schemaName);
+        // New tenants must start empty so tenant Flyway owns the V1 baseline and
+        // records its own history. Cloning tenant_default leaves a non-empty
+        // schema without history, which Flyway correctly refuses to migrate.
+        schemaService.provisionEmptySchema(schemaName);
     }
 
     private static List<TenantSchema> tenants(Connection connection, String status) throws SQLException {
