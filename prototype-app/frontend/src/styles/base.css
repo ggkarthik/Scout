@@ -155,6 +155,9 @@
   --orange: #ea580c;
   --green: #059669;
   --light: #475569;
+  /* Shared desktop canvas for the public site: wide enough for product UI,
+     capped enough to retain a deliberate reading measure on large displays. */
+  --public-page-max: 1520px;
   min-height: 100vh;
   padding: 88px 24px 24px;
   background:
@@ -183,7 +186,7 @@
   justify-content: space-between;
   align-items: center;
   gap: 16px;
-  width: min(1320px, 100%);
+  width: min(var(--public-page-max), 100%);
   height: 100%;
   margin: 0 auto;
 }
@@ -265,7 +268,7 @@
 }
 
 .scout-hero {
-  width: min(1320px, 100%);
+  width: min(var(--public-page-max), 100%);
   min-height: calc(100vh - 112px);
   margin: 0 auto;
   padding: 88px 0 72px;
@@ -319,9 +322,9 @@
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: minmax(0, 0.92fr) minmax(520px, 1.08fr);
-  gap: clamp(36px, 6vw, 80px);
-  align-items: center;
+  grid-template-columns: minmax(0, 0.96fr) minmax(600px, 1.04fr);
+  gap: clamp(40px, 4vw, 72px);
+  align-items: start;
 }
 
 .scout-eyebrow {
@@ -347,7 +350,7 @@
   font-size: clamp(3.2rem, 6vw, 5.5rem);
   line-height: 0.96;
   letter-spacing: -0.06em;
-  max-width: 10.5ch;
+  max-width: 12.5ch;
 }
 
 .scout-hero-content p {
@@ -427,6 +430,8 @@
   border-radius: 24px;
   background: rgba(255, 255, 255, 0.94);
   box-shadow: 0 34px 80px rgba(15, 23, 42, 0.14), 0 8px 24px rgba(15, 23, 42, 0.08);
+  /* Align the product preview with the headline rather than the full copy column. */
+  margin-top: 54px;
 }
 
 .scout-hero-visual::before {
@@ -627,7 +632,7 @@
 }
 
 .security-signal-strip {
-  width: min(1320px, 100%);
+  width: min(var(--public-page-max), 100%);
   margin: 0 auto 24px;
   padding: 18px 24px;
   display: flex;
@@ -817,7 +822,7 @@
 }
 
 .sg-section {
-  width: min(1320px, 100%);
+  width: min(var(--public-page-max), 100%);
   margin: 24px auto 0;
   padding: 26px;
 }
@@ -1046,7 +1051,7 @@
 }
 
 .feature-section {
-  width: min(1320px, 100%);
+  width: min(var(--public-page-max), 100%);
   margin: 24px auto 0;
   padding: 36px 26px;
 }
@@ -1439,7 +1444,7 @@
 }
 
 .callout-strip {
-  width: min(1320px, 100%);
+  width: min(var(--public-page-max), 100%);
   margin: 24px auto 0;
   padding: 26px 30px;
   border: 1px solid var(--border);
@@ -1468,7 +1473,7 @@
 }
 
 .ai-teaser {
-  width: min(1320px, 100%);
+  width: min(var(--public-page-max), 100%);
   margin: 24px auto 0;
 }
 
@@ -1839,7 +1844,7 @@
 }
 
 .scout-footer {
-  width: min(1320px, 100%);
+  width: min(var(--public-page-max), 100%);
   margin: 40px auto 0;
   padding: 32px 26px 24px;
   border-top: 1px solid var(--border);
@@ -2155,15 +2160,35 @@
   }
 
   .public-demo-nav {
-    align-items: start;
-    flex-direction: column;
     height: auto;
     padding: 14px 16px 16px;
   }
 
+  .public-demo-nav-inner {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
   .public-demo-links {
-    flex-wrap: wrap;
+    width: 100%;
+    flex-wrap: nowrap;
     justify-content: flex-start;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .public-demo-links a {
+    flex: 0 0 auto;
+  }
+
+  .public-demo-shell,
+  .public-demo-shell.compact {
+    padding: 130px 16px 16px;
+  }
+
+  .scout-hero {
+    padding-top: 32px;
   }
 }
 
@@ -2178,6 +2203,10 @@
 
   .scout-hero-content h1 {
     max-width: 11ch;
+  }
+
+  .scout-hero-visual {
+    margin-top: 0;
   }
 }
 

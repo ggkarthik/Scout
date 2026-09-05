@@ -158,50 +158,41 @@ const GRID_CARDS: Array<{
   comingSoon?: boolean;
 }> = [
   {
-    id: 'infra-grid',
-    variant: 'blue',
-    icon: '🖥️',
-    title: 'Infrastructure Grid',
-    desc: 'Full-spectrum vulnerability assessment across your on-premises and data-center footprint. Scout fingerprints every host, OS, and running service — no agent installation, no network disruption, no credentials required.',
-    chips: ['Host Discovery', 'OS / Application Fingerprinting', 'Agentless', 'SLA Enforcement'],
-    linkLabel: 'Explore Infrastructure Risk'
-  },
-  {
-    id: 'cloud-grid',
-    variant: 'cyan',
-    icon: '☁️',
-    title: 'Cloud Grid',
-    desc: 'Discover and assess every cloud workload — EC2, containers, serverless, and managed services. Scout maps cloud-native attack paths and correlates findings with your live SBOM inventory, giving you context no cloud-native tool can match.',
-    chips: ['Cloud Resources', 'Container Images', 'Critical prioritization'],
-    linkLabel: 'Explore Cloud Security'
+    id: 'ai-grid',
+    variant: 'orange',
+    icon: '🤖',
+    title: 'AI Grid',
+    desc: 'Discover, inventory, and secure your expanding AI attack surface—LLM endpoints, autonomous agents, MCP tools, and vector DBs.',
+    chips: ['AI Model & LLM Discovery', 'Agent Risk & Capability Scoring', 'MCP Surface Analysis', 'AI-BOM & Dataset Lineage', 'Prompt Injection Mapping'],
+    linkLabel: 'Explore AI Grid'
   },
   {
     id: 'bom-grid',
     variant: 'purple',
     icon: '📦',
     title: 'BOM Grid',
-    desc: 'BOM Grid gives security teams a unified BOM control plane for applications, cloud workloads, and AI systems. Suppress false positives for organizations and prioritize real risk across applications, cloud, and AI.',
-    chips: ['CycloneDX / SPDX', 'GitHub SBOM', 'EOL Tracking', 'Vendor Assertions'],
+    desc: 'Unified BOM control plane mapping open source components, proprietary code, AI model dependencies, and cloud workloads.',
+    chips: ['CycloneDX / SPDX Ingestion', 'GitHub & CI/CD Integration', 'EOL Component Tracking', 'Vendor Assertions & VEX'],
     linkLabel: 'Explore BOM Security Grid'
   },
   {
-    id: 'ai-grid-card',
-    variant: 'orange',
-    icon: '🤖',
-    title: 'AI Grid',
-    desc: 'Discover, inventory, and secure every AI asset in your environment — LLM deployments, AI agents, MCP servers, vector databases, and fine-tuned models. Identify prompt injection risk, data leakage exposure, and over-privileged agent capabilities.',
-    chips: ['AI Model Discovery', 'Agent Risk Scoring', 'MCP Surface Mapping', 'AI-BOM', 'LLM CVE Coverage'],
-    comingSoon: true
+    id: 'cloud-grid',
+    variant: 'cyan',
+    icon: '☁️',
+    title: 'Cloud Grid',
+    desc: 'Continuous agentless discovery and risk assessment across EC2 instances, containers, Kubernetes clusters, and serverless stacks.',
+    chips: ['Cloud Native Resources', 'Container Image Scanning', 'Attack Path Analysis', 'Cloud-to-BOM Context'],
+    linkLabel: 'Explore Cloud Security'
+  },
+  {
+    id: 'infra-grid',
+    variant: 'blue',
+    icon: '🖥️',
+    title: 'Infra Grid',
+    desc: 'Full-spectrum host discovery and vulnerability assessment for hybrid, on-premises, and legacy IT environments.',
+    chips: ['Host & Service Discovery', 'Passive OS Fingerprinting', '100% Agentless Assessment', 'SLA & Remediation Rules'],
+    linkLabel: 'Explore Infrastructure Risk'
   }
-];
-
-const INTEL_FEEDS: Array<{ icon: string; name: string; desc: string }> = [
-  { icon: '🏛️', name: 'National Vulnerability Databases', desc: 'Continuously track CVEs, severity, weaknesses, and affected software.' },
-  { icon: '🔥', name: 'Active Exploitation Catalogs', desc: 'Identify vulnerabilities confirmed to be exploited in the wild.' },
-  { icon: '🐙', name: 'Open Source Ecosystem Advisories', desc: 'Monitor package-level advisories across major open source ecosystems.' },
-  { icon: '📊', name: 'Exploit Likelihood Models', desc: 'Score CVEs by real-world weaponization probability.' },
-  { icon: '📋', name: 'Vendor Applicability Guidance', desc: 'Use vendor guidance to suppress non-applicable findings with precision.' },
-  { icon: '📅', name: 'Product Lifecycle Intelligence', desc: 'Track end-of-life and end-of-support timelines across your software inventory.' }
 ];
 
 const AI_CAPABILITIES: Array<{ icon: string; name: string; desc: string }> = [
@@ -209,8 +200,8 @@ const AI_CAPABILITIES: Array<{ icon: string; name: string; desc: string }> = [
   { icon: '🕸️', name: 'Agent Risk Mapping', desc: 'Map agent access, internet reach, and code execution risk before abuse.' },
   { icon: '🔌', name: 'MCP Surface Analysis', desc: 'Identify exposed MCP servers, tools, and sensitive system access.' },
   { icon: '🗄️', name: 'Vector DB Risk Scoring', desc: 'Assess RAG and vector data stores for sensitivity and access risk.' },
-  { icon: '💉', name: 'Prompt Injection Detection', desc: 'Detect prompt injection, jailbreak, and indirect injection exposure.' },
-  { icon: '📋', name: 'AI-BOM Generation', desc: 'Generate a complete AI inventory of models, frameworks, datasets, and dependencies.' }
+  { icon: '💉', name: 'Prompt Injection Defense', desc: 'Identify systemic exposure to direct prompt injections, jailbreaks, and indirect prompt manipulation vulnerabilities.' },
+  { icon: '📋', name: 'Automated AI-BOM Generation', desc: 'Generate comprehensive AI Software Bills of Materials mapping models, frameworks, datasets, vector tools, and dependencies.' }
 ];
 
 function VisualPanel({ title, children }: { title: string; children: React.ReactNode }) {
@@ -243,7 +234,12 @@ function FeatureList({ items }: { items: Array<{ title: string; body: string }> 
   );
 }
 
-function _LegacyDemoLandingPage() {
+/**
+ * Public marketing page shared by the anonymous root and /demo routes.
+ * Keeping it in the application tree gives the page normal navigation,
+ * accessible anchors, and the same security policy as every other route.
+ */
+export function PublicLandingPage() {
   return (
     <PublicDemoShell>
       <section className="scout-hero">
@@ -252,22 +248,22 @@ function _LegacyDemoLandingPage() {
         <div className="scout-hero-glow scout-hero-glow--cyan" aria-hidden="true" />
         <div className="scout-hero-layout">
           <div className="scout-hero-content">
-            <span className="scout-eyebrow">✦ Exposure &amp; BOM Management Platform</span>
-            <h1>Exposure and SBOM management for <span className="hero-accent">modern software.</span></h1>
+            <span className="scout-eyebrow">✦ AI-First Exposure &amp; BOM Management</span>
+            <h1>The AI-First Exposure Management Platform Powered by <span className="hero-accent">AI Grid</span></h1>
             <p>
-              ScoutGrid unifies applications, hosts, cloud workloads, SBOM, AI BOM, CBOM, and vulnerability
-              intelligence in one operational view—so security teams can identify real exposure and fix what
-              matters first.
+              ScoutGrid unifies LLMs, autonomous agents, MCP tools, cloud workloads, host infrastructure, and
+              software supply chains (BOM) into one operational view. Eliminate scanner noise, pinpoint real
+              exposure, and resolve critical risks first.
             </p>
             <div className="hero-actions">
-              <Link className="btn btn-primary" to="/demo/request">Request a product demo</Link>
-              <a className="btn btn-outline" href="#platform">Explore the platform</a>
+              <Link className="btn btn-primary" to="/demo/request">Request product demo</Link>
+              <a className="btn btn-outline" href="#platform">Explore AI Grid architecture</a>
             </div>
             <div className="scout-stats" aria-label="ScoutGrid coverage">
               {[
                 ['BOM coverage', 'SBOM · AI BOM · CBOM'],
-                ['Asset context', 'Apps · Hosts · Cloud'],
-                ['Risk signals', 'KEV · EPSS · EOL']
+                ['Asset context', 'AI · Apps · Cloud · Hosts'],
+                ['Risk signals', 'KEV · EPSS · EOL · AI feeds']
               ].map(([label, value]) => (
                 <div key={label} className="scout-stat">
                   <strong>{label}</strong>
@@ -306,9 +302,9 @@ function _LegacyDemoLandingPage() {
               <div className="hero-risk-list">
                 <div className="hero-console-label">Priority queue</div>
                 {[
+                  ['MCP Agent Capability Leak', 'LangChain Gateway', '9.6', 'Critical'],
                   ['CVE-2024-3094', 'Production checkout API', '9.4', 'Critical'],
                   ['CVE-2021-44228', 'Payments database host', '9.1', 'Critical'],
-                  ['CVE-2023-44487', 'Partner cloud gateway', '8.2', 'High']
                 ].map(([cve, asset, score, severity]) => (
                   <div className="hero-risk-item" key={cve}>
                     <span className={`hero-severity-dot hero-severity-dot--${severity.toLowerCase()}`} />
@@ -337,8 +333,8 @@ function _LegacyDemoLandingPage() {
               </div>
             </div>
             <div className="hero-console-footer">
-              <span>Evidence: NVD · CISA KEV · EPSS · vendor advisories</span>
-              <strong>Prioritized with asset context</strong>
+              <span>Evidence: AI models · CISA KEV · EPSS · vendor advisories</span>
+              <strong>Unified exposure context</strong>
             </div>
           </div>
         </div>
@@ -359,9 +355,8 @@ function _LegacyDemoLandingPage() {
           <span className="sg-eyebrow">The Platform</span>
           <h2>One platform. Four grids. Every attack surface covered.</h2>
           <p>
-            Scout is an exposure management platform built on four grids — covering every attack surface from
-            on-premises infrastructure to cloud workloads, open-source dependencies, and AI models — without a
-            single agent deployed.
+            ScoutGrid delivers complete visibility across on-premises infrastructure, cloud workloads, open-source
+            software supply chains, and AI models—without deploying a single agent.
           </p>
         </div>
         <div className="grid-cards">
@@ -374,35 +369,31 @@ function _LegacyDemoLandingPage() {
               <div className="grid-card-chips">
                 {card.chips.map((chip) => <span key={chip} className="chip">{chip}</span>)}
               </div>
-              {card.comingSoon ? (
-                <div className="coming-soon-overlay">
-                  <span className="coming-soon-tag">Coming Soon</span>
-                  <p className="coming-soon-text">AI Grid is in active development.<br />Join the early access program.</p>
-                  <Link className="btn btn-outline" to="/demo/request">Request early access</Link>
-                </div>
-              ) : (
-                <a className="grid-card-link" href="#solutions">{card.linkLabel} →</a>
-              )}
+              <a className="grid-card-link" href={card.id === 'ai-grid' ? '#ai-grid-capabilities' : '#solutions'}>{card.linkLabel} →</a>
             </article>
           ))}
         </div>
       </section>
 
-      <section id="intelligence" className="sg-section">
-        <div className="sg-section-heading centered">
-          <span className="sg-eyebrow">Vuln Intelligence Layer</span>
-          <h2>One intelligence layer. Every source that matters.</h2>
-        </div>
-        <div className="intel-feeds">
-          {INTEL_FEEDS.map((feed) => (
-            <article key={feed.name} className="feed-card">
-              <div className="feed-icon" aria-hidden="true">{feed.icon}</div>
-              <div>
-                <div className="feed-name">{feed.name}</div>
-                <div className="feed-desc">{feed.desc}</div>
+      <section id="ai-grid-capabilities" className="ai-teaser">
+        <div className="ai-teaser-card">
+          <div className="ai-teaser-badges">
+            <span className="badge badge--orange">Core innovation</span>
+          </div>
+          <h2 className="ai-teaser-title">AI Grid: Securing your fastest-growing attack surface</h2>
+          <p className="ai-teaser-copy">
+            Traditional tools can&apos;t see LLM APIs, fine-tuned models, autonomous agents, or Model Context Protocol
+            (MCP) servers. AI Grid brings enterprise exposure rigor to the AI ecosystem.
+          </p>
+          <div className="ai-capabilities">
+            {AI_CAPABILITIES.map((cap) => (
+              <div key={cap.name} className="ai-cap">
+                <div className="ai-cap-icon" aria-hidden="true">{cap.icon}</div>
+                <div className="ai-cap-name">{cap.name}</div>
+                <div className="ai-cap-desc">{cap.desc}</div>
               </div>
-            </article>
-          ))}
+            ))}
+          </div>
         </div>
       </section>
 
@@ -415,8 +406,7 @@ function _LegacyDemoLandingPage() {
               items={[
                 { title: 'Zero deployment friction', body: 'No agent packages to maintain, no OS compatibility matrix to manage. Assessment begins the moment you connect to Scout.' },
                 { title: 'OT and legacy safe', body: 'Passive fingerprinting protects fragile industrial and legacy systems that cannot tolerate agent installation or active scanning.' },
-                { title: 'Continuous, not point-in-time', body: 'Scout maintains a live asset inventory that updates as your environment changes — new workloads are assessed automatically.' },
-                { title: 'Prioritized, not just detected', body: 'Every finding arrives ranked by real-world exploitability and business impact, so teams fix what matters first instead of drowning in raw results.' }
+                { title: 'Continuous, not point-in-time', body: 'ScoutGrid maintains a live inventory that continuously updates as cloud workloads and AI models scale.' }
               ]}
             />
           </div>
@@ -429,9 +419,8 @@ function _LegacyDemoLandingPage() {
               {[
                 ['🖥️', 'prod-web-01.corp', 'Host', 'blue'],
                 ['☁️', 'i-0a3f8c29d41e', 'EC2', 'cyan'],
-                ['📦', 'payment-service:v2.1', 'Container', 'purple'],
-                ['🔧', 'legacy-erp-03', 'Legacy', 'orange'],
-                ['☁️', 'api-gateway-prod', 'Lambda', 'cyan']
+                ['🤖', 'agent-gateway-langchain', 'AI Agent', 'orange'],
+                ['📦', 'payment-service:v2.1', 'Container', 'purple']
               ].map(([icon, name, tag, variant]) => (
                 <div key={name} className="risk-row">
                   <span aria-hidden="true">{icon}</span>
@@ -459,9 +448,9 @@ function _LegacyDemoLandingPage() {
             <h2>Fix what matters. Ignore the rest.</h2>
             <FeatureList
               items={[
-                { title: 'Contextual remediation guidance', body: 'AI-generated fix recommendations surfaced alongside each finding — patch version, workaround steps, and affected component context.' },
-                { title: 'Single prioritized action queue', body: 'Every finding across infra, cloud, BOM, and AI collapses into one ranked queue, so teams always know what to fix next.' },
-                { title: 'Scored beyond CVSS', body: 'The Scout Score weighs real-world exploitability, asset criticality, and business context — not just raw severity.' }
+                { title: 'Scored beyond CVSS', body: 'The Scout Score combines real-world exploitability (EPSS, KEV), asset criticality, business context, and reachability.' },
+                { title: 'Single prioritized action queue', body: 'Findings across Infra, Cloud, BOM, and AI Grids collapse into one ranked queue so teams always know what to fix next.' },
+                { title: 'Contextual remediation guidance', body: 'AI-generated fix recommendations are provided alongside each finding with exact patch versions and workarounds.' }
               ]}
             />
           </div>
@@ -532,53 +521,6 @@ function _LegacyDemoLandingPage() {
         </div>
       </section>
 
-      <section id="zero-day" className="sg-section feature-section alt">
-        <div className="feature-grid reverse">
-          <div className="feature-content">
-            <span className="sg-eyebrow">Zero-Day Management</span>
-            <h2>When the world learns about it — you already know your exposure.</h2>
-            <FeatureList
-              items={[
-                { title: 'Real-time KEV and NVD watch', body: 'The moment CISA adds a CVE to the KEV catalog or NVD publishes a new record, Scout re-scores every correlated finding in your environment.' },
-                { title: 'Instant blast-radius analysis', body: 'Within minutes of disclosure, see every affected host, container, and cloud workload of a new 0-day disclosure — with asset criticality context included.' },
-                { title: 'Automatic SLA escalation', body: 'KEV-listed CVEs automatically inherit critical SLA timelines and trigger immediate findings even outside scheduled scan windows.' },
-                { title: 'EPSS-guided urgency scoring', body: 'EPSS scores refreshed daily separate the theoretical 0-days from those with active weaponization — so you respond to the right threat first.' }
-              ]}
-            />
-          </div>
-          <VisualPanel title="Scout — 0-Day Response Timeline">
-            <div className="zeroday-timeline">
-              {[
-                ['T+0h', 'red', 'NVD publishes CVE-2024-XXXX', 'CVSS 9.8 · CRITICAL · RCE in widely-used library'],
-                ['T+2m', 'orange', 'Scout ingests and correlates', '147 affected components matched across 3 grids'],
-                ['T+4m', 'cyan', 'Blast radius computed', '89 hosts · 34 containers · 24 cloud workloads'],
-                ['T+6m', 'purple', 'Findings created & SLAs set', 'Teams notified · ServiceNow incidents opened'],
-                ['T+1h', 'green', 'CISA adds to KEV catalog', 'Scout auto-escalates priority · SLA shrinks to 24h']
-              ].map(([time, color, title, sub]) => (
-                <div key={time} className="zd-event">
-                  <div className="zd-time">{time}</div>
-                  <div className={`zd-dot zd-dot--${color}`} />
-                  <div className="zd-info">
-                    <div className="zd-title">{title}</div>
-                    <div className="zd-sub">{sub}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </VisualPanel>
-        </div>
-      </section>
-
-      <div className="callout-strip">
-        <div className="callout-inner">
-          <div className="callout-text">
-            <div className="callout-title">Your scanners find everything.<br />Scout tells you what to fix first.</div>
-            <div className="callout-sub">One platform. Every grid. Zero agents required.</div>
-          </div>
-          <Link className="btn btn-primary" to="/demo/request">Get a demo →</Link>
-        </div>
-      </div>
-
       <section id="app-risk" className="sg-section feature-section alt">
         <div className="feature-grid">
           <div className="feature-content">
@@ -619,41 +561,13 @@ function _LegacyDemoLandingPage() {
         </div>
       </section>
 
-      <section id="ai-grid" className="ai-teaser">
-        <div className="ai-teaser-card">
-          <div className="ai-teaser-badges">
-            <span className="badge badge--orange">Coming Soon</span>
-            <span className="ai-teaser-meta">Early Access Q3 2026</span>
-          </div>
-          <h2 className="ai-teaser-title">AI Grid</h2>
-          <p className="ai-teaser-copy">
-            AI is your fastest-growing attack surface — and your least visible. Scout&rsquo;s AI Grid discovers,
-            inventories, and secures every AI asset — from LLM APIs and autonomous agents to vector databases —
-            bringing the rigor of the Infra, Cloud, and BOM Grids to a surface traditional tools can&rsquo;t see.
-          </p>
-          <div className="ai-capabilities">
-            {AI_CAPABILITIES.map((cap) => (
-              <div key={cap.name} className="ai-cap">
-                <div className="ai-cap-icon" aria-hidden="true">{cap.icon}</div>
-                <div className="ai-cap-name">{cap.name}</div>
-                <div className="ai-cap-desc">{cap.desc}</div>
-              </div>
-            ))}
-          </div>
-          <div className="ai-teaser-cta">
-            <Link className="btn btn-primary" to="/demo/request">Request early access</Link>
-            <span>Be among the first to secure your AI attack surface.</span>
-          </div>
-        </div>
-      </section>
-
       <section id="cta" className="sg-section cta-section">
         <div className="cta-box">
           <span className="badge badge--red">Ready to see Scout?</span>
           <h2>Eliminate blind trust in your security posture.</h2>
           <p>
-            See how Scout maps your full attack surface, prioritizes what actually matters, and cuts vulnerability
-            noise — in a live demo tailored to your environment.
+            See how ScoutGrid maps your full attack surface, prioritizes real risk across Cloud, Infra, BOM, and AI
+            Grids, and cuts vulnerability noise in minutes.
           </p>
           <div className="cta-actions">
             <Link className="btn btn-primary" to="/demo/request">Schedule a demo</Link>
@@ -675,7 +589,8 @@ function _LegacyDemoLandingPage() {
               ScoutGrid
             </div>
             <p className="footer-tagline">
-              Exposure and BOM management across applications, hosts, cloud workloads, software components, and AI.
+              Exposure and BOM management platform across applications, host infrastructure, cloud workloads,
+              software components, and AI.
             </p>
           </div>
           <div className="footer-col">
@@ -683,21 +598,21 @@ function _LegacyDemoLandingPage() {
             <a href="#infra-grid">Infra Grid</a>
             <a href="#cloud-grid">Cloud Grid</a>
             <a href="#bom-grid">BOM Grid</a>
-            <a href="#ai-grid">AI Grid</a>
-            <a href="#intelligence">Vuln Intelligence</a>
+            <a href="#ai-grid-capabilities">AI Grid</a>
+            <a href="#ai-prioritization">Vuln Intelligence</a>
           </div>
           <div className="footer-col">
             <div className="footer-col-title">Solutions</div>
             <a href="#solutions">Agentless Assessment</a>
-            <a href="#zero-day">0-Day Response</a>
-            <a href="#noise-reduction">Noise Reduction</a>
             <a href="#ai-prioritization">AI Prioritization</a>
+            <a href="#noise-reduction">Noise Reduction</a>
             <a href="#app-risk">Executive Reporting</a>
           </div>
           <div className="footer-col">
             <div className="footer-col-title">Get started</div>
             <Link to="/demo/request">Request a demo</Link>
             <Link to="/login">Log in</Link>
+            <a href="#platform">Documentation</a>
           </div>
         </div>
           <div className="footer-bottom">
@@ -709,20 +624,9 @@ function _LegacyDemoLandingPage() {
   );
 }
 
-/**
- * The public site is supplied as a self-contained artifact so its imagery,
- * typography, and responsive layout remain exactly as designed.
- */
+/** Backward-compatible name used by the existing /demo route. */
 export function DemoLandingPage() {
-  return (
-    <main className="public-landing-embed">
-      <iframe
-        className="public-landing-embed__frame"
-        src="/scoutgrid-landing.html"
-        title="ScoutGrid — exposure and BOM management"
-      />
-    </main>
-  );
+  return <PublicLandingPage />;
 }
 
 const ZERO_DAY_BLOG_PATH = '/demo/blog/zero-day-response-hours-not-weeks';
@@ -1324,14 +1228,13 @@ function PublicDemoShell({ children, compact = false }: { children: React.ReactN
             <strong>ScoutGrid</strong>
           </Link>
           <div className="public-demo-links">
-            <a href="/demo#platform">Platform</a>
-            <a href="/demo#bom-grid">BOM Security</a>
-            <a href="/demo#solutions">Exposure</a>
-            <a href="/demo#intelligence">Intelligence</a>
-            <a href="/demo#ai-grid">AI Grid</a>
-            <Link to="/demo/blog">Blogs</Link>
-            <Link className="nav-link-cta" to="/demo/request">Request demo</Link>
+            <a href="/demo#platform">Four Grids</a>
+            <a href="/demo#ai-grid-capabilities">AI Grid</a>
+            <a href="/demo#ai-prioritization">Prioritization</a>
+            <a href="/demo#app-risk">App Risk</a>
+            <a href="/demo#ai-prioritization">Intelligence</a>
             <Link className="nav-link-outline" to="/login">Log in</Link>
+            <Link className="nav-link-cta" to="/demo/request">Request Demo</Link>
             {hasStoredToken && (
               <button className="btn btn-secondary" type="button" onClick={logout}>
                 Log out

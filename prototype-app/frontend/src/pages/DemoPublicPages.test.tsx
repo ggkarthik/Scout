@@ -1,6 +1,4 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
 import { api, clearStoredAuthToken, getStoredAuthToken, setStoredAuthToken } from '../api/client';
@@ -40,7 +38,7 @@ describe('Demo public pages', () => {
     delete window.turnstile;
   });
 
-  it('renders the supplied ScoutGrid landing page at the index route', async () => {
+  it('renders the first-class ScoutGrid landing page at the index route', () => {
     renderWithProviders(
       <Routes>
         <Route path="/" element={<DemoLandingPage />} />
@@ -48,19 +46,27 @@ describe('Demo public pages', () => {
       { route: '/' }
     );
 
-    expect(screen.getByTitle('ScoutGrid — exposure and BOM management')).toHaveAttribute('src', '/scoutgrid-landing.html');
+    expect(screen.getByRole('heading', { name: /Exposure Management Platform with AI Security Posture Management/i })).toBeInTheDocument();
+    expect(screen.queryByTitle('ScoutGrid — exposure and BOM management')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Request a product demo/i })).toHaveAttribute('href', '/demo/request');
+    expect(document.getElementById('platform')).toBeInTheDocument();
+    expect(document.getElementById('bom-grid')).toBeInTheDocument();
+    expect(document.getElementById('ai-grid')).toBeInTheDocument();
   });
 
-  it('configures the embedded landing-page login links for top-level navigation', () => {
-    const artifact = readFileSync(resolve(process.cwd(), 'public/scoutgrid-landing.html'), 'utf8');
-    const templateText = artifact.match(
-      /const __bundlerTemplate =\s*([\s\S]*?)\s*;\s*<\/script>/
-    )?.[1];
+  it('uses application routes for public landing-page actions', () => {
+    renderWithProviders(<DemoLandingPage />, { route: '/demo' });
 
-    expect(templateText).toBeDefined();
-    const template = JSON.parse(templateText!);
-    expect(template.match(/<a href="#"[^>]*>Log in<\/a>/g)).toHaveLength(2);
-    expect(artifact).toContain('<a href="/login" target="_top"$1>Log in</a>');
+    const navigation = within(screen.getByRole('navigation'));
+    expect(navigation.getByRole('link', { name: 'Platform' })).toHaveAttribute('href', '/demo#platform');
+    expect(navigation.queryByRole('link', { name: 'BOM Security' })).not.toBeInTheDocument();
+    expect(navigation.queryByRole('link', { name: 'Exposure' })).not.toBeInTheDocument();
+    expect(navigation.queryByRole('link', { name: 'Intelligence' })).not.toBeInTheDocument();
+    expect(navigation.queryByRole('link', { name: 'AI Grid' })).not.toBeInTheDocument();
+    screen.getAllByRole('link', { name: 'Log in' }).forEach((link) => {
+      expect(link).toHaveAttribute('href', '/login');
+    });
+    expect(screen.getByRole('link', { name: /Schedule a demo/i })).toHaveAttribute('href', '/demo/request');
   });
 
   it('lists the first blog post and links to the article', () => {
