@@ -575,13 +575,9 @@ function routeLoadingFallback() {
 
 function PublicLandingRoute() {
   return (
-    <main className="public-landing-embed">
-      <iframe
-        className="public-landing-embed__frame"
-        src="/scoutgrid-landing.html"
-        title="ScoutGrid — exposure and BOM management"
-      />
-    </main>
+    <React.Suspense fallback={routeLoadingFallback()}>
+      <DemoLandingPage />
+    </React.Suspense>
   );
 }
 
