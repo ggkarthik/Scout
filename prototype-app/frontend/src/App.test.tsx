@@ -57,7 +57,7 @@ describe('App test persona switcher', () => {
     const { default: App } = await import('./App');
     renderWithProviders(<App />, { route: '/' });
 
-    expect(screen.getByTitle('ScoutGrid — exposure and BOM management')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /The AI-First Exposure Management Platform Powered/i })).toBeInTheDocument();
     expect(screen.queryByText('Loading page...')).not.toBeInTheDocument();
   });
 

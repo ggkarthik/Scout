@@ -1,8 +1,8 @@
 import React from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { pathForConnectView } from '../app/routes';
-import { api, setStoredAuthToken } from '../api/client';
+import { api, clearStoredAuthToken, getStoredAuthToken, setStoredAuthToken } from '../api/client';
 import { getAuthContextQueryKey } from '../features/auth/queries';
 import { canManageRiskPolicy } from '../features/auth/roles';
 import type { ActorContext } from '../features/auth/types';
@@ -1195,6 +1195,20 @@ export function DemoExpiredPage() {
 }
 
 function PublicDemoShell({ children, compact = false }: { children: React.ReactNode; compact?: boolean }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [hasStoredToken, setHasStoredToken] = React.useState(() => getStoredAuthToken().trim().length > 0);
+
+  React.useEffect(() => {
+    setHasStoredToken(getStoredAuthToken().trim().length > 0);
+  }, [location.pathname, location.search]);
+
+  const logout = React.useCallback(() => {
+    clearStoredAuthToken();
+    setHasStoredToken(false);
+    navigate('/login', { replace: true });
+  }, [navigate]);
+
   return (
     <main className={compact ? 'public-demo-shell compact' : 'public-demo-shell'}>
       <nav className="public-demo-nav">
@@ -1209,6 +1223,11 @@ function PublicDemoShell({ children, compact = false }: { children: React.ReactN
             <Link to="/demo/blog">Blog</Link>
             <Link className="nav-link-outline" to="/login">Log in</Link>
             <Link className="nav-link-cta" to="/demo/request">Request Demo</Link>
+            {hasStoredToken && (
+              <button className="btn btn-secondary" type="button" onClick={logout}>
+                Log out
+              </button>
+            )}
           </div>
         </div>
       </nav>
