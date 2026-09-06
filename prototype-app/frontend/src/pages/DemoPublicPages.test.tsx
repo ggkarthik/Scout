@@ -46,9 +46,9 @@ describe('Demo public pages', () => {
       { route: '/' }
     );
 
-    expect(screen.getByRole('heading', { name: /Exposure Management Platform with AI Security Posture Management/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /The AI-First Exposure Management Platform Powered/i })).toBeInTheDocument();
     expect(screen.queryByTitle('ScoutGrid — exposure and BOM management')).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Request a product demo/i })).toHaveAttribute('href', '/demo/request');
+    expect(screen.getByRole('link', { name: /Request product demo/i })).toHaveAttribute('href', '/demo/request');
     expect(document.getElementById('platform')).toBeInTheDocument();
     expect(document.getElementById('bom-grid')).toBeInTheDocument();
     expect(document.getElementById('ai-grid')).toBeInTheDocument();
@@ -58,10 +58,11 @@ describe('Demo public pages', () => {
     renderWithProviders(<DemoLandingPage />, { route: '/demo' });
 
     const navigation = within(screen.getByRole('navigation'));
-    expect(navigation.getByRole('link', { name: 'Platform' })).toHaveAttribute('href', '/demo#platform');
-    expect(navigation.queryByRole('link', { name: 'BOM Security' })).not.toBeInTheDocument();
-    expect(navigation.queryByRole('link', { name: 'Exposure' })).not.toBeInTheDocument();
-    expect(navigation.queryByRole('link', { name: 'Intelligence' })).not.toBeInTheDocument();
+    expect(navigation.getByRole('link', { name: 'Platform' })).toHaveAttribute('href', '/demo#solutions');
+    expect(navigation.getByRole('link', { name: 'Grids' })).toHaveAttribute('href', '/demo#platform');
+    expect(navigation.getByRole('link', { name: 'Blog' })).toHaveAttribute('href', '/demo/blog');
+    expect(navigation.getByRole('link', { name: 'Request Demo' })).toHaveAttribute('href', '/demo/request');
+    expect(navigation.queryByRole('link', { name: 'Four Grids' })).not.toBeInTheDocument();
     expect(navigation.queryByRole('link', { name: 'AI Grid' })).not.toBeInTheDocument();
     screen.getAllByRole('link', { name: 'Log in' }).forEach((link) => {
       expect(link).toHaveAttribute('href', '/login');
