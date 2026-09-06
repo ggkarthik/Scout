@@ -1,8 +1,8 @@
 import React from 'react';
-import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { pathForConnectView } from '../app/routes';
-import { api, clearStoredAuthToken, getStoredAuthToken, setStoredAuthToken } from '../api/client';
+import { api, setStoredAuthToken } from '../api/client';
 import { getAuthContextQueryKey } from '../features/auth/queries';
 import { canManageRiskPolicy } from '../features/auth/roles';
 import type { ActorContext } from '../features/auth/types';
@@ -249,7 +249,7 @@ export function PublicLandingPage() {
         <div className="scout-hero-layout">
           <div className="scout-hero-content">
             <span className="scout-eyebrow">✦ AI-First Exposure &amp; BOM Management</span>
-            <h1>The AI-First Exposure Management Platform Powered by <span className="hero-accent">AI Grid</span></h1>
+            <h1>The <span className="hero-accent">AI-First</span> Exposure Management Platform Powered</h1>
             <p>
               ScoutGrid unifies LLMs, autonomous agents, MCP tools, cloud workloads, host infrastructure, and
               software supply chains (BOM) into one operational view. Eliminate scanner noise, pinpoint real
@@ -338,16 +338,6 @@ export function PublicLandingPage() {
             </div>
           </div>
         </div>
-      </section>
-
-      <section className="security-signal-strip" aria-label="Supported security workflows">
-        <span>Built for modern security workflows</span>
-        <strong>CycloneDX</strong>
-        <strong>SPDX</strong>
-        <strong>CISA KEV</strong>
-        <strong>EPSS</strong>
-        <strong>VEX</strong>
-        <strong>ServiceNow</strong>
       </section>
 
       <section id="platform" className="sg-section">
@@ -1205,20 +1195,6 @@ export function DemoExpiredPage() {
 }
 
 function PublicDemoShell({ children, compact = false }: { children: React.ReactNode; compact?: boolean }) {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const [hasStoredToken, setHasStoredToken] = React.useState(() => getStoredAuthToken().trim().length > 0);
-
-  React.useEffect(() => {
-    setHasStoredToken(getStoredAuthToken().trim().length > 0);
-  }, [location.pathname, location.search]);
-
-  const logout = React.useCallback(() => {
-    clearStoredAuthToken();
-    setHasStoredToken(false);
-    navigate('/login', { replace: true });
-  }, [navigate]);
-
   return (
     <main className={compact ? 'public-demo-shell compact' : 'public-demo-shell'}>
       <nav className="public-demo-nav">
@@ -1228,18 +1204,11 @@ function PublicDemoShell({ children, compact = false }: { children: React.ReactN
             <strong>ScoutGrid</strong>
           </Link>
           <div className="public-demo-links">
-            <a href="/demo#platform">Four Grids</a>
-            <a href="/demo#ai-grid-capabilities">AI Grid</a>
-            <a href="/demo#ai-prioritization">Prioritization</a>
-            <a href="/demo#app-risk">App Risk</a>
-            <a href="/demo#ai-prioritization">Intelligence</a>
+            <a href="/demo#solutions">Platform</a>
+            <a href="/demo#platform">Grids</a>
+            <Link to="/demo/blog">Blog</Link>
             <Link className="nav-link-outline" to="/login">Log in</Link>
             <Link className="nav-link-cta" to="/demo/request">Request Demo</Link>
-            {hasStoredToken && (
-              <button className="btn btn-secondary" type="button" onClick={logout}>
-                Log out
-              </button>
-            )}
           </div>
         </div>
       </nav>
