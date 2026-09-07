@@ -97,8 +97,16 @@ class TenantDeletionPostgresIntegrationTest {
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(asPlatformOwner(authedDelete("/api/platform/tenants/{tenantId}", tenant.getId())))
-                .andExpect(status().isNoContent());
+        var deletionResponse = mockMvc.perform(asPlatformOwner(
+                        authedDelete("/api/platform/tenants/{tenantId}", tenant.getId())))
+                .andReturn()
+                .getResponse();
+        assertEquals(
+                204,
+                deletionResponse.getStatus(),
+                "Tenant deletion failed: status=" + deletionResponse.getStatus()
+                        + " body=" + deletionResponse.getContentAsString()
+                        + " requestId=" + deletionResponse.getHeader("X-Request-ID"));
 
         assertTrue(tenantRepository.findById(tenant.getId()).isEmpty());
         assertSchemaMissing(tenant.getSchemaName());
