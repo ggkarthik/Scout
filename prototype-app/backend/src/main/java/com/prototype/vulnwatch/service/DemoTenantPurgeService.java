@@ -122,7 +122,13 @@ public class DemoTenantPurgeService {
 
     private void purgeTenantRows(Tenant tenant) {
         UUID tenantId = tenant.getId();
-        tenantSchemaService.dropTenantSchema(tenant.getSchemaName());
+        // Provisioning is asynchronous. A tenant can be deleted before its schema
+        // exists, and the production runtime role is intentionally not allowed to
+        // execute DDL. Skip schema cleanup in that case; the controlled migration
+        // owner handles cleanup for schemas that were actually provisioned.
+        if (tenantSchemaService.schemaExists(tenant.getSchemaName())) {
+            tenantSchemaService.dropTenantSchema(tenant.getSchemaName());
+        }
         purgeSharedTenantRows(tenantId);
         resetJdbcTemplate.update(
                 "update tenant_default.demo_requests set tenant_id = null where tenant_id = ?",

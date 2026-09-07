@@ -116,6 +116,7 @@ class DemoTenantPurgeServiceTest {
         user.setStatus("ACTIVE");
 
         when(tenantRepository.findById(tenant.getId())).thenReturn(Optional.of(tenant));
+        when(tenantSchemaService.schemaExists("tenant_customer_one")).thenReturn(true);
         when(resetJdbcTemplate.query(any(String.class), any(org.springframework.jdbc.core.RowMapper.class), eq(tenant.getId())))
                 .thenReturn(java.util.List.of(userId));
         when(resetJdbcTemplate.queryForObject("select count(*) from platform.tenant_memberships where user_id = ?", Integer.class, userId))
@@ -132,6 +133,29 @@ class DemoTenantPurgeServiceTest {
         verify(resetJdbcTemplate).update("update tenant_default.demo_requests set tenant_id = null where tenant_id = ?", tenant.getId());
         verify(resetJdbcTemplate).update("delete from platform.tenants where id = ?", tenant.getId());
         verify(appUserRepository).save(user);
+        verify(auditEventService).record("tenant.deleted", "tenant", tenant.getId().toString(), null);
+    }
+
+    @Test
+    void deleteTenantRemovesUnprovisionedTenantWithoutSchemaDdl() {
+        Tenant tenant = new Tenant();
+        tenant.setId(UUID.randomUUID());
+        tenant.setName("Pending Tenant");
+        tenant.setSlug("pending-tenant");
+        tenant.setSchemaName("tenant_pending_tenant");
+        tenant.setStatus("PROVISIONING");
+
+        when(tenantRepository.findById(tenant.getId())).thenReturn(Optional.of(tenant));
+        when(tenantSchemaService.schemaExists("tenant_pending_tenant")).thenReturn(false);
+        when(resetJdbcTemplate.query(any(String.class), any(org.springframework.jdbc.core.RowMapper.class), eq(tenant.getId())))
+                .thenReturn(java.util.List.of());
+        when(resetJdbcTemplate.queryForList(any(String.class), eq(String.class)))
+                .thenReturn(java.util.List.of());
+
+        service.deleteTenant(tenant.getId(), Instant.parse("2026-06-11T00:00:00Z"));
+
+        verify(tenantSchemaService, never()).dropTenantSchema(any(String.class));
+        verify(resetJdbcTemplate).update("delete from platform.tenants where id = ?", tenant.getId());
         verify(auditEventService).record("tenant.deleted", "tenant", tenant.getId().toString(), null);
     }
 
