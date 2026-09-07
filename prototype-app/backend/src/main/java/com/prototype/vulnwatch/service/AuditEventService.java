@@ -21,7 +21,10 @@ public class AuditEventService {
             "platform.user.role.granted",
             "platform.user.role.revoked",
             "platform.user.setup_issued",
-            "platform.user.setup_completed"
+            "platform.user.setup_completed",
+            "tenant.deleted",
+            "tenant.delete_failed",
+            "tenant.delete.requested"
     );
 
     private final AuditEventRepository auditEventRepository;
@@ -46,7 +49,20 @@ public class AuditEventService {
     @Transactional
     public void record(String action, String targetType, String targetId, String detailsJson, String outcome) {
         RequestActor actor = requestActorService.currentActor();
-        persistEvent(resolveTenantId(actor, action), actor.userId(), actor.roles().stream().findFirst().orElse(null), action, targetType, targetId, detailsJson, outcome);
+        Runnable persist = () -> persistEvent(
+                resolveTenantId(actor, action),
+                actor.userId(),
+                actor.roles().stream().findFirst().orElse(null),
+                action,
+                targetType,
+                targetId,
+                detailsJson,
+                outcome);
+        if (PLATFORM_USER_AUDIT_ACTIONS.contains(action)) {
+            TenantContext.runAsPlatform(persist);
+        } else {
+            persist.run();
+        }
     }
 
     @Transactional
@@ -60,7 +76,12 @@ public class AuditEventService {
             String detailsJson,
             String outcome
     ) {
-        persistEvent(tenantId, actorSubject, actorRole, action, targetType, targetId, detailsJson, outcome);
+        if (PLATFORM_USER_AUDIT_ACTIONS.contains(action)) {
+            TenantContext.runAsPlatform(() -> persistEvent(
+                    null, actorSubject, actorRole, action, targetType, targetId, detailsJson, outcome));
+        } else {
+            persistEvent(tenantId, actorSubject, actorRole, action, targetType, targetId, detailsJson, outcome);
+        }
     }
 
     private void persistEvent(
