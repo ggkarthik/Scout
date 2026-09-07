@@ -79,7 +79,7 @@ public class AuditEventService {
                 detailsJson,
                 outcome);
         if (PLATFORM_USER_AUDIT_ACTIONS.contains(action)) {
-            TenantContext.runAsPlatform(() -> executePlatformAudit(persist));
+            TenantContext.runAsPreAuthentication(() -> executePlatformAudit(persist));
         } else {
             persist.run();
         }
@@ -96,7 +96,7 @@ public class AuditEventService {
             String outcome
     ) {
         if (PLATFORM_USER_AUDIT_ACTIONS.contains(action)) {
-            TenantContext.runAsPlatform(() -> executePlatformAudit(() -> persistEvent(
+            TenantContext.runAsPreAuthentication(() -> executePlatformAudit(() -> persistEvent(
                     null, actorSubject, actorRole, action, targetType, targetId, detailsJson, outcome)));
         } else {
             persistEvent(tenantId, actorSubject, actorRole, action, targetType, targetId, detailsJson, outcome);
