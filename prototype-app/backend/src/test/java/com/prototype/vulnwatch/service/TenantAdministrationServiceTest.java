@@ -21,6 +21,7 @@ class TenantAdministrationServiceTest {
     @Mock private DemoTenantPurgeService demoTenantPurgeService;
     @Mock private TenantSchemaMigrationService tenantSchemaMigrationService;
     @Mock private IdentityAdministrationService identityAdministrationService;
+    @Mock private AuditEventService auditEventService;
 
     @Test
     void ownerRecoveryRequiresActiveUnexpiredDemoTenant() {
@@ -64,11 +65,14 @@ class TenantAdministrationServiceTest {
         assertEquals(saved, result);
         verify(identityAdministrationService).assertOwnerCredentialProvisioningAllowed("owner@example.com");
         verify(identityAdministrationService).provisionTenantOwner(tenantId, "owner@example.com", "new-password", "owner@example.com");
+        verify(auditEventService).record("tenant.provisioning.requested", "tenant", tenantId.toString(), null);
+        verify(auditEventService).record("tenant.owner.credential_provisioned", "tenant", tenantId.toString(),
+                "{\"credentialProvided\":true}");
     }
 
     private TenantAdministrationService service() {
         return new TenantAdministrationService(tenantService, demoTenantPurgeService, tenantSchemaMigrationService,
-                identityAdministrationService, false);
+                identityAdministrationService, auditEventService, false);
     }
 
     private Tenant tenant(UUID id, String status) {

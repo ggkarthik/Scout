@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
 
 import com.prototype.vulnwatch.domain.AuditEvent;
 import com.prototype.vulnwatch.domain.Tenant;
@@ -118,5 +119,20 @@ class AuditEventServiceTest {
         AuditEvent event = eventCaptor.getValue();
         assertEquals("platform.user.setup_issued", event.getAction());
         assertNull(event.getTenant());
+    }
+
+    @Test
+    void tenantOwnerCredentialAuditUsesPreAuthenticationPlatformPath() {
+        when(requestActorService.currentActor()).thenReturn(new RequestActor(
+                "owner@example.com", true, null, null, Set.of("PLATFORM_OWNER")));
+        when(auditEventRepository.save(any(AuditEvent.class))).thenAnswer(invocation -> {
+            assertTrue(TenantContext.isPreAuthenticationContext());
+            return invocation.getArgument(0);
+        });
+
+        AuditEventService service = new AuditEventService(auditEventRepository, tenantRepository, requestActorService);
+        service.record("tenant.owner.credential_recovered", "tenant", "tenant-1", "{\"credentialUpdated\":true}");
+
+        verify(auditEventRepository).save(any(AuditEvent.class));
     }
 }

@@ -97,11 +97,6 @@ public class TenantAdministrationController {
         Tenant tenant = tenantAdministrationService.createTenant(
                 request.name(), request.slug(), request.planCode(), request.billingRef(), request.addDemoData(),
                 request.ownerEmail(), request.ownerPassword());
-        auditEventService.record("tenant.provisioning.requested", "tenant", tenant.getId().toString(), null);
-        if (request.ownerEmail() != null && !request.ownerEmail().isBlank()) {
-            auditEventService.record("tenant.owner.credential_provisioned", "tenant", tenant.getId().toString(),
-                    "{\"credentialProvided\":true}");
-        }
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(toTenantResponse(tenant));
     }
 
@@ -127,11 +122,6 @@ public class TenantAdministrationController {
     ) {
         Tenant tenant = tenantAdministrationService.recoverTenantOwner(
                 tenantId, request.ownerEmail(), request.ownerPassword());
-        auditEventService.record(
-                "tenant.owner.credential_recovered",
-                "tenant",
-                tenantId.toString(),
-                "{\"credentialUpdated\":true}");
         return toTenantResponse(tenant);
     }
 

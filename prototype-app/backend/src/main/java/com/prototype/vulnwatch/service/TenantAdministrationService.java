@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class TenantAdministrationService {
@@ -15,6 +16,7 @@ public class TenantAdministrationService {
     private final DemoTenantPurgeService demoTenantPurgeService;
     private final TenantSchemaMigrationService tenantSchemaMigrationService;
     private final IdentityAdministrationService identityAdministrationService;
+    private final AuditEventService auditEventService;
     private final boolean synchronousTenantProvisioningEnabled;
 
     public TenantAdministrationService(
@@ -22,12 +24,14 @@ public class TenantAdministrationService {
             DemoTenantPurgeService demoTenantPurgeService,
             TenantSchemaMigrationService tenantSchemaMigrationService,
             IdentityAdministrationService identityAdministrationService,
+            AuditEventService auditEventService,
             @Value("${app.demo.synchronous-tenant-provisioning-enabled:false}") boolean synchronousTenantProvisioningEnabled
     ) {
         this.tenantService = tenantService;
         this.demoTenantPurgeService = demoTenantPurgeService;
         this.tenantSchemaMigrationService = tenantSchemaMigrationService;
         this.identityAdministrationService = identityAdministrationService;
+        this.auditEventService = auditEventService;
         this.synchronousTenantProvisioningEnabled = synchronousTenantProvisioningEnabled;
     }
 
@@ -43,6 +47,7 @@ public class TenantAdministrationService {
         return createTenant(name, slug, planCode, billingRef, addDemoData, null, null);
     }
 
+    @Transactional
     public Tenant createTenant(
             String name,
             String slug,
@@ -69,6 +74,11 @@ public class TenantAdministrationService {
                     tenant.getId(), ownerEmail, ownerPassword, ownerEmail);
             tenant = tenantService.updateDemoOwnerEmail(tenant.getId(), ownerEmail);
         }
+        auditEventService.record("tenant.provisioning.requested", "tenant", tenant.getId().toString(), null);
+        if (hasOwnerEmail) {
+            auditEventService.record("tenant.owner.credential_provisioned", "tenant", tenant.getId().toString(),
+                    "{\"credentialProvided\":true}");
+        }
         return tenant;
     }
 
@@ -76,6 +86,7 @@ public class TenantAdministrationService {
         return tenantService.retryProvisioning(tenantId);
     }
 
+    @Transactional
     public Tenant recoverTenantOwner(UUID tenantId, String ownerEmail, String ownerPassword) {
         Tenant tenant = tenantService.requireTenantUuid(tenantId);
         if (!"ACTIVE".equalsIgnoreCase(tenant.getStatus())) {
@@ -89,7 +100,10 @@ public class TenantAdministrationService {
             throw new IllegalArgumentException("Tenant owner recovery is unavailable for an expired demo tenant");
         }
         identityAdministrationService.provisionTenantOwner(tenantId, ownerEmail, ownerPassword, ownerEmail);
-        return tenantService.updateDemoOwnerEmail(tenantId, ownerEmail);
+        Tenant updated = tenantService.updateDemoOwnerEmail(tenantId, ownerEmail);
+        auditEventService.record("tenant.owner.credential_recovered", "tenant", tenantId.toString(),
+                "{\"credentialUpdated\":true}");
+        return updated;
     }
 
     public Tenant updateStatus(UUID tenantId, String status) {

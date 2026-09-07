@@ -29,7 +29,10 @@ public class AuditEventService {
             "platform.user.setup_completed",
             "tenant.deleted",
             "tenant.delete_failed",
-            "tenant.delete.requested"
+            "tenant.delete.requested",
+            "tenant.provisioning.requested",
+            "tenant.owner.credential_provisioned",
+            "tenant.owner.credential_recovered"
     );
 
     private final AuditEventRepository auditEventRepository;
