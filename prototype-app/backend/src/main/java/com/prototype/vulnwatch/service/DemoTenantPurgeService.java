@@ -139,6 +139,12 @@ public class DemoTenantPurgeService {
     }
 
     private void purgeSharedTenantRows(UUID tenantId) {
+        // Memberships are the direct tenant dependency that must be removed
+        // before the registry row. Keep this explicit even if metadata-based
+        // discovery is incomplete under a restricted production role.
+        resetJdbcTemplate.update(
+                "delete from platform.tenant_memberships where tenant_id = ?",
+                tenantId);
         List<String> tableNames = resetJdbcTemplate.queryForList("""
                 select distinct concat(kcu.table_schema, '.', kcu.table_name)
                 from information_schema.table_constraints tc
@@ -157,7 +163,9 @@ public class DemoTenantPurgeService {
                 order by 1 desc
                 """, String.class);
         for (String tableName : tableNames) {
-            if (!hasText(tableName) || "platform.tenants".equalsIgnoreCase(tableName)) {
+            if (!hasText(tableName)
+                    || "platform.tenants".equalsIgnoreCase(tableName)
+                    || "platform.tenant_memberships".equalsIgnoreCase(tableName)) {
                 continue;
             }
             resetJdbcTemplate.update("delete from " + tableName + " where tenant_id = ?", tenantId);
