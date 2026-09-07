@@ -116,7 +116,6 @@ class DemoTenantPurgeServiceTest {
         user.setStatus("ACTIVE");
 
         when(tenantRepository.findById(tenant.getId())).thenReturn(Optional.of(tenant));
-        when(tenantSchemaService.schemaExists("tenant_customer_one")).thenReturn(true);
         when(resetJdbcTemplate.query(any(String.class), any(org.springframework.jdbc.core.RowMapper.class), eq(tenant.getId())))
                 .thenReturn(java.util.List.of(userId));
         when(resetJdbcTemplate.queryForObject("select count(*) from platform.tenant_memberships where user_id = ?", Integer.class, userId))
@@ -127,7 +126,7 @@ class DemoTenantPurgeServiceTest {
 
         service.deleteTenant(tenant.getId(), now);
 
-        verify(tenantSchemaService).dropTenantSchema("tenant_customer_one");
+        verify(tenantSchemaService, never()).dropTenantSchema(any(String.class));
         verify(resetJdbcTemplate).update("delete from platform.tenant_support_grants where tenant_id = ?", tenant.getId());
         verify(resetJdbcTemplate).update("delete from platform.tenant_memberships where tenant_id = ?", tenant.getId());
         verify(resetJdbcTemplate).update("update tenant_default.demo_requests set tenant_id = null where tenant_id = ?", tenant.getId());
@@ -146,7 +145,6 @@ class DemoTenantPurgeServiceTest {
         tenant.setStatus("PROVISIONING");
 
         when(tenantRepository.findById(tenant.getId())).thenReturn(Optional.of(tenant));
-        when(tenantSchemaService.schemaExists("tenant_pending_tenant")).thenReturn(false);
         when(resetJdbcTemplate.query(any(String.class), any(org.springframework.jdbc.core.RowMapper.class), eq(tenant.getId())))
                 .thenReturn(java.util.List.of());
         when(resetJdbcTemplate.queryForList(any(String.class), eq(String.class)))

@@ -122,13 +122,10 @@ public class DemoTenantPurgeService {
 
     private void purgeTenantRows(Tenant tenant) {
         UUID tenantId = tenant.getId();
-        // Provisioning is asynchronous. A tenant can be deleted before its schema
-        // exists, and the production runtime role is intentionally not allowed to
-        // execute DDL. Skip schema cleanup in that case; the controlled migration
-        // owner handles cleanup for schemas that were actually provisioned.
-        if (tenantSchemaService.schemaExists(tenant.getSchemaName())) {
-            tenantSchemaService.dropTenantSchema(tenant.getSchemaName());
-        }
+        // The permanent web service uses a restricted runtime role and must never
+        // execute tenant-schema DDL. This also handles partially provisioned
+        // tenants whose namespace exists without a completed schema migration.
+        // Schema cleanup belongs to the controlled migration owner.
         purgeSharedTenantRows(tenantId);
         resetJdbcTemplate.update(
                 "update tenant_default.demo_requests set tenant_id = null where tenant_id = ?",
