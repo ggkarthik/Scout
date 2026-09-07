@@ -50,6 +50,22 @@ class TenantAdministrationServiceTest {
         verifyNoInteractions(identityAdministrationService);
     }
 
+    @Test
+    void createTenantProvisionOwnerDoesNotRequireSynchronousSchemaMigration() {
+        UUID tenantId = UUID.randomUUID();
+        Tenant created = tenant(tenantId, "PROVISIONING");
+        Tenant saved = tenant(tenantId, "PROVISIONING");
+        when(tenantService.createTenant("Demo", "demo", null, null, false)).thenReturn(created);
+        when(tenantService.updateDemoOwnerEmail(tenantId, "owner@example.com")).thenReturn(saved);
+
+        Tenant result = service().createTenant("Demo", "demo", null, null, false,
+                "owner@example.com", "new-password");
+
+        assertEquals(saved, result);
+        verify(identityAdministrationService).assertOwnerCredentialProvisioningAllowed("owner@example.com");
+        verify(identityAdministrationService).provisionTenantOwner(tenantId, "owner@example.com", "new-password", "owner@example.com");
+    }
+
     private TenantAdministrationService service() {
         return new TenantAdministrationService(tenantService, demoTenantPurgeService, tenantSchemaMigrationService,
                 identityAdministrationService, false);

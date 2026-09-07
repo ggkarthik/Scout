@@ -57,9 +57,8 @@ public class TenantAdministrationService {
         if (hasOwnerEmail != hasOwnerPassword) {
             throw new IllegalArgumentException("Owner email and owner password must be provided together");
         }
-        if ((hasOwnerEmail || hasOwnerPassword) && !synchronousTenantProvisioningEnabled) {
-            throw new IllegalArgumentException(
-                    "Direct demo credentials require synchronous provisioning; use the invite flow in production");
+        if (hasOwnerEmail) {
+            identityAdministrationService.assertOwnerCredentialProvisioningAllowed(ownerEmail);
         }
         Tenant tenant = tenantService.createTenant(name, slug, planCode, billingRef, addDemoData);
         if (synchronousTenantProvisioningEnabled) {

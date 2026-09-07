@@ -161,6 +161,25 @@ public class IdentityAdministrationService {
         return membershipRepository.save(membership);
     }
 
+    @Transactional(readOnly = true)
+    public void assertOwnerCredentialProvisioningAllowed(String email) {
+        String normalizedEmail = requireText(email, "ownerEmail").toLowerCase(Locale.ROOT);
+        AppUser existing = userRepository.findByExternalSubject(normalizedEmail)
+                .or(() -> userRepository.findByEmailIgnoreCase(normalizedEmail))
+                .orElse(null);
+        if (existing == null) {
+            return;
+        }
+        if (existing.isPlatformOwner()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Platform-owner identities cannot be assigned as tenant owners");
+        }
+        if (!listActiveMemberships(existing.getExternalSubject()).isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "This user already has active access to another tenant");
+        }
+    }
+
     @Transactional
     public TenantMembership grantPlatformOwnerMembership(UUID tenantId, String subject, String role, String grantedBySubject) {
         Tenant tenant = tenantRepository.findById(tenantId)
