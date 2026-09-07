@@ -27,6 +27,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.crypto.bcrypt.BCrypt;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
@@ -128,6 +129,35 @@ public class IdentityAdministrationService {
         membership.setTenant(tenant);
         membership.setUser(user);
         membership.setRole(normalizeRole(role));
+        return membershipRepository.save(membership);
+    }
+
+    @Transactional
+    public TenantMembership provisionTenantOwner(UUID tenantId, String email, String password, String displayName) {
+        String normalizedEmail = requireText(email, "ownerEmail").toLowerCase(Locale.ROOT);
+        if (password == null || password.length() < 8) {
+            throw new IllegalArgumentException("ownerPassword must be at least 8 characters");
+        }
+        Tenant tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + tenantId));
+        AppUser user = loadOrCreateEligibleLockedUser(tenantId, normalizedEmail, normalizedEmail, displayName);
+        user.setEmail(normalizedEmail);
+        user.setDisplayName(trimToNull(displayName));
+        user.setStatus("ACTIVE");
+        user.setPasswordHash(BCrypt.hashpw(password, BCrypt.gensalt(10)));
+        user.setPasswordSetAt(Instant.now());
+        user.setUpdatedAt(Instant.now());
+        userRepository.save(user);
+
+        TenantMembership membership = membershipRepository
+                .findFirstByUserExternalSubjectAndTenantId(normalizedEmail, tenantId)
+                .orElseGet(TenantMembership::new);
+        membership.setTenant(tenant);
+        membership.setUser(user);
+        membership.setRole("TENANT_ADMIN");
+        membership.setStatus("ACTIVE");
+        membership.setProvenance("MANUAL");
+        membership.setUpdatedAt(Instant.now());
         return membershipRepository.save(membership);
     }
 

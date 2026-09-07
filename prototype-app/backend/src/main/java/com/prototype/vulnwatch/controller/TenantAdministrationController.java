@@ -94,7 +94,8 @@ public class TenantAdministrationController {
     @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public ResponseEntity<TenantResponse> createTenant(@RequestBody TenantCreateRequest request) {
         Tenant tenant = tenantAdministrationService.createTenant(
-                request.name(), request.slug(), request.planCode(), request.billingRef(), request.addDemoData());
+                request.name(), request.slug(), request.planCode(), request.billingRef(), request.addDemoData(),
+                request.ownerEmail(), request.ownerPassword());
         auditEventService.record("tenant.provisioning.requested", "tenant", tenant.getId().toString(), null);
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(toTenantResponse(tenant));
     }

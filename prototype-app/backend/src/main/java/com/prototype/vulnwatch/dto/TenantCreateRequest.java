@@ -5,6 +5,8 @@ public record TenantCreateRequest(
         String slug,
         String planCode,
         String billingRef,
-        boolean addDemoData
+        boolean addDemoData,
+        String ownerEmail,
+        String ownerPassword
 ) {
 }

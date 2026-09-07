@@ -17,6 +17,10 @@ server:
   shutdown: graceful
 
 app:
+  demo:
+    # Production emails must point recipients at the public ScoutGrid application.
+    # APP_DEMO_APP_BASE_URL may still override this for a separately hosted environment.
+    app-base-url: ${APP_DEMO_APP_BASE_URL:https://scoutgrid.io}
   ai-security:
     aws:
       max-concurrent: ${APP_AI_SECURITY_AWS_MAX_CONCURRENT:2}

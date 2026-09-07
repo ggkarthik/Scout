@@ -4,6 +4,7 @@ import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.TenantQuotaUpdateRequest;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
@@ -91,6 +92,8 @@ public class TenantService {
         tenant.setStatus("PROVISIONING");
         if (addDemoData) {
             tenant.setDemoSource(DemoDatasetProvisioningService.REQUESTED_MARKER);
+            tenant.setDemoExpiresAt(Instant.now().plus(7, ChronoUnit.DAYS));
+            tenant.setDemoCreatedBy("platform-console");
         }
         return tenantRepository.save(tenant);
     }

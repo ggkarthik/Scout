@@ -1,6 +1,11 @@
 # Copy to application-local.yml (which is ignored) only when a local profile file is needed.
 # application.yml automatically imports backend/.env.local when present.
 app:
+  demo:
+    # Local database runs use the migration-owner connection, so newly-created
+    # tenants become usable immediately instead of waiting for the production
+    # control-plane bootstrap job.
+    synchronous-tenant-provisioning-enabled: ${APP_DEMO_SYNCHRONOUS_TENANT_PROVISIONING_ENABLED:true}
   security:
     bootstrap:
       platform-owners:

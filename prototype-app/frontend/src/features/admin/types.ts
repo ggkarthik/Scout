@@ -139,6 +139,8 @@ export type TenantCreateRequest = {
   planCode?: string;
   billingRef?: string;
   addDemoData?: boolean;
+  ownerEmail?: string;
+  ownerPassword?: string;
 };
 
 export type TenantDemoExpiryRequest = {

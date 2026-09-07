@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -16,10 +17,29 @@ public class PlatformInventoryConnectorHealthService {
 
     private final TenantService tenantService;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
+    private final TenantSchemaService tenantSchemaService;
     private final ServiceNowCmdbConfigRepository serviceNowCmdbConfigRepository;
     private final SccmCmdbConfigRepository sccmCmdbConfigRepository;
     private final AwsDiscoveryConfigRepository awsDiscoveryConfigRepository;
 
+    @Autowired
+    public PlatformInventoryConnectorHealthService(
+            TenantService tenantService,
+            TenantSchemaExecutionService tenantSchemaExecutionService,
+            TenantSchemaService tenantSchemaService,
+            ServiceNowCmdbConfigRepository serviceNowCmdbConfigRepository,
+            SccmCmdbConfigRepository sccmCmdbConfigRepository,
+            AwsDiscoveryConfigRepository awsDiscoveryConfigRepository
+    ) {
+        this.tenantService = tenantService;
+        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
+        this.tenantSchemaService = tenantSchemaService;
+        this.serviceNowCmdbConfigRepository = serviceNowCmdbConfigRepository;
+        this.sccmCmdbConfigRepository = sccmCmdbConfigRepository;
+        this.awsDiscoveryConfigRepository = awsDiscoveryConfigRepository;
+    }
+
+    /** Compatibility constructor for focused unit tests that do not need schema existence checks. */
     public PlatformInventoryConnectorHealthService(
             TenantService tenantService,
             TenantSchemaExecutionService tenantSchemaExecutionService,
@@ -27,17 +47,21 @@ public class PlatformInventoryConnectorHealthService {
             SccmCmdbConfigRepository sccmCmdbConfigRepository,
             AwsDiscoveryConfigRepository awsDiscoveryConfigRepository
     ) {
-        this.tenantService = tenantService;
-        this.tenantSchemaExecutionService = tenantSchemaExecutionService;
-        this.serviceNowCmdbConfigRepository = serviceNowCmdbConfigRepository;
-        this.sccmCmdbConfigRepository = sccmCmdbConfigRepository;
-        this.awsDiscoveryConfigRepository = awsDiscoveryConfigRepository;
+        this(tenantService, tenantSchemaExecutionService, null,
+                serviceNowCmdbConfigRepository, sccmCmdbConfigRepository, awsDiscoveryConfigRepository);
     }
 
     public List<InventoryConnectorHealthResponse> listInventoryConnectorHealth() {
         return TenantContext.runAsPlatform(() -> {
             List<InventoryConnectorHealthResponse> responses = new ArrayList<>();
             for (Tenant tenant : tenantService.listTenants()) {
+                // A tenant can exist in the platform registry before the controlled
+                // schema bootstrap has created its tenant schema. It has no connector
+                // health to report yet and must not make the platform panel fail.
+                if (!"ACTIVE".equalsIgnoreCase(tenant.getStatus())
+                        || (tenantSchemaService != null && !tenantSchemaService.schemaExists(tenant.getSchemaName()))) {
+                    continue;
+                }
                 tenantSchemaExecutionService.run(tenant, () -> {
                     serviceNowCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "servicenow")
                             .ifPresent(config -> responses.add(toResponse(tenant, "servicenow", config.isEnabled(),
