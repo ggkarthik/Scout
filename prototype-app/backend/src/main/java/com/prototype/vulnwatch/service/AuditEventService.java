@@ -11,9 +11,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class AuditEventService {
@@ -30,7 +35,9 @@ public class AuditEventService {
     private final AuditEventRepository auditEventRepository;
     private final TenantRepository tenantRepository;
     private final RequestActorService requestActorService;
+    private final TransactionTemplate platformAuditTransactions;
 
+    /** Constructor used by focused unit tests that do not start Spring transactions. */
     public AuditEventService(
             AuditEventRepository auditEventRepository,
             TenantRepository tenantRepository,
@@ -39,6 +46,21 @@ public class AuditEventService {
         this.auditEventRepository = auditEventRepository;
         this.tenantRepository = tenantRepository;
         this.requestActorService = requestActorService;
+        this.platformAuditTransactions = null;
+    }
+
+    @Autowired
+    public AuditEventService(
+            AuditEventRepository auditEventRepository,
+            TenantRepository tenantRepository,
+            RequestActorService requestActorService,
+            @Qualifier("transactionManager") PlatformTransactionManager transactionManager
+    ) {
+        this.auditEventRepository = auditEventRepository;
+        this.tenantRepository = tenantRepository;
+        this.requestActorService = requestActorService;
+        this.platformAuditTransactions = new TransactionTemplate(transactionManager);
+        this.platformAuditTransactions.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     public void record(String action, String targetType, String targetId, String detailsJson) {
@@ -57,7 +79,7 @@ public class AuditEventService {
                 detailsJson,
                 outcome);
         if (PLATFORM_USER_AUDIT_ACTIONS.contains(action)) {
-            TenantContext.runAsPlatform(persist);
+            TenantContext.runAsPlatform(() -> executePlatformAudit(persist));
         } else {
             persist.run();
         }
@@ -74,11 +96,19 @@ public class AuditEventService {
             String outcome
     ) {
         if (PLATFORM_USER_AUDIT_ACTIONS.contains(action)) {
-            TenantContext.runAsPlatform(() -> persistEvent(
-                    null, actorSubject, actorRole, action, targetType, targetId, detailsJson, outcome));
+            TenantContext.runAsPlatform(() -> executePlatformAudit(() -> persistEvent(
+                    null, actorSubject, actorRole, action, targetType, targetId, detailsJson, outcome)));
         } else {
             persistEvent(tenantId, actorSubject, actorRole, action, targetType, targetId, detailsJson, outcome);
         }
+    }
+
+    private void executePlatformAudit(Runnable persist) {
+        if (platformAuditTransactions == null) {
+            persist.run();
+            return;
+        }
+        platformAuditTransactions.executeWithoutResult(status -> persist.run());
     }
 
     private void persistEvent(
