@@ -41,12 +41,10 @@ public class AuditEventService {
         this.requestActorService = requestActorService;
     }
 
-    @Transactional
     public void record(String action, String targetType, String targetId, String detailsJson) {
         record(action, targetType, targetId, detailsJson, "SUCCESS");
     }
 
-    @Transactional
     public void record(String action, String targetType, String targetId, String detailsJson, String outcome) {
         RequestActor actor = requestActorService.currentActor();
         Runnable persist = () -> persistEvent(
@@ -65,7 +63,6 @@ public class AuditEventService {
         }
     }
 
-    @Transactional
     public void recordExplicitActor(
             UUID tenantId,
             String actorSubject,
