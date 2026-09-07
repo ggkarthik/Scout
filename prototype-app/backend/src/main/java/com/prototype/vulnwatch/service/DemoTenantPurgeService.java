@@ -150,6 +150,7 @@ public class DemoTenantPurgeService {
                   and ccu.table_schema = 'platform'
                   and ccu.table_name = 'tenants'
                   and ccu.column_name = 'id'
+                  and kcu.table_schema = 'platform'
                   and kcu.column_name = 'tenant_id'
                 order by 1 desc
                 """, String.class);
