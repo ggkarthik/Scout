@@ -122,10 +122,12 @@ public class DemoTenantPurgeService {
 
     private void purgeTenantRows(Tenant tenant) {
         UUID tenantId = tenant.getId();
-        // The permanent web service uses a restricted runtime role and must never
-        // execute tenant-schema DDL. This also handles partially provisioned
-        // tenants whose namespace exists without a completed schema migration.
-        // Schema cleanup belongs to the controlled migration owner.
+        // Only the schema owner or a superuser may perform this cleanup. The
+        // permanent production web service uses a restricted runtime role, while
+        // owner-controlled local/integration runs can still remove their schemas.
+        if (tenantSchemaService.canDropTenantSchema(tenant.getSchemaName())) {
+            tenantSchemaService.dropTenantSchema(tenant.getSchemaName());
+        }
         purgeSharedTenantRows(tenantId);
         resetJdbcTemplate.update(
                 "update tenant_default.demo_requests set tenant_id = null where tenant_id = ?",

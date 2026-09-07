@@ -64,6 +64,27 @@ public class TenantSchemaService {
         return Boolean.TRUE.equals(exists);
     }
 
+    /**
+     * Schema DDL is allowed only for the schema owner or a superuser. The
+     * permanent production web service uses neither and must leave cleanup to
+     * the controlled migration owner.
+     */
+    public boolean canDropTenantSchema(String schemaName) {
+        Boolean allowed = platformJdbcTemplate.queryForObject("""
+                select exists (
+                    select 1
+                    from pg_namespace n
+                    join pg_roles r on r.oid = n.nspowner
+                    where n.nspname = ?
+                      and (
+                          current_setting('is_superuser') = 'on'
+                          or r.rolname = current_user
+                      )
+                )
+                """, Boolean.class, sanitizeSchemaName(schemaName));
+        return Boolean.TRUE.equals(allowed);
+    }
+
     /** Verifies availability only. Ordinary request paths must never perform tenant DDL. */
     public void assertSchemaReady(String schemaName) {
         String normalized = sanitizeSchemaName(schemaName);
