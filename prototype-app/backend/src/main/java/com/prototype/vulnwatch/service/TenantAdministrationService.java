@@ -68,12 +68,29 @@ public class TenantAdministrationService {
         if (hasOwnerEmail) {
             identityAdministrationService.provisionTenantOwner(
                     tenant.getId(), ownerEmail, ownerPassword, ownerEmail);
+            tenant = tenantService.updateDemoOwnerEmail(tenant.getId(), ownerEmail);
         }
         return tenant;
     }
 
     public Tenant retryProvisioning(UUID tenantId) {
         return tenantService.retryProvisioning(tenantId);
+    }
+
+    public Tenant recoverTenantOwner(UUID tenantId, String ownerEmail, String ownerPassword) {
+        Tenant tenant = tenantService.requireTenantUuid(tenantId);
+        if (!"ACTIVE".equalsIgnoreCase(tenant.getStatus())) {
+            throw new IllegalArgumentException("Tenant owner recovery requires an ACTIVE tenant");
+        }
+        if (tenant.getDemoExpiresAt() == null && (tenant.getDemoSource() == null || tenant.getDemoSource().isBlank())
+                && !DemoLifecycleService.DEMO_PLAN_CODE.equalsIgnoreCase(tenant.getPlanCode())) {
+            throw new IllegalArgumentException("Tenant owner recovery is only available for demo tenants");
+        }
+        if (tenant.getExpiredAt() != null || (tenant.getDemoExpiresAt() != null && !tenant.getDemoExpiresAt().isAfter(Instant.now()))) {
+            throw new IllegalArgumentException("Tenant owner recovery is unavailable for an expired demo tenant");
+        }
+        identityAdministrationService.provisionTenantOwner(tenantId, ownerEmail, ownerPassword, ownerEmail);
+        return tenantService.updateDemoOwnerEmail(tenantId, ownerEmail);
     }
 
     public Tenant updateStatus(UUID tenantId, String status) {

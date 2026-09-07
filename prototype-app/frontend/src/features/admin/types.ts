@@ -143,6 +143,11 @@ export type TenantCreateRequest = {
   ownerPassword?: string;
 };
 
+export type TenantOwnerRecoveryRequest = {
+  ownerEmail: string;
+  ownerPassword: string;
+};
+
 export type TenantDemoExpiryRequest = {
   expiresAt: string;
 };

@@ -1203,6 +1203,10 @@ function TenantLifecyclePanel() {
     status: string;
     demoExpiresAt?: string | null;
   } | null>(null);
+  const [tenantPendingOwnerRecovery, setTenantPendingOwnerRecovery] = React.useState<{ id: string; name: string; email: string } | null>(null);
+  const [ownerRecoveryEmail, setOwnerRecoveryEmail] = React.useState('');
+  const [ownerRecoveryPassword, setOwnerRecoveryPassword] = React.useState('');
+  const [ownerRecoverySuccess, setOwnerRecoverySuccess] = React.useState<string | null>(null);
   const tenantsQuery = useQuery({
     queryKey: ['platform-tenants'],
     queryFn: api.listTenants
@@ -1256,6 +1260,17 @@ function TenantLifecyclePanel() {
       await queryClient.invalidateQueries({ queryKey: ['platform-tenants'] });
       await queryClient.invalidateQueries({ queryKey: ['platform-inventory-connector-health'] });
       await queryClient.invalidateQueries({ queryKey: ['platform-tenant-schema-status'] });
+    }
+  });
+  const recoverTenantOwner = useMutation({
+    mutationFn: ({ tenantId, ownerEmail, ownerPassword }: { tenantId: string; ownerEmail: string; ownerPassword: string }) =>
+      api.recoverTenantOwner(tenantId, { ownerEmail, ownerPassword }),
+    onSuccess: async (tenant) => {
+      setTenantPendingOwnerRecovery(null);
+      setOwnerRecoveryEmail('');
+      setOwnerRecoveryPassword('');
+      setOwnerRecoverySuccess(`Owner credential saved for ${tenant.name}. Share the new password securely with the tenant owner.`);
+      await queryClient.invalidateQueries({ queryKey: ['platform-tenants'] });
     }
   });
   const tenants = React.useMemo(() => tenantsQuery.data ?? [], [tenantsQuery.data]);
@@ -1427,6 +1442,21 @@ function TenantLifecyclePanel() {
                           Restore access
                         </button>
                       ) : null}
+                      {normalizedStatus === 'ACTIVE' && !demoExpired ? (
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          disabled={recoverTenantOwner.isPending}
+                          onClick={() => {
+                            setOwnerRecoveryEmail(tenant.demoOwnerEmail ?? '');
+                            setOwnerRecoveryPassword('');
+                            setOwnerRecoverySuccess(null);
+                            setTenantPendingOwnerRecovery({ id: tenant.id, name: tenant.name, email: tenant.demoOwnerEmail ?? '' });
+                          }}
+                        >
+                          {tenant.demoOwnerEmail ? 'Reset owner credential' : 'Set owner credential'}
+                        </button>
+                      ) : null}
                       {tenant.slug === 'default-workspace' ? null : (
                         <button
                           type="button"
@@ -1475,6 +1505,39 @@ function TenantLifecyclePanel() {
             : 'Failed to request tenant provisioning retry'}
         </div>
       )}
+      {ownerRecoverySuccess && <div className="notice" role="status">{ownerRecoverySuccess}</div>}
+      {recoverTenantOwner.isError && (
+        <div className="notice error" role="alert">
+          {recoverTenantOwner.error instanceof Error ? recoverTenantOwner.error.message : 'Owner credential recovery failed'}
+        </div>
+      )}
+      <ConfirmDialog
+        isOpen={tenantPendingOwnerRecovery != null}
+        title={tenantPendingOwnerRecovery?.email ? 'Reset tenant owner credential?' : 'Set tenant owner credential?'}
+        message={tenantPendingOwnerRecovery == null ? '' : (
+          <div>
+            <p>Set a new tenant-admin sign-in for {tenantPendingOwnerRecovery.name}. Existing passwords are never shown.</p>
+            <label>Owner email<input type="email" aria-label="Recovery owner email" value={ownerRecoveryEmail} onChange={(event) => setOwnerRecoveryEmail(event.target.value)} autoComplete="email" /></label>
+            <label>New password<input type="password" aria-label="Recovery owner password" value={ownerRecoveryPassword} onChange={(event) => setOwnerRecoveryPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={72} /></label>
+            <small>Use 8–72 characters. Share it through a secure channel.</small>
+          </div>
+        )}
+        confirmLabel={recoverTenantOwner.isPending ? 'Saving...' : 'Save credential'}
+        confirmDisabled={recoverTenantOwner.isPending || ownerRecoveryEmail.trim() === '' || ownerRecoveryPassword.length < 8}
+        cancelLabel="Cancel"
+        onCancel={() => {
+          if (!recoverTenantOwner.isPending) {
+            setTenantPendingOwnerRecovery(null);
+            setOwnerRecoveryEmail('');
+            setOwnerRecoveryPassword('');
+          }
+        }}
+        onConfirm={() => {
+          if (tenantPendingOwnerRecovery != null && ownerRecoveryEmail.trim() !== '' && ownerRecoveryPassword.length >= 8) {
+            recoverTenantOwner.mutate({ tenantId: tenantPendingOwnerRecovery.id, ownerEmail: ownerRecoveryEmail.trim(), ownerPassword: ownerRecoveryPassword });
+          }
+        }}
+      />
       <ConfirmDialog
         isOpen={tenantPendingExtension != null}
         title="Extend tenant access?"

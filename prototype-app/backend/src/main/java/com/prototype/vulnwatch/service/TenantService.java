@@ -158,6 +158,15 @@ public class TenantService {
     }
 
     @Transactional
+    public Tenant updateDemoOwnerEmail(UUID tenantId, String ownerEmail) {
+        Tenant tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + tenantId));
+        tenant.setDemoOwnerEmail(ownerEmail == null || ownerEmail.isBlank() ? null : ownerEmail.trim().toLowerCase(Locale.ROOT));
+        tenant.setUpdatedAt(Instant.now());
+        return tenantRepository.save(tenant);
+    }
+
+    @Transactional
     public Tenant updateQuotas(UUID tenantId, TenantQuotaUpdateRequest request) {
         Tenant tenant = tenantRepository.findById(tenantId)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + tenantId));

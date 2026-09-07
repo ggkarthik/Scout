@@ -104,6 +104,7 @@ import type {
   TenantInviteRequest,
   TenantInviteValidationResponse,
   TenantCreateRequest,
+  TenantOwnerRecoveryRequest,
   TenantSchemaStatusPage,
   TenantMember,
   TenantMemberRequest,
@@ -1922,6 +1923,11 @@ export const api = {
     }),
   getTenantSchemaStatus: () =>
     request<TenantSchemaStatusPage>('/platform/tenant-schema-status?page=0&size=200'),
+  recoverTenantOwner: (tenantId: string, payload: TenantOwnerRecoveryRequest) =>
+    request<Tenant>(`/platform/tenants/${encodeURIComponent(tenantId)}/owner-recovery`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
   deleteTenant: (tenantId: string) =>
     request<void>(`/platform/tenants/${encodeURIComponent(tenantId)}`, {
       method: 'DELETE'

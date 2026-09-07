@@ -19,6 +19,7 @@ import com.prototype.vulnwatch.dto.PlatformUserResponse;
 import com.prototype.vulnwatch.dto.PlatformUserSetupLinkResponse;
 import com.prototype.vulnwatch.dto.TenantQuotaUpdateRequest;
 import com.prototype.vulnwatch.dto.TenantResponse;
+import com.prototype.vulnwatch.dto.TenantOwnerRecoveryRequest;
 import com.prototype.vulnwatch.dto.TenantStatusRequest;
 import com.prototype.vulnwatch.security.SensitiveTenantAction;
 import com.prototype.vulnwatch.service.AuditEventService;
@@ -112,6 +113,22 @@ public class TenantAdministrationController {
     @PreAuthorize("hasRole('PLATFORM_OWNER')")
     public TenantResponse getTenant(@PathVariable UUID tenantId) {
         return toTenantResponse(tenantAdministrationService.getTenant(tenantId));
+    }
+
+    @PostMapping("/platform/tenants/{tenantId}/owner-recovery")
+    @PreAuthorize("hasRole('PLATFORM_OWNER')")
+    public TenantResponse recoverTenantOwner(
+            @PathVariable UUID tenantId,
+            @Valid @RequestBody TenantOwnerRecoveryRequest request
+    ) {
+        Tenant tenant = tenantAdministrationService.recoverTenantOwner(
+                tenantId, request.ownerEmail(), request.ownerPassword());
+        auditEventService.record(
+                "tenant.owner.credential_recovered",
+                "tenant",
+                tenantId.toString(),
+                "{\"credentialUpdated\":true}");
+        return toTenantResponse(tenant);
     }
 
     @PatchMapping("/platform/tenants/{tenantId}/status")
