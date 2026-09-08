@@ -2,6 +2,7 @@ package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.migration.PackagedMigrationCatalog;
+import com.prototype.vulnwatch.migration.TenantSearchPathFlywayCallback;
 import com.prototype.vulnwatch.migration.TenantSchemaFingerprint;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import com.zaxxer.hikari.HikariDataSource;
@@ -185,6 +186,7 @@ public class TenantSchemaMigrationService {
                     .table("tenant_schema_history")
                     .locations("classpath:db/migration/tenant")
                     .placeholders(placeholders)
+                    .callbacks(new TenantSearchPathFlywayCallback(schema))
                     .validateOnMigrate(true)
                     .outOfOrder(false)
                     .initSql("SET search_path TO " + quotedIdentifier(schema)

@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.config;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.UUID;
+import com.prototype.vulnwatch.migration.TenantSearchPathFlywayCallback;
 import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -49,6 +50,7 @@ public class PreJpaDefaultTenantMigrationConfiguration {
             Flyway.configure().dataSource(dataSource).schemas(DEFAULT_SCHEMA).defaultSchema(DEFAULT_SCHEMA)
                     .table("tenant_schema_history").locations("classpath:db/migration/tenant")
                     .placeholders(Map.of("tenantId", tenantId.toString(), "tenantSchema", DEFAULT_SCHEMA))
+                    .callbacks(new TenantSearchPathFlywayCallback(DEFAULT_SCHEMA))
                     .validateOnMigrate(true).outOfOrder(false)
                     .initSql("SET search_path TO \"tenant_default\", public; SET statement_timeout = '5min'")
                     .load().migrate();
