@@ -584,7 +584,8 @@ public final class ProductionBootstrapCli {
                         "tenantSchema", tenant.schemaName()))
                 .validateOnMigrate(true)
                 .outOfOrder(false)
-                .initSql("SET statement_timeout = '5min'")
+                .initSql("SET search_path TO " + quotedIdentifier(tenant.schemaName())
+                        + ", public; SET statement_timeout = '5min'")
                 .load();
     }
 

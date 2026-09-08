@@ -187,7 +187,8 @@ public class TenantSchemaMigrationService {
                     .placeholders(placeholders)
                     .validateOnMigrate(true)
                     .outOfOrder(false)
-                    .initSql("SET statement_timeout = '5min'")
+                    .initSql("SET search_path TO " + quotedIdentifier(schema)
+                            + ", public; SET statement_timeout = '5min'")
                     .load();
             flyway.migrate();
             int version = Integer.parseInt(flyway.info().current().getVersion().getVersion());
@@ -237,6 +238,10 @@ public class TenantSchemaMigrationService {
             statement.setString(1, LOCK_NAME);
             statement.execute();
         }
+    }
+
+    private static String quotedIdentifier(String identifier) {
+        return "\"" + identifier.replace("\"", "\"\"") + "\"";
     }
 
     private MigrationReport report(UUID runId, Instant startedAt, List<SchemaResult> results,
