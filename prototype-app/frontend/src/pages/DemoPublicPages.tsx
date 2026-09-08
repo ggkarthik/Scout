@@ -248,16 +248,16 @@ export function PublicLandingPage() {
         <div className="scout-hero-glow scout-hero-glow--cyan" aria-hidden="true" />
         <div className="scout-hero-layout">
           <div className="scout-hero-content">
-            <span className="scout-eyebrow">✦ AI-First Exposure &amp; BOM Management</span>
-            <h1>The <span className="hero-accent">AI-First</span> Exposure Management Platform Powered</h1>
+            <span className="scout-eyebrow">✦ AI-First Exposure Platform</span>
+            <h1>The Exposure Management Platform Powered by <span className="hero-accent">AI Grid</span></h1>
             <p>
               ScoutGrid unifies LLMs, autonomous agents, MCP tools, cloud workloads, host infrastructure, and
               software supply chains (BOM) into one operational view. Eliminate scanner noise, pinpoint real
               exposure, and resolve critical risks first.
             </p>
             <div className="hero-actions">
-              <Link className="btn btn-primary" to="/demo/request">Request product demo</Link>
-              <a className="btn btn-outline" href="#platform">Explore AI Grid architecture</a>
+              <Link className="btn btn-primary" to="/demo/request">Request Product Demo</Link>
+              <a className="btn btn-outline" href="#grids">Explore AI Grid Architecture</a>
             </div>
             <div className="scout-stats" aria-label="ScoutGrid coverage">
               {[
@@ -340,10 +340,19 @@ export function PublicLandingPage() {
         </div>
       </section>
 
-      <section id="platform" className="sg-section">
+      <section className="workflow-band" aria-label="Supported security workflows">
+        <span>Built for the workflows security teams already run</span>
+        <div className="workflow-chips">
+          {['Cloud discovery', 'Host infrastructure', 'Software BOM', 'AI security', 'Vulnerability intelligence'].map((workflow) => (
+            <span key={workflow}>{workflow}</span>
+          ))}
+        </div>
+      </section>
+
+      <section id="grids" className="sg-section">
         <div className="sg-section-heading centered">
           <span className="sg-eyebrow">The Platform</span>
-          <h2>One platform. Four grids. Every attack surface covered.</h2>
+          <h2>One Platform. Four Grids. Every Attack Surface Covered.</h2>
           <p>
             ScoutGrid delivers complete visibility across on-premises infrastructure, cloud workloads, open-source
             software supply chains, and AI models—without deploying a single agent.
@@ -554,13 +563,13 @@ export function PublicLandingPage() {
       <section id="cta" className="sg-section cta-section">
         <div className="cta-box">
           <span className="badge badge--red">Ready to see Scout?</span>
-          <h2>Eliminate blind trust in your security posture.</h2>
+          <h2>Eliminate Blind Trust in Your Security Posture.</h2>
           <p>
             See how ScoutGrid maps your full attack surface, prioritizes real risk across Cloud, Infra, BOM, and AI
             Grids, and cuts vulnerability noise in minutes.
           </p>
           <div className="cta-actions">
-            <Link className="btn btn-primary" to="/demo/request">Schedule a demo</Link>
+            <Link className="btn btn-primary" to="/demo/request">Schedule a Live Demo</Link>
             <Link className="btn btn-outline" to="/login">Talk to an expert</Link>
           </div>
           <div className="cta-trust">
@@ -602,7 +611,7 @@ export function PublicLandingPage() {
             <div className="footer-col-title">Get started</div>
             <Link to="/demo/request">Request a demo</Link>
             <Link to="/login">Log in</Link>
-            <a href="#platform">Documentation</a>
+            <a href="#grids">Documentation</a>
           </div>
         </div>
           <div className="footer-bottom">
@@ -1218,8 +1227,8 @@ function PublicDemoShell({ children, compact = false }: { children: React.ReactN
             <strong>ScoutGrid</strong>
           </Link>
           <div className="public-demo-links">
-            <a href="/demo#solutions">Platform</a>
-            <a href="/demo#platform">Grids</a>
+            <a href="/demo#grids">Platform</a>
+            <a href="/demo#ai-grid">Grids</a>
             <Link to="/demo/blog">Blog</Link>
             <Link className="nav-link-outline" to="/login">Log in</Link>
             <Link className="nav-link-cta" to="/demo/request">Request Demo</Link>

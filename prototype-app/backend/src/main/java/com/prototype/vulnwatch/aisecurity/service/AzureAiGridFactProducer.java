@@ -13,7 +13,7 @@ public class AzureAiGridFactProducer implements AiGridFactProducer {
         List<ProducedFact> facts = AiGridFactProducerSupport.facts();
         AiGridFactProducerSupport.copy(input, "provisioningState", "resource.provisioning_state_observed", facts);
         AiGridFactProducerSupport.copy(input, "status", "resource.status_observed", facts);
-        AiGridFactProducerSupport.copy(input, "publicNetworkUnrestricted", "network.public_access_configured", facts);
+        copyPublicAccess(input, facts);
         AiGridFactProducerSupport.copy(input, "localAuthEnabled", "identity.local_auth_enabled_configured", facts);
         AiGridFactProducerSupport.copy(input, "diagnosticLoggingEnabled", "logging.diagnostic_enabled_configured", facts);
         AiGridFactProducerSupport.copy(input, "hasDestination", "logging.diagnostic_destination_configured", facts);
@@ -125,5 +125,12 @@ public class AzureAiGridFactProducer implements AiGridFactProducer {
         };
         for (String[] mapping : phase2Attributes) AiGridFactProducerSupport.copy(input, mapping[0], mapping[1], facts);
         return List.copyOf(facts);
+    }
+
+    private void copyPublicAccess(FactInput input, List<ProducedFact> facts) {
+        String attribute = input.attributes().hasNonNull("publicNetworkUnrestricted") ? "publicNetworkUnrestricted"
+                : input.attributes().hasNonNull("publiclyAccessible") ? "publiclyAccessible"
+                : input.attributes().hasNonNull("publicEndpoint") ? "publicEndpoint" : null;
+        if (attribute != null) AiGridFactProducerSupport.copy(input, attribute, "network.public_access_configured", facts);
     }
 }

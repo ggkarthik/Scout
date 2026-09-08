@@ -18,7 +18,6 @@ import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceServ
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.Phase1CorpusBootstrapCommand;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.Phase1CorpusCertification;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.Phase1CorpusReadiness;
-import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.ReleaseDecision;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.ReleaseReadiness;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.RunCommand;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.PolicyApproval;
@@ -35,7 +34,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -43,7 +41,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 @RequestMapping("/api/platform/ai-grid/validation")
@@ -95,16 +92,6 @@ public class AiGridValidationGovernanceController {
     @PostMapping("/answer-keys/{environmentId}/runs")
     public AnswerKeyRun recordRun(@PathVariable UUID environmentId, @RequestBody RunCommand command) {
         return governance.recordRun(environmentId, command, actor());
-    }
-
-    @GetMapping("/policies/{policyId}/versions/{version}/digest")
-    public Map<String, String> policyDigest(@PathVariable String policyId, @PathVariable String version) {
-        throw legacyVersionRoute();
-    }
-
-    @GetMapping("/policies/{policyId}/versions/{version}/release-readiness")
-    public ReleaseReadiness releaseReadiness(@PathVariable String policyId, @PathVariable String version) {
-        throw legacyVersionRoute();
     }
 
     @GetMapping("/policies/{policyId}/digest")
@@ -174,11 +161,6 @@ public class AiGridValidationGovernanceController {
         return governance.finalizePrecisionReview(reviewId);
     }
 
-    @PostMapping("/policies/{policyId}/versions/{version}/publish")
-    public ReleaseDecision publish(@PathVariable String policyId, @PathVariable String version) {
-        throw legacyVersionRoute();
-    }
-
     @PostMapping("/policies/{policyId}/approve")
     public PolicyApproval approve(@PathVariable String policyId, @RequestBody(required = false) ApprovalCommand command) {
         return governance.approvePolicy(policyId, command == null ? null : command.tenantTestNote(), actor());
@@ -237,11 +219,6 @@ public class AiGridValidationGovernanceController {
 
     private String actor() {
         return actors.currentActor().userId();
-    }
-
-    private ResponseStatusException legacyVersionRoute() {
-        return new ResponseStatusException(HttpStatus.GONE,
-                "Version-keyed AI Grid release routes were replaced by policy-ID keyed routes");
     }
 
     public record BiasCommand(boolean passed, String rationale) {}

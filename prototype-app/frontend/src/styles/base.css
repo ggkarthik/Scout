@@ -350,7 +350,7 @@
   font-size: clamp(3.2rem, 6vw, 5.5rem);
   line-height: 0.96;
   letter-spacing: -0.06em;
-  max-width: 12.5ch;
+  max-width: 13.5ch;
 }
 
 .scout-hero-content p {
@@ -432,6 +432,34 @@
   box-shadow: 0 34px 80px rgba(15, 23, 42, 0.14), 0 8px 24px rgba(15, 23, 42, 0.08);
   /* Align the product preview with the headline rather than the full copy column. */
   margin-top: 54px;
+}
+
+.workflow-band {
+  display: grid;
+  gap: 14px;
+  padding: 22px max(24px, calc((100vw - var(--public-page-max)) / 2));
+  border-block: 1px solid var(--border);
+  background: #ffffff;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.workflow-chips {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.workflow-chips span {
+  padding: 7px 13px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 0.78rem;
 }
 
 .scout-hero-visual::before {
@@ -2053,6 +2081,10 @@
   .scout-hero-layout,
   .hero-console-body {
     grid-template-columns: 1fr;
+  }
+
+  .workflow-band {
+    padding-inline: 16px;
   }
 
   .blog-page-width {

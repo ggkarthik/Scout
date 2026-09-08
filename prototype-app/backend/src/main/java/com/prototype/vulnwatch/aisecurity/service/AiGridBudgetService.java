@@ -62,7 +62,7 @@ public class AiGridBudgetService {
                         .addValue("criticality", wildcard(criticality))
                         .addValue("families", json(resourceFamilies == null ? List.of() : resourceFamilies))
                         .addValue("decision", decision).addValue("reason", reason).addValue("usage", json(usage)));
-                reconcileAlerts(runId, config, usage);
+                reconcileAlerts(tenant, runId, config, usage);
                 return new Admission(runId, decision, reason, usage);
             });
             if (admission != null && "THROTTLED".equals(admission.decision())) {
@@ -99,7 +99,7 @@ public class AiGridBudgetService {
                     .addValue("retained", positive(command.retainedSnapshotBytesLimit(), "retainedSnapshotBytesLimit"))
                     .addValue("warning", command.warningRatio()).addValue("actor", actor)
                     .addValue("reason", required(command.reason(), "reason")).addValue("tenantId", tenant.getId()));
-            reconcileAlerts(null, current(), usage());
+            reconcileAlerts(tenant, null, current(), usage());
             return current();
         }));
     }
@@ -149,7 +149,7 @@ public class AiGridBudgetService {
                      where run_id = :runId
                     """, Map.of("provider", provider, "retained", usage.retainedSnapshotBytes(),
                     "state", exceeded.isEmpty() ? "WITHIN_BUDGET" : "EXCEEDED", "runId", runId));
-            reconcileAlerts(runId, config, usage);
+            reconcileAlerts(tenant, runId, config, usage);
         }));
     }
 
@@ -274,19 +274,19 @@ public class AiGridBudgetService {
                 rs.getTimestamp("first_observed_at").toInstant(), rs.getTimestamp("last_observed_at").toInstant()));
     }
 
-    private void reconcileAlerts(UUID runId, BudgetConfig config, BudgetUsage usage) {
-        reconcileAlert(runId, "DAILY_SCANS", usage.dailyScans(), config.dailyScanLimit(), config.warningRatio());
-        reconcileAlert(runId, "PROVIDER_API_CALLS", usage.dailyProviderApiCalls(),
+    private void reconcileAlerts(Tenant tenant, UUID runId, BudgetConfig config, BudgetUsage usage) {
+        reconcileAlert(tenant, runId, "DAILY_SCANS", usage.dailyScans(), config.dailyScanLimit(), config.warningRatio());
+        reconcileAlert(tenant, runId, "PROVIDER_API_CALLS", usage.dailyProviderApiCalls(),
                 config.dailyProviderApiCallLimit(), config.warningRatio());
-        reconcileAlert(runId, "NEW_SNAPSHOT_BYTES", usage.dailyNewSnapshotBytes(),
+        reconcileAlert(tenant, runId, "NEW_SNAPSHOT_BYTES", usage.dailyNewSnapshotBytes(),
                 config.dailyNewSnapshotBytesLimit(), config.warningRatio());
-        reconcileAlert(runId, "PROCESSING_MS", usage.dailyProcessingMs(),
+        reconcileAlert(tenant, runId, "PROCESSING_MS", usage.dailyProcessingMs(),
                 config.dailyProcessingMsLimit(), config.warningRatio());
-        reconcileAlert(runId, "RETAINED_SNAPSHOT_BYTES", usage.retainedSnapshotBytes(),
+        reconcileAlert(tenant, runId, "RETAINED_SNAPSHOT_BYTES", usage.retainedSnapshotBytes(),
                 config.retainedSnapshotBytesLimit(), config.warningRatio());
     }
 
-    private void reconcileAlert(UUID runId, String metric, long observed, Long limit, double warningRatio) {
+    private void reconcileAlert(Tenant tenant, UUID runId, String metric, long observed, Long limit, double warningRatio) {
         if (limit == null || observed < Math.floor(limit * warningRatio)) {
             jdbc.update("""
                     update ai_grid_budget_alerts set status = 'RESOLVED', last_observed_at = now()
@@ -305,9 +305,9 @@ public class AiGridBudgetService {
             jdbc.update("""
                     insert into ai_grid_budget_alerts
                         (id, tenant_id, run_id, metric, level, observed_value, limit_value)
-                    values (:id, current_setting('app.current_tenant_id')::uuid, :runId,
+                    values (:id, :tenantId, :runId,
                             :metric, :level, :observed, :limit)
-                    """, new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("runId", runId)
+                    """, new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("tenantId", tenant.getId()).addValue("runId", runId)
                     .addValue("metric", metric).addValue("level", level).addValue("observed", observed)
                     .addValue("limit", limit));
         }

@@ -2,6 +2,7 @@ package com.prototype.vulnwatch.migration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
 import com.prototype.vulnwatch.support.PostgresITSupport;
@@ -56,7 +57,7 @@ class SchemaMigrationStartupPostgresIntegrationTest {
                 "select count(*) from platform.ai_grid_correlation_versions where lifecycle = 'PUBLISHED'", Integer.class));
         assertEquals(76, jdbcTemplate.queryForObject(
                 "select count(*) from platform.ai_grid_policy_versions where policy_id like 'AGCF-%' and release_family = 'AGCF_PHASE_1' and release_wave = 'PHASE_1'", Integer.class));
-        assertEquals(1, jdbcTemplate.queryForObject(
-                "select count(*) from platform.ai_grid_policy_migration_ledger", Integer.class));
+        assertNull(jdbcTemplate.queryForObject(
+                "select to_regclass('platform.ai_grid_policy_migration_ledger')", String.class));
     }
 }

@@ -142,12 +142,11 @@ class AiGridValidationGovernancePostgresIntegrationTest {
         String policyId = "GOVERNANCE_TEST_POLICY";
         String version = "1.0.0";
         String digest = governance.policyDigest(policyId, version);
-
-        var blocked = governance.publishPolicy(policyId, version, "release-owner");
-        assertFalse(blocked.published());
+        var blocked = governance.approvePolicy(policyId, "release-owner");
+        assertFalse(blocked.approved());
         assertTrue(blocked.reason().contains("answer-key"));
         assertTrue(blocked.reason().contains("precision"));
-        assertFalse(governance.releaseReadiness(policyId, version).ready());
+        assertFalse(governance.releaseReadiness(policyId).ready());
 
         var environment = governance.createEnvironment(new EnvironmentCommand(
                 "bedrock-agent-release", "2026.08.1", "AWS", "BEDROCK_AGENTS",
