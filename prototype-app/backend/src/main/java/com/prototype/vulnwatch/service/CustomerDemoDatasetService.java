@@ -735,10 +735,10 @@ public class CustomerDemoDatasetService {
         UUID eventId = stableId(tenantId, "finding-event:" + findingId);
         jdbcTemplate.update("""
                 INSERT INTO finding_events
-                    (id, finding_id, actor, event_type, summary, details_json, created_at)
-                VALUES (?, ?, 'correlation-engine', 'DETECTED', ?, ?::jsonb, ?)
+                    (id, finding_id, tenant_id, actor, event_type, summary, details_json, created_at)
+                VALUES (?, ?, ?, 'correlation-engine', 'DETECTED', ?, ?::jsonb, ?)
                 ON CONFLICT (id) DO NOTHING
-                """, eventId, findingId, vulnerability.externalId() + " detected in " + asset.name(),
+                """, eventId, findingId, tenantId, vulnerability.externalId() + " detected in " + asset.name(),
                 "{\"dataset\":\"" + DATASET_VERSION + "\"}",
                 ts(now.minus(40L - assetIndex * 3L, ChronoUnit.DAYS)));
         UUID commentId = stableId(tenantId, "finding-comment:" + findingId);
@@ -750,10 +750,10 @@ public class CustomerDemoDatasetService {
                     : "Owner notified; remediation is planned for the current sprint.";
         };
         jdbcTemplate.update("""
-                INSERT INTO finding_comments (id, finding_id, author, body, created_at)
-                VALUES (?, ?, 'security@kanra.example', ?, ?)
+                INSERT INTO finding_comments (id, finding_id, tenant_id, author, body, created_at)
+                VALUES (?, ?, ?, 'security@kanra.example', ?, ?)
                 ON CONFLICT (id) DO NOTHING
-                """, commentId, findingId, body, ts(now.minus(2L + assetIndex, ChronoUnit.DAYS)));
+                """, commentId, findingId, tenantId, body, ts(now.minus(2L + assetIndex, ChronoUnit.DAYS)));
     }
 
     private void seedOrgCves(UUID tenantId, List<UUID> vulnerabilityIds, Instant now) {
