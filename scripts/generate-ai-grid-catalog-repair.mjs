@@ -78,43 +78,63 @@ VALUES
 ${policyRows}
 ON CONFLICT (policy_id,version) DO NOTHING;
 
-CREATE TEMP TABLE ai_grid_bundled_catalog_repair (
-    policy_id varchar(128) NOT NULL,
-    version varchar(32) NOT NULL,
-    package_digest varchar(64) NOT NULL,
-    package_source_ref varchar(1024) NOT NULL,
-    PRIMARY KEY (policy_id, version)
-) ON COMMIT DROP;
-
-INSERT INTO ai_grid_bundled_catalog_repair (policy_id,version,package_digest,package_source_ref)
-VALUES
-${expectedRows};
-
-CREATE TEMP TABLE ai_grid_bundled_catalog_changed ON COMMIT DROP AS
-SELECT expected.*
-  FROM ai_grid_bundled_catalog_repair expected
-  JOIN platform.ai_grid_policy_versions policy
-    ON policy.policy_id = expected.policy_id AND policy.version = expected.version
- WHERE policy.package_digest IS DISTINCT FROM expected.package_digest
-    OR policy.package_source_ref IS DISTINCT FROM expected.package_source_ref;
-
 -- Record the exact approval before changing any legacy active package digest.
+WITH expected (policy_id,version,package_digest,package_source_ref) AS (
+    VALUES
+${expectedRows}
+), changed AS (
+    SELECT expected.*
+      FROM expected
+      JOIN platform.ai_grid_policy_versions policy
+        ON policy.policy_id = expected.policy_id AND policy.version = expected.version
+     WHERE policy.package_digest IS DISTINCT FROM expected.package_digest
+        OR policy.package_source_ref IS DISTINCT FROM expected.package_source_ref
+)
 INSERT INTO platform.ai_grid_policy_release_decisions
     (id,policy_id,policy_version,decision,reason,decided_by,package_digest,approved_package_digest)
 SELECT md5('ai-grid-bundled-catalog-repair:' || policy_id || ':' || version || ':' || package_digest)::uuid,
        policy_id,version,'APPROVED','Bundled catalog digest repair','ai-grid-catalog-repair',package_digest,package_digest
-FROM ai_grid_bundled_catalog_changed
+FROM changed
 ON CONFLICT (id) DO NOTHING;
 
 -- These triggers protect ordinary edits. This controlled repair updates the corresponding
 -- approval and distribution binding in the same transaction.
 ALTER TABLE platform.ai_grid_policy_versions DISABLE TRIGGER trg_ai_grid_approved_package_immutable;
 ALTER TABLE platform.ai_grid_policy_versions DISABLE TRIGGER trg_ai_grid_phase_1_preview_digest_change;
+ALTER TABLE platform.ai_grid_policy_distribution DISABLE TRIGGER trg_ai_grid_distribution_approval;
 
+WITH expected (policy_id,version,package_digest,package_source_ref) AS (
+    VALUES
+${expectedRows}
+)
+UPDATE platform.ai_grid_policy_distribution distribution
+   SET approved_package_digest = expected.package_digest,
+       release_decision_id = md5('ai-grid-bundled-catalog-repair:' || expected.policy_id || ':' || expected.version || ':' || expected.package_digest)::uuid,
+       updated_by = 'ai-grid-catalog-repair',
+       updated_at = now()
+  FROM expected
+  JOIN platform.ai_grid_policy_versions policy
+    ON policy.policy_id = expected.policy_id AND policy.version = expected.version
+ WHERE distribution.policy_id = expected.policy_id
+   AND distribution.pinned_version = expected.version
+   AND (policy.package_digest IS DISTINCT FROM expected.package_digest
+        OR policy.package_source_ref IS DISTINCT FROM expected.package_source_ref);
+
+WITH expected (policy_id,version,package_digest,package_source_ref) AS (
+    VALUES
+${expectedRows}
+), changed AS (
+    SELECT expected.*
+      FROM expected
+      JOIN platform.ai_grid_policy_versions policy
+        ON policy.policy_id = expected.policy_id AND policy.version = expected.version
+     WHERE policy.package_digest IS DISTINCT FROM expected.package_digest
+        OR policy.package_source_ref IS DISTINCT FROM expected.package_source_ref
+)
 UPDATE platform.ai_grid_policy_versions policy
    SET package_digest = expected.package_digest,
        package_source_ref = expected.package_source_ref
-  FROM ai_grid_bundled_catalog_changed expected
+  FROM changed expected
  WHERE policy.policy_id = expected.policy_id
    AND policy.version = expected.version
    AND (policy.package_digest IS DISTINCT FROM expected.package_digest
@@ -122,17 +142,7 @@ UPDATE platform.ai_grid_policy_versions policy
 
 ALTER TABLE platform.ai_grid_policy_versions ENABLE TRIGGER trg_ai_grid_phase_1_preview_digest_change;
 ALTER TABLE platform.ai_grid_policy_versions ENABLE TRIGGER trg_ai_grid_approved_package_immutable;
-
-UPDATE platform.ai_grid_policy_distribution distribution
-   SET approved_package_digest = expected.package_digest,
-       release_decision_id = md5('ai-grid-bundled-catalog-repair:' || expected.policy_id || ':' || expected.version || ':' || expected.package_digest)::uuid,
-       updated_by = 'ai-grid-catalog-repair',
-       updated_at = now()
-  FROM ai_grid_bundled_catalog_changed expected
- WHERE distribution.policy_id = expected.policy_id
-   AND distribution.pinned_version = expected.version
-   AND (distribution.approved_package_digest IS DISTINCT FROM expected.package_digest
-        OR distribution.release_decision_id IS DISTINCT FROM md5('ai-grid-bundled-catalog-repair:' || expected.policy_id || ':' || expected.version || ':' || expected.package_digest)::uuid);
+ALTER TABLE platform.ai_grid_policy_distribution ENABLE TRIGGER trg_ai_grid_distribution_approval;
 
 INSERT INTO platform.ai_grid_policy_distribution
     (policy_id,available,default_selection,rollout_stage,updated_by)

@@ -474,16 +474,9 @@ VALUES
 ('AGCF-XSP-012','1.0.0','Search ACL, tenant isolation, retrieval mode, and sensitive-data evidence validate the retrieval path','Evaluates search acl, tenant isolation, retrieval mode, and sensitive-data evidence validate the retrieval path only from complete, fresh relationship evidence.','HIGH','VALIDATED','VALIDATED_EXPOSURE','REQUIRED','[]','["MULTI_CLOUD_GRAPH"]','["MULTI_CLOUD_GRAPH"]','["DIRECT_PROVIDER_RELATIONSHIP"]','[]','[]','{}','AGCF_P2_XSP_012','Break the decisive relationship or correct the linked provider controls, then reassess with complete, fresh evidence.','[{"framework":"OWASP_GENAI_LLM_TOP_10","frameworkVersion":"2026","controlId":"LLM02","mappingType":"PARTIAL","rationale":"MULTI_CLOUD XSP evidence contributes directly to this risk but is not a certification claim."},{"framework":"OWASP_GENAI_LLM_TOP_10","frameworkVersion":"2026","controlId":"LLM03","mappingType":"PARTIAL","rationale":"MULTI_CLOUD XSP evidence contributes directly to this risk but is not a certification claim."},{"framework":"CSA_AICM","frameworkVersion":"1.1","controlId":"IAM-18","mappingType":"PARTIAL","rationale":"MULTI_CLOUD XSP normalized evidence contributes to this control."},{"framework":"CSA_AICM","frameworkVersion":"1.1","controlId":"DSP-17","mappingType":"PARTIAL","rationale":"MULTI_CLOUD XSP normalized evidence contributes to this control."}]','STATIC','[]','91886fbbcabb756256ba2cc63451b299b15ab5dad6208d2a077892a73159af80','policy-packages/agcf/XSP-012/1.0.0.json','AI Grid Security','AGCF-OBJ-P2-XSP-012','MULTI_CLOUD','CORRELATION_PATH','{"mode":"CORRELATION_PATH","correlationPath":{"correlationId":"XSP-012","correlationVersion":"1.0.0","decisiveFact":"exposure.search_sensitive_retrieval_path","maxDepth":4,"maxFanOut":50}}','["E2"]','[]','null','AGCF_PHASE_2','PHASE_2')
 ON CONFLICT (policy_id,version) DO NOTHING;
 
-CREATE TEMP TABLE ai_grid_bundled_catalog_repair (
-    policy_id varchar(128) NOT NULL,
-    version varchar(32) NOT NULL,
-    package_digest varchar(64) NOT NULL,
-    package_source_ref varchar(1024) NOT NULL,
-    PRIMARY KEY (policy_id, version)
-) ON COMMIT DROP;
-
-INSERT INTO ai_grid_bundled_catalog_repair (policy_id,version,package_digest,package_source_ref)
-VALUES
+-- Record the exact approval before changing any legacy active package digest.
+WITH expected (policy_id,version,package_digest,package_source_ref) AS (
+    VALUES
 ('AGCF-AWS-001','1.0.0','57781735b507f8f284472af507020181380e71ae41716fd70ba84a904e2697b1','policy-packages/agcf/AGCF-AWS-001/1.0.0.json'),
 ('AGCF-AWS-002','1.0.0','c12b96252a146d3e49dfb137130bf02888d2aafd01490fb94cf97f72e30b6a2a','policy-packages/agcf/AGCF-AWS-002/1.0.0.json'),
 ('AGCF-AWS-003','1.0.0','9feb9672faee1c0cbac3301be20f69bfde67b30cd8373932260fe36404e32487','policy-packages/agcf/AGCF-AWS-003/1.0.0.json'),
@@ -642,33 +635,376 @@ VALUES
 ('AGCF-XSP-009','1.0.0','2cee0cc2e9ebef9f2b57106b67ff555e68b41ac3b5b09a0f5f06e4667e5f181e','policy-packages/agcf/XSP-009/1.0.0.json'),
 ('AGCF-XSP-010','1.0.0','50abb49aeb5585c9a0b06f94bf61ff4c6445681490ea3dbc07f8e4bc5fc7d89a','policy-packages/agcf/XSP-010/1.0.0.json'),
 ('AGCF-XSP-011','1.0.0','762dce72867d65581ee9a27b48940d002d71571a473db671bae76feb73d09064','policy-packages/agcf/XSP-011/1.0.0.json'),
-('AGCF-XSP-012','1.0.0','91886fbbcabb756256ba2cc63451b299b15ab5dad6208d2a077892a73159af80','policy-packages/agcf/XSP-012/1.0.0.json');
-
-CREATE TEMP TABLE ai_grid_bundled_catalog_changed ON COMMIT DROP AS
-SELECT expected.*
-  FROM ai_grid_bundled_catalog_repair expected
-  JOIN platform.ai_grid_policy_versions policy
-    ON policy.policy_id = expected.policy_id AND policy.version = expected.version
- WHERE policy.package_digest IS DISTINCT FROM expected.package_digest
-    OR policy.package_source_ref IS DISTINCT FROM expected.package_source_ref;
-
--- Record the exact approval before changing any legacy active package digest.
+('AGCF-XSP-012','1.0.0','91886fbbcabb756256ba2cc63451b299b15ab5dad6208d2a077892a73159af80','policy-packages/agcf/XSP-012/1.0.0.json')
+), changed AS (
+    SELECT expected.*
+      FROM expected
+      JOIN platform.ai_grid_policy_versions policy
+        ON policy.policy_id = expected.policy_id AND policy.version = expected.version
+     WHERE policy.package_digest IS DISTINCT FROM expected.package_digest
+        OR policy.package_source_ref IS DISTINCT FROM expected.package_source_ref
+)
 INSERT INTO platform.ai_grid_policy_release_decisions
     (id,policy_id,policy_version,decision,reason,decided_by,package_digest,approved_package_digest)
 SELECT md5('ai-grid-bundled-catalog-repair:' || policy_id || ':' || version || ':' || package_digest)::uuid,
        policy_id,version,'APPROVED','Bundled catalog digest repair','ai-grid-catalog-repair',package_digest,package_digest
-FROM ai_grid_bundled_catalog_changed
+FROM changed
 ON CONFLICT (id) DO NOTHING;
 
 -- These triggers protect ordinary edits. This controlled repair updates the corresponding
 -- approval and distribution binding in the same transaction.
 ALTER TABLE platform.ai_grid_policy_versions DISABLE TRIGGER trg_ai_grid_approved_package_immutable;
 ALTER TABLE platform.ai_grid_policy_versions DISABLE TRIGGER trg_ai_grid_phase_1_preview_digest_change;
+ALTER TABLE platform.ai_grid_policy_distribution DISABLE TRIGGER trg_ai_grid_distribution_approval;
 
+WITH expected (policy_id,version,package_digest,package_source_ref) AS (
+    VALUES
+('AGCF-AWS-001','1.0.0','57781735b507f8f284472af507020181380e71ae41716fd70ba84a904e2697b1','policy-packages/agcf/AGCF-AWS-001/1.0.0.json'),
+('AGCF-AWS-002','1.0.0','c12b96252a146d3e49dfb137130bf02888d2aafd01490fb94cf97f72e30b6a2a','policy-packages/agcf/AGCF-AWS-002/1.0.0.json'),
+('AGCF-AWS-003','1.0.0','9feb9672faee1c0cbac3301be20f69bfde67b30cd8373932260fe36404e32487','policy-packages/agcf/AGCF-AWS-003/1.0.0.json'),
+('AGCF-AWS-004','1.0.0','07cd28465e7064470b624fb880f668fb85d1378748ecc5c7170e84a4f342d09f','policy-packages/agcf/AGCF-AWS-004/1.0.0.json'),
+('AGCF-AWS-005','1.0.0','23b8b88e1f39b1027b06523d80f50a0d04c561a70c20892935f3de39f08c590d','policy-packages/agcf/AGCF-AWS-005/1.0.0.json'),
+('AGCF-AWS-006','1.0.0','7bb3c448e05ef599a309356a41c30bbd6840754861453cf7cf1919d61d121c2d','policy-packages/agcf/AGCF-AWS-006/1.0.0.json'),
+('AGCF-AWS-007','1.0.0','5c190b1ba579381d98752ed9bfe778ee72726f322a33ea9ae746ae4d2c666586','policy-packages/agcf/AGCF-AWS-007/1.0.0.json'),
+('AGCF-AWS-008','1.0.0','a1ca007efa0d57ff15657a8c0f5e319cf29e3594083f7b25ff53f1305652ee67','policy-packages/agcf/AGCF-AWS-008/1.0.0.json'),
+('AGCF-AWS-009','1.0.0','b0e9bd0238a1a76adb5962d9a50752c9d00df4c753b351ebcf37123500f79a6c','policy-packages/agcf/AGCF-AWS-009/1.0.0.json'),
+('AGCF-AWS-010','1.0.0','2085139054fde1a89dd39349c5246be8659b3f86e16e5df8bd2c879da5d4c02e','policy-packages/agcf/AGCF-AWS-010/1.0.0.json'),
+('AGCF-AWS-011','1.0.0','9ca94d96b62255aff0b50627bce8a40a93b8958b1a28868c29eab35127d480da','policy-packages/agcf/AGCF-AWS-011/1.0.0.json'),
+('AGCF-AWS-012','1.0.0','07cc0a7ce59e1691a3b05fb5b35ef25533a91dda201a96423108429edbea5d40','policy-packages/agcf/AGCF-AWS-012/1.0.0.json'),
+('AGCF-AWS-013','1.0.0','ad4f6868de61f569dc70460d3c146a948aee1191c660cc189800d546f02cdd3c','policy-packages/agcf/AGCF-AWS-013/1.0.0.json'),
+('AGCF-AWS-014','1.0.0','7dcf639821e689065acde25d6ee6e641b80e01eb473f03b6d4ef11ae65b623c0','policy-packages/agcf/AGCF-AWS-014/1.0.0.json'),
+('AGCF-AWS-015','1.0.0','e9a5a7eed7500f691aec17b5ef623e0e6dfdac7c55c3e54c01f93633c930b84a','policy-packages/agcf/AGCF-AWS-015/1.0.0.json'),
+('AGCF-AWS-016','1.0.0','63b237f362088e6e18fe80b313c6a2d0f8cbe1c8b72f7b0d523251097e822d75','policy-packages/agcf/AGCF-AWS-016/1.0.0.json'),
+('AGCF-AWS-017','1.0.0','92032a2275adb81da31144fba77922b2466e398dece88862760f29b84911c799','policy-packages/agcf/AGCF-AWS-017/1.0.0.json'),
+('AGCF-AWS-018','1.0.0','33027bed112f7fb9e19f2f532c04a7996dc105c76b9aa931e859d72aa797b927','policy-packages/agcf/AGCF-AWS-018/1.0.0.json'),
+('AGCF-AWS-019','1.0.0','c8ce30888a018c8442570d5cc4f803285682a6cf8bd81886a30fa13172c7edcd','policy-packages/agcf/AGCF-AWS-019/1.0.0.json'),
+('AGCF-AWS-020','1.0.0','5600cba4b91ce8eb887aa61252cd19620274a3818f3df6ac9c5338b88dde04ed','policy-packages/agcf/AGCF-AWS-020/1.0.0.json'),
+('AGCF-AWS-021','1.0.0','a2f3b5aa79d35ca337633c73ecb65635ce29f2feba47945ed63449f4408e1391','policy-packages/agcf/AGCF-AWS-021/1.0.0.json'),
+('AGCF-AWS-022','1.0.0','17b466fce5a0933cd2f29a16ba150570968b5bd7bdbb7c100fe9247c53b3effe','policy-packages/agcf/AGCF-AWS-022/1.0.0.json'),
+('AGCF-AWS-023','1.0.0','46bd7553eb526bbdc0020e2471c68d8e708897765a5a680e923790778db323b6','policy-packages/agcf/AGCF-AWS-023/1.0.0.json'),
+('AGCF-AWS-024','1.0.0','32493d9bac26e8c6392bc9e0be84bb475257836e4b95e8cb3a33b435bd483a69','policy-packages/agcf/AGCF-AWS-024/1.0.0.json'),
+('AGCF-AWS-025','1.0.0','8d45578380aee8ad28aa11817b4fac1e767322c216a0c25b859d95bd12910c34','policy-packages/agcf/AGCF-AWS-025/1.0.0.json'),
+('AGCF-AWS-026','1.0.0','00f9dbf74b2df8503837a8d898285bbb83ef77008ef19f449d0f32ab47d81e81','policy-packages/agcf/AGCF-AWS-026/1.0.0.json'),
+('AGCF-AWS-027','1.0.0','60357eaee299c5f144c7c9979655d44f81fae435acf0b218186aa5045ab4a331','policy-packages/agcf/AGCF-AWS-027/1.0.0.json'),
+('AGCF-AWS-028','1.0.0','7790daf45be65ae53c8e236df812d4015709b651405a3103726017662f775153','policy-packages/agcf/AGCF-AWS-028/1.0.0.json'),
+('AGCF-AWS-029','1.0.0','c0591f1280f470e380698f3ad97e4162b314d3eff20988f819d57be51f76e429','policy-packages/agcf/AGCF-AWS-029/1.0.0.json'),
+('AGCF-AWS-030','1.0.0','136d320464e1b73b69caa7aefebd72e73caf94328c986bc78fc66cf7813a09ae','policy-packages/agcf/AGCF-AWS-030/1.0.0.json'),
+('AGCF-AWS-031','1.0.0','2a234e76ad25868156e3292f6c599149fbefd375585273e6b5d8fc7c2c75fe55','policy-packages/agcf/AGCF-AWS-031/1.0.0.json'),
+('AGCF-AWS-032','1.0.0','cd0298bd26d3ae64f730b55da8ccccdcd4a4cdb81ef4913b8e775b1f9f25f202','policy-packages/agcf/AGCF-AWS-032/1.0.0.json'),
+('AGCF-AWS-033','1.0.0','9723cada991dc4c9de96f16e50e67fd13b320f5d61294c96a7fa11d45b5fe382','policy-packages/agcf/AGCF-AWS-033/1.0.0.json'),
+('AGCF-AWS-034','1.0.0','468d4f2f64d16d755e2268d4817e3743b40bdbec76ed2ff447b2482c88d3ee24','policy-packages/agcf/AGCF-AWS-034/1.0.0.json'),
+('AGCF-AWS-035','1.0.0','d4b365402012676f0a0250ba30c6570a2b6ecb1dbe4b3c460e123fad162313cf','policy-packages/agcf/AGCF-AWS-035/1.0.0.json'),
+('AGCF-AWS-036','1.0.0','fc02fa9441435d43ae05ac28673c413059567c4eb3106fec0fe0e5230b0ff9c2','policy-packages/agcf/AGCF-AWS-036/1.0.0.json'),
+('AGCF-AWS-037','1.0.0','eb83fa2afdb801fd67a1cf37c3b6214be2b19774e3abd06ca146ed3315739c21','policy-packages/agcf/AGCF-AWS-037/1.0.0.json'),
+('AGCF-AWS-038','1.0.0','377f6069bef60525f43d1fe5bda8ff8d5cde4334fd355937a58378efaa371967','policy-packages/agcf/AGCF-AWS-038/1.0.0.json'),
+('AGCF-AWS-039','1.0.0','f65fb7507d1e5625e4a32f4014d03f520cba80c5eb48f67478469a1ad0781623','policy-packages/agcf/AGCF-AWS-039/1.0.0.json'),
+('AGCF-AWS-040','1.0.0','dc51be86de53ca4594aa1d24b2154dc9754bdd9c9fdd624c0b2ecda6494e8bae','policy-packages/agcf/AGCF-AWS-040/1.0.0.json'),
+('AGCF-AWS-041','1.0.0','2f70c284e52f484754686fea1ccf9db91ca3c448a641410eee9896e199ccbdd3','policy-packages/agcf/AGCF-AWS-041/1.0.0.json'),
+('AGCF-AWS-042','1.0.0','0dc897d54f3830b093789a4233df1d78c21d3897a1b6235f8b42243353e2ae5b','policy-packages/agcf/AGCF-AWS-042/1.0.0.json'),
+('AGCF-AWS-043','1.0.0','a4c50aa5003455b38f9f2c48952062c3c9d89a76a6255b460ebdf8451490655d','policy-packages/agcf/AGCF-AWS-043/1.0.0.json'),
+('AGCF-AWS-044','1.0.0','05a02f13eee7643f7bc75b58fe1a9079797a8507eb4f79d241a7aabf28d68e51','policy-packages/agcf/AGCF-AWS-044/1.0.0.json'),
+('AGCF-AWS-045','1.0.0','568301c4417b9b7726722add6a9b4b1cca2ad9bb3755c2b8186e6a11cf0ca3b5','policy-packages/agcf/AGCF-AWS-045/1.0.0.json'),
+('AGCF-AWS-046','1.0.0','4a2e475e377d89afe650a69065cd045019ba0bafa4164f598726bc3770eb5bc9','policy-packages/agcf/AGCF-AWS-046/1.0.0.json'),
+('AGCF-AWS-047','1.0.0','99cfd58324c35c39ee91af86462ed4ba8b6005561e4579cbd27cefe3edaf1a9d','policy-packages/agcf/AGCF-AWS-047/1.0.0.json'),
+('AGCF-AWS-048','1.0.0','ba738411028ebcceedb01f44d74ae96a0010d3ef1a9e85c2479b8c4a4a125d32','policy-packages/agcf/AGCF-AWS-048/1.0.0.json'),
+('AGCF-AWS-049','1.0.0','d346a10537f2e6cf0e6e0a78bf69bd64529e1c21cf8c4fd4e978b093721abebb','policy-packages/agcf/AGCF-AWS-049/1.0.0.json'),
+('AGCF-AWS-050','1.0.0','4ef980e6a022d78ff83a2ef042f92e51b9a9013f3e44b66789fef6fd8ac6ff58','policy-packages/agcf/AGCF-AWS-050/1.0.0.json'),
+('AGCF-AWS-051','1.0.0','6c6418efcd439c170bcf5cf68d1691c71f40a5d55a1daaeaab79dcaeabda1d4f','policy-packages/agcf/AGCF-AWS-051/1.0.0.json'),
+('AGCF-AWS-052','1.0.0','6a8eb00ba0c2971b2edfd6943e11ca50f72cc5d981b325a06b0094b44f7f1fe0','policy-packages/agcf/AGCF-AWS-052/1.0.0.json'),
+('AGCF-AWS-053','1.0.0','816a3b1ffd6622d4fa2896f33695ff58b6474dd900c4f4abbfbad2b0e498632b','policy-packages/agcf/AGCF-AWS-053/1.0.0.json'),
+('AGCF-AWS-054','1.0.0','4b1a97e38b1d182bdeb22fda62d4273071940660b5ae4f68a13c14c7db578340','policy-packages/agcf/AGCF-AWS-054/1.0.0.json'),
+('AGCF-AWS-055','1.0.0','7e671e094188d22f289ee1a6708daf9e49fc0475d310d9a8275aa405de9070f7','policy-packages/agcf/AGCF-AWS-055/1.0.0.json'),
+('AGCF-AWS-056','1.0.0','725539d6b65c7952d4aee935e4f8973f73da00920c2704d54ae3e6ec83b594e1','policy-packages/agcf/AGCF-AWS-056/1.0.0.json'),
+('AGCF-AWS-057','1.0.0','4ebf2481c85b86751e5559850be809c1bbb6a6cabfe4f55f3013ee22575b75f7','policy-packages/agcf/AGCF-AWS-057/1.0.0.json'),
+('AGCF-AWS-058','1.0.0','e82012c3453635e1024af03d6b16f52629b71ed65c22aaa965fa473d38243d28','policy-packages/agcf/AGCF-AWS-058/1.0.0.json'),
+('AGCF-AWS-059','1.0.0','1245dc9f019ba7cab57df7a0e1dcaf9262437915dc7b81c9bf8d474d5f835986','policy-packages/agcf/AGCF-AWS-059/1.0.0.json'),
+('AGCF-AWS-060','1.0.0','e2d673b71ed7fd5785c588c1a90fb3a26c8d6db42a5274e4b87dd4fb0454577d','policy-packages/agcf/AGCF-AWS-060/1.0.0.json'),
+('AGCF-AWS-061','1.0.0','ea22a87f5e05e89b16b3b044f6c1f0c1118dc472d6cc4b0d7247c1dce44cd92c','policy-packages/agcf/AGCF-AWS-061/1.0.0.json'),
+('AGCF-AWS-062','1.0.0','b50d61c519e83a4dc6b97480d28ede27ab41562ac98f7acbc17f7feaf7208265','policy-packages/agcf/AGCF-AWS-062/1.0.0.json'),
+('AGCF-AWS-063','1.0.0','ca0390e0157638dc7eba759b7c7d5e4841a5a85fcc4356e511af8540e9c7ab80','policy-packages/agcf/AGCF-AWS-063/1.0.0.json'),
+('AGCF-AWS-064','1.0.0','0604be8c6c7822a05f6527acd80443dd2c8a423b5171172a16a60a4bc7b591e5','policy-packages/agcf/AGCF-AWS-064/1.0.0.json'),
+('AGCF-AWS-065','1.0.0','00868538a96e53778413aa54530378d8aa363a1ea14adf0bc7d8c960ac9a343e','policy-packages/agcf/AGCF-AWS-065/1.0.0.json'),
+('AGCF-AWS-066','1.0.0','7cde89aba8accd3367cd452614defc11c66f83679c6285a877f82a5499c9afd7','policy-packages/agcf/AGCF-AWS-066/1.0.0.json'),
+('AGCF-AWS-067','1.0.0','8f78ac884e75213443cf552ff01f538c90ed3e69feac1778f50781f05ba8e1c6','policy-packages/agcf/AGCF-AWS-067/1.0.0.json'),
+('AGCF-AWS-068','1.0.0','38fe98563122b0f80f02a78fb6945e6ebc127e137b96ae7a201c5be8efd7ec0b','policy-packages/agcf/AGCF-AWS-068/1.0.0.json'),
+('AGCF-AWS-069','1.0.0','fc7c1e8d34741a61e9a276409fe868e632c653c64ba8a2511257cf0ad5ec7761','policy-packages/agcf/AGCF-AWS-069/1.0.0.json'),
+('AGCF-AWS-070','1.0.0','d64d01a0d1b951006359f5321fb7fa85ded55a242e0c0076a2224c82075f9963','policy-packages/agcf/AGCF-AWS-070/1.0.0.json'),
+('AGCF-AWS-071','1.0.0','56c5d728cf1d7eade6a455cce0484baebbfbc3e355ddc0adfa515b75e3857f25','policy-packages/agcf/AGCF-AWS-071/1.0.0.json'),
+('AGCF-AWS-072','1.0.0','4be06c4433280d058f82ef2e437179d3c96404aa828cb76b0351da4ab1f32238','policy-packages/agcf/AGCF-AWS-072/1.0.0.json'),
+('AGCF-AZR-001','1.0.0','046bbffeaa50c65541cdb7742dcf4ced919d025579045d2007af0d84092704e2','policy-packages/agcf/AGCF-AZR-001/1.0.0.json'),
+('AGCF-AZR-002','1.0.0','6439276140620f364748a6c4dff16c7f68c4fa8934336fa3b0c0686c0f481608','policy-packages/agcf/AGCF-AZR-002/1.0.0.json'),
+('AGCF-AZR-003','1.0.0','df812e74b06ec3d28df42cccd2c4e6394a03e8650a76b24ce1a12cfe016eb47d','policy-packages/agcf/AGCF-AZR-003/1.0.0.json'),
+('AGCF-AZR-004','1.0.0','7cdc37529db58523b5fbe9c8bf7a8b1c77884d147533ba8c384c623b51d4bcc1','policy-packages/agcf/AGCF-AZR-004/1.0.0.json'),
+('AGCF-AZR-005','1.0.0','bedc94b31e40aa4f55664b99b7dacacd73667a482068f3e36e2daf01bfb54aaf','policy-packages/agcf/AGCF-AZR-005/1.0.0.json'),
+('AGCF-AZR-006','1.0.0','2af6dcd38095ab9090be5ff78990ccf8afba8042ea693603eaa08083f46dfd3b','policy-packages/agcf/AGCF-AZR-006/1.0.0.json'),
+('AGCF-AZR-007','1.0.0','10f2a258b173eb96c6f05e9b63fafbe4dd5dd3db8bf3a52bfdac51e8fb62e593','policy-packages/agcf/AGCF-AZR-007/1.0.0.json'),
+('AGCF-AZR-008','1.0.0','ece3b78208cfaae29c247c8ff78a1554f387b1c94d8617ad59677f64d2e5f2fb','policy-packages/agcf/AGCF-AZR-008/1.0.0.json'),
+('AGCF-AZR-009','1.0.0','98eb727f433b21c7bbb7966cd8c7a3bd384ad692845fbe6775e9b1fe264b6e7b','policy-packages/agcf/AGCF-AZR-009/1.0.0.json'),
+('AGCF-AZR-010','1.0.0','a54b33061982f59777b5aa68c4ed9f7b06b960eaf56eee683e4afe5e317c5dea','policy-packages/agcf/AGCF-AZR-010/1.0.0.json'),
+('AGCF-AZR-011','1.0.0','065cf0952abfc7d4a84f26f7e9a353fcf52d5451d9d09c4355c710fae4d49bc6','policy-packages/agcf/AGCF-AZR-011/1.0.0.json'),
+('AGCF-AZR-012','1.0.0','664aca53cd6c3ed7f437dfa42cca2372280a3066797a9a4fba7c98c8cd45f79a','policy-packages/agcf/AGCF-AZR-012/1.0.0.json'),
+('AGCF-AZR-013','1.0.0','9e824a72c65ea1ba5c97d77caa043cef4da26951a62f5bc5716669f4f50ff4d5','policy-packages/agcf/AGCF-AZR-013/1.0.0.json'),
+('AGCF-AZR-014','1.0.0','c17014f0ca16723456cc795d8b04c52f784298d79f1f3254837b39e1c341c16e','policy-packages/agcf/AGCF-AZR-014/1.0.0.json'),
+('AGCF-AZR-015','1.0.0','52a3ebeb4e58935dc7b1a6b5837b1319bf26d98d4c9c1532cc2ccf84ab06450c','policy-packages/agcf/AGCF-AZR-015/1.0.0.json'),
+('AGCF-AZR-016','1.0.0','3071eec263ebb4a9d468da373cd2d7d6aa2d80925277828f7ac069de7fc72a4f','policy-packages/agcf/AGCF-AZR-016/1.0.0.json'),
+('AGCF-AZR-017','1.0.0','2616adf6abb03e4fcf61349130285dceb34122f2198da2ca35f52ac254f39359','policy-packages/agcf/AGCF-AZR-017/1.0.0.json'),
+('AGCF-AZR-018','1.0.0','999807ed8ca6bd7ba48349624be80bb44b4ea70e33a9c6a8f12ebff3550e7184','policy-packages/agcf/AGCF-AZR-018/1.0.0.json'),
+('AGCF-AZR-019','1.0.0','d444cf2eabef606ab116a7bab9dd4f112b8c3e7f91d31e90151540f3badecc4b','policy-packages/agcf/AGCF-AZR-019/1.0.0.json'),
+('AGCF-AZR-020','1.0.0','055a6129236c68ef0997e2486d3b1aed1ca25be2fe376167ea34e4d9a6afb97a','policy-packages/agcf/AGCF-AZR-020/1.0.0.json'),
+('AGCF-AZR-021','1.0.0','e4e301f70db0173986a0064c08067a528c8956e2703697e6f6101760c5492250','policy-packages/agcf/AGCF-AZR-021/1.0.0.json'),
+('AGCF-AZR-022','1.0.0','5ed0d2f2958c4c71f29e16601ef01bebf77ae8905f0f42954c64d0025d832108','policy-packages/agcf/AGCF-AZR-022/1.0.0.json'),
+('AGCF-AZR-023','1.0.0','e50b5f26ed18870f2723e9ea177effab94e25cbf0dad9f501c386ae5b10a075f','policy-packages/agcf/AGCF-AZR-023/1.0.0.json'),
+('AGCF-AZR-024','1.0.0','74d0fd1107a27fbee282e4fe9a2e2b99977668adc79715b277ca0ca6abf1520a','policy-packages/agcf/AGCF-AZR-024/1.0.0.json'),
+('AGCF-AZR-025','1.0.0','ca67ac614ec02a61f27d2bb4118bd51f0132c5f662421b22825612006b7e87c8','policy-packages/agcf/AGCF-AZR-025/1.0.0.json'),
+('AGCF-AZR-026','1.0.0','534500676194bbde05c1c2071fb22612c101a7b7994f6f8a1c793754a854810c','policy-packages/agcf/AGCF-AZR-026/1.0.0.json'),
+('AGCF-AZR-027','1.0.0','31946f2b9733f78d7a02865edf162a74ef6c295e9adf19832466e9981c3bb833','policy-packages/agcf/AGCF-AZR-027/1.0.0.json'),
+('AGCF-AZR-028','1.0.0','a1b5d9432ee0554b15446b519ceefc2100e4010fb0b2cb82f615fef949061233','policy-packages/agcf/AGCF-AZR-028/1.0.0.json'),
+('AGCF-AZR-029','1.0.0','e484838e945bd0df97f75305668091f5397e4f39f6a991505513a6ba43f92884','policy-packages/agcf/AGCF-AZR-029/1.0.0.json'),
+('AGCF-AZR-030','1.0.0','114068db61bb49bcbee8f502f4608b8b384b6dd7336cdbf679cd6464eb24fb95','policy-packages/agcf/AGCF-AZR-030/1.0.0.json'),
+('AGCF-AZR-031','1.0.0','9bcaf2cc4a18af2a5f7d9234c5ba8606a12b27eda294d10220cdd3dc8db272a1','policy-packages/agcf/AGCF-AZR-031/1.0.0.json'),
+('AGCF-AZR-032','1.0.0','0f05267df3a5c72b4210721794a71b91560e321c3bce4c12926cad6aed51e62c','policy-packages/agcf/AGCF-AZR-032/1.0.0.json'),
+('AGCF-AZR-033','1.0.0','5e82e65006e3da5e89d9d8434d8b60d755346c2d8bad321e4c84dd1360761574','policy-packages/agcf/AGCF-AZR-033/1.0.0.json'),
+('AGCF-AZR-034','1.0.0','b83b09e4a30b83798f1437128487e27d41207fcd678d9f7e686e372655693a91','policy-packages/agcf/AGCF-AZR-034/1.0.0.json'),
+('AGCF-AZR-035','1.0.0','dbaef20696b1421c7317995dfc6f4da96247edf8f4bbb1554f6921aa92ef49dd','policy-packages/agcf/AGCF-AZR-035/1.0.0.json'),
+('AGCF-AZR-036','1.0.0','65195885a5619fe3a73b2e3ab3347ed95753683d7bdef486b438fd339cb0efe5','policy-packages/agcf/AGCF-AZR-036/1.0.0.json'),
+('AGCF-AZR-037','1.0.0','4e751fda2d083554bc1023bac70e8323813872b8edfc158dab7354a86a9b2cd1','policy-packages/agcf/AGCF-AZR-037/1.0.0.json'),
+('AGCF-AZR-038','1.0.0','bff48e1563aaa8090c6d9a915c40e72dd1307c8ed56535c72c3529ac6d3bf290','policy-packages/agcf/AGCF-AZR-038/1.0.0.json'),
+('AGCF-AZR-039','1.0.0','b13e699106326a27eccbd9cd7e2d63b292ac1218d0c5cff0d72a8f985e9f1f4c','policy-packages/agcf/AGCF-AZR-039/1.0.0.json'),
+('AGCF-AZR-040','1.0.0','c6723ee8888588f091002423ed3cfa0de7e7e6a5ea5811c69075299b37373624','policy-packages/agcf/AGCF-AZR-040/1.0.0.json'),
+('AGCF-AZR-041','1.0.0','3793eae46d61e0829fbbca9ca844a3b14f6fbcf91ae5b74aa02978b9dcc979de','policy-packages/agcf/AGCF-AZR-041/1.0.0.json'),
+('AGCF-AZR-042','1.0.0','ba202b1b71c4d8765f48a840d670ee1e06977926a5f7a2131d967256d5c9d70c','policy-packages/agcf/AGCF-AZR-042/1.0.0.json'),
+('AGCF-AZR-043','1.0.0','bf535779c6ad183ba407495f8f5698b60db12fafc5db2cc99cd7de24cab4b68a','policy-packages/agcf/AGCF-AZR-043/1.0.0.json'),
+('AGCF-AZR-044','1.0.0','c2c4e0d6e10540e01845d1a670099c0234a31e8b7dc089e12abee4d3a7a8c565','policy-packages/agcf/AGCF-AZR-044/1.0.0.json'),
+('AGCF-AZR-045','1.0.0','84f7987ca19ad9cf69bf7ef3a7eb59265f1d8ee3f12f287fc401ef0c8248e898','policy-packages/agcf/AGCF-AZR-045/1.0.0.json'),
+('AGCF-AZR-046','1.0.0','fe6b8e09e3f66b43a8aadb0eaec06129c94dffbf275c230e129d3ed5a56b88f2','policy-packages/agcf/AGCF-AZR-046/1.0.0.json'),
+('AGCF-AZR-047','1.0.0','335a98f32fe7a5a7e12b9a5c3bab773890bbc1b85b75b4bc51bc88fb2c059a21','policy-packages/agcf/AGCF-AZR-047/1.0.0.json'),
+('AGCF-AZR-048','1.0.0','b01c06b890df243e2b8645dd0534a871a1cd0b7c6457c8f6cb4428c3d6bc6c1d','policy-packages/agcf/AGCF-AZR-048/1.0.0.json'),
+('AGCF-AZR-049','1.0.0','9616857c48f05dc504b81711b31e55ebcff91fc4c39ae9ac69f49b41450ed909','policy-packages/agcf/AGCF-AZR-049/1.0.0.json'),
+('AGCF-AZR-050','1.0.0','faa4944111b07d7bf826b730aa8b9778ee765e64948ecf173adb3321d53dc352','policy-packages/agcf/AGCF-AZR-050/1.0.0.json'),
+('AGCF-AZR-051','1.0.0','02273a88d7435c80f5c6b9afa47798dec110352c5fd624f6a103578eeeda3fc6','policy-packages/agcf/AGCF-AZR-051/1.0.0.json'),
+('AGCF-AZR-052','1.0.0','e97e5df9fe344b33075c07d3ea9f578b4313bf6b50efa8bd3fa77902543b3901','policy-packages/agcf/AGCF-AZR-052/1.0.0.json'),
+('AGCF-AZR-053','1.0.0','8b7e98a5a1ffbbe0a5c5cce0e416eccdcd0a3e821f5aee4ab19f86773c816ded','policy-packages/agcf/AGCF-AZR-053/1.0.0.json'),
+('AGCF-AZR-054','1.0.0','9ff00b52ec011a1d5ea3575274a3fc978c8321a7f347e8fbfdae631dc04c1f4a','policy-packages/agcf/AGCF-AZR-054/1.0.0.json'),
+('AGCF-AZR-055','1.0.0','87e7d4025ef67aec744a3a3ab56db267a01142f8e0a1b9022267ea675f1e3167','policy-packages/agcf/AGCF-AZR-055/1.0.0.json'),
+('AGCF-AZR-056','1.0.0','c65d68a6c45b28ff8c17d943824bfb226e0521362ece941a7b877a4ed9951357','policy-packages/agcf/AGCF-AZR-056/1.0.0.json'),
+('AGCF-AZR-057','1.0.0','438e0b4d0376f3173e23efd7f2c87b213d3135397b86b8ca1349620b515e95ef','policy-packages/agcf/AGCF-AZR-057/1.0.0.json'),
+('AGCF-AZR-058','1.0.0','751f3c437672b737fe172e13153c2b93430103b705d41899452b625b41c6a3ad','policy-packages/agcf/AGCF-AZR-058/1.0.0.json'),
+('AGCF-AZR-059','1.0.0','0e2a862d3ac3e53cfb9df8a8f3b4346d8c13d1d22bb4836caf84ead67e4735d2','policy-packages/agcf/AGCF-AZR-059/1.0.0.json'),
+('AGCF-AZR-060','1.0.0','1720a4c88e6095ddc109e67f074a0726a1722e3e11294402b87b94646a674524','policy-packages/agcf/AGCF-AZR-060/1.0.0.json'),
+('AGCF-AZR-061','1.0.0','3fbe44e7f135abc0cddf72358ea9588b6481931d1b9f18114727211b058451a0','policy-packages/agcf/AGCF-AZR-061/1.0.0.json'),
+('AGCF-AZR-062','1.0.0','ee8b9effd3f9dbca12106a0e96c853b9707d0c2b8b88e431e4d0da4f4ccae159','policy-packages/agcf/AGCF-AZR-062/1.0.0.json'),
+('AGCF-AZR-063','1.0.0','206baff9f75fa53e5cf9effc18a96fd5f60ff2322ac1911fb53aecf4159a904f','policy-packages/agcf/AGCF-AZR-063/1.0.0.json'),
+('AGCF-AZR-064','1.0.0','3e31720f666b0c5d3853700db8ddfb339f7e4bc2cb6330f14c2c377ce35a16e1','policy-packages/agcf/AGCF-AZR-064/1.0.0.json'),
+('AGCF-AZR-065','1.0.0','58a09b7cb68fb30b08ae12af745a5a69a20446df7587fde75b704c4b0483cdda','policy-packages/agcf/AGCF-AZR-065/1.0.0.json'),
+('AGCF-AZR-066','1.0.0','c2cbf73d5bb0ffa5aad29f15ac50b3d8421397b4db8a03639e32f96c86165860','policy-packages/agcf/AGCF-AZR-066/1.0.0.json'),
+('AGCF-AZR-067','1.0.0','bdcc7f582f83ee92d4d84fb97d63970e01ab8bada67035519aa1304eda7cebb3','policy-packages/agcf/AGCF-AZR-067/1.0.0.json'),
+('AGCF-AZR-068','1.0.0','f73b582a881bf256f67e31f504ea706fac65942f89fa91ce7f637dd3033363b3','policy-packages/agcf/AGCF-AZR-068/1.0.0.json'),
+('AGCF-AZR-069','1.0.0','771ef58fc5c984f1d67964649d97600fd772f19dad0a2298f01f0733ca5cd3d3','policy-packages/agcf/AGCF-AZR-069/1.0.0.json'),
+('AGCF-AZR-070','1.0.0','0aa2935fe1f01465f87fcd3e74f5878faa0746da947b2930a51c5edc7f8dda45','policy-packages/agcf/AGCF-AZR-070/1.0.0.json'),
+('AGCF-AZR-071','1.0.0','5875020211d7f6a177a017a7a61dba4369e099a50698db5bb02a631531a7a9a4','policy-packages/agcf/AGCF-AZR-071/1.0.0.json'),
+('AGCF-AZR-072','1.0.0','848568738e9733674a5b6cb76a9438a35742919b644799c1c65567473836a499','policy-packages/agcf/AGCF-AZR-072/1.0.0.json'),
+('AGCF-AZR-073','1.0.0','7cc28e0d9f5e84b4d368e6097eb45ae09206a979938a51a7c1ae7aaff6b658ef','policy-packages/agcf/AGCF-AZR-073/1.0.0.json'),
+('AGCF-AZR-074','1.0.0','c0e4f1952361bd54103cb1a76265c74afb7115bd2e5e7675a2dce114aef1191f','policy-packages/agcf/AGCF-AZR-074/1.0.0.json'),
+('AGCF-AZR-075','1.0.0','c82fa5e59641fdcdd4266de421986006f2bd956e656aaf766b8626e09df9528d','policy-packages/agcf/AGCF-AZR-075/1.0.0.json'),
+('AGCF-XSP-001','1.0.0','e94674a32c10d0c6002826434944f523f1e1180139134b4be21e5a34f1ccfa9a','policy-packages/agcf/AGCF-XSP-001/1.0.0.json'),
+('AGCF-XSP-002','1.0.0','c5924043d588c67f2031ac30ebe4df12f9b569ed35815fd3f8bc3f2e9e687fc2','policy-packages/agcf/AGCF-XSP-002/1.0.0.json'),
+('AGCF-XSP-003','1.0.0','dc97f04ed54742f22c6508c48895137b030a4dbcd5bd1b9ba62ee841b53876db','policy-packages/agcf/AGCF-XSP-003/1.0.0.json'),
+('AGCF-XSP-004','1.0.0','10d8195e99d426cfd7e7de6205af391fb95aed50c2136efeacf4ac6054be909d','policy-packages/agcf/AGCF-XSP-004/1.0.0.json'),
+('AGCF-XSP-005','1.0.0','c91296a7958e37a3d29f78d08304b5310d06f9cb8883ef35851e2b44da4d75bc','policy-packages/agcf/AGCF-XSP-005/1.0.0.json'),
+('AGCF-XSP-006','1.0.0','d7907c4de2724d819152f823c92799c27d7bc977b79bd23fe4f2fa43f41162c1','policy-packages/agcf/AGCF-XSP-006/1.0.0.json'),
+('AGCF-XSP-007','1.0.0','38295898e29907ea76b52a7479ec72a4afdf5540c774064cc4472bda9785349a','policy-packages/agcf/XSP-007/1.0.0.json'),
+('AGCF-XSP-008','1.0.0','fedfbfb21240fd6dd5e9da910cfac2fae4599aeb383a55618ec87e76c56c955b','policy-packages/agcf/XSP-008/1.0.0.json'),
+('AGCF-XSP-009','1.0.0','2cee0cc2e9ebef9f2b57106b67ff555e68b41ac3b5b09a0f5f06e4667e5f181e','policy-packages/agcf/XSP-009/1.0.0.json'),
+('AGCF-XSP-010','1.0.0','50abb49aeb5585c9a0b06f94bf61ff4c6445681490ea3dbc07f8e4bc5fc7d89a','policy-packages/agcf/XSP-010/1.0.0.json'),
+('AGCF-XSP-011','1.0.0','762dce72867d65581ee9a27b48940d002d71571a473db671bae76feb73d09064','policy-packages/agcf/XSP-011/1.0.0.json'),
+('AGCF-XSP-012','1.0.0','91886fbbcabb756256ba2cc63451b299b15ab5dad6208d2a077892a73159af80','policy-packages/agcf/XSP-012/1.0.0.json')
+)
+UPDATE platform.ai_grid_policy_distribution distribution
+   SET approved_package_digest = expected.package_digest,
+       release_decision_id = md5('ai-grid-bundled-catalog-repair:' || expected.policy_id || ':' || expected.version || ':' || expected.package_digest)::uuid,
+       updated_by = 'ai-grid-catalog-repair',
+       updated_at = now()
+  FROM expected
+  JOIN platform.ai_grid_policy_versions policy
+    ON policy.policy_id = expected.policy_id AND policy.version = expected.version
+ WHERE distribution.policy_id = expected.policy_id
+   AND distribution.pinned_version = expected.version
+   AND (policy.package_digest IS DISTINCT FROM expected.package_digest
+        OR policy.package_source_ref IS DISTINCT FROM expected.package_source_ref);
+
+WITH expected (policy_id,version,package_digest,package_source_ref) AS (
+    VALUES
+('AGCF-AWS-001','1.0.0','57781735b507f8f284472af507020181380e71ae41716fd70ba84a904e2697b1','policy-packages/agcf/AGCF-AWS-001/1.0.0.json'),
+('AGCF-AWS-002','1.0.0','c12b96252a146d3e49dfb137130bf02888d2aafd01490fb94cf97f72e30b6a2a','policy-packages/agcf/AGCF-AWS-002/1.0.0.json'),
+('AGCF-AWS-003','1.0.0','9feb9672faee1c0cbac3301be20f69bfde67b30cd8373932260fe36404e32487','policy-packages/agcf/AGCF-AWS-003/1.0.0.json'),
+('AGCF-AWS-004','1.0.0','07cd28465e7064470b624fb880f668fb85d1378748ecc5c7170e84a4f342d09f','policy-packages/agcf/AGCF-AWS-004/1.0.0.json'),
+('AGCF-AWS-005','1.0.0','23b8b88e1f39b1027b06523d80f50a0d04c561a70c20892935f3de39f08c590d','policy-packages/agcf/AGCF-AWS-005/1.0.0.json'),
+('AGCF-AWS-006','1.0.0','7bb3c448e05ef599a309356a41c30bbd6840754861453cf7cf1919d61d121c2d','policy-packages/agcf/AGCF-AWS-006/1.0.0.json'),
+('AGCF-AWS-007','1.0.0','5c190b1ba579381d98752ed9bfe778ee72726f322a33ea9ae746ae4d2c666586','policy-packages/agcf/AGCF-AWS-007/1.0.0.json'),
+('AGCF-AWS-008','1.0.0','a1ca007efa0d57ff15657a8c0f5e319cf29e3594083f7b25ff53f1305652ee67','policy-packages/agcf/AGCF-AWS-008/1.0.0.json'),
+('AGCF-AWS-009','1.0.0','b0e9bd0238a1a76adb5962d9a50752c9d00df4c753b351ebcf37123500f79a6c','policy-packages/agcf/AGCF-AWS-009/1.0.0.json'),
+('AGCF-AWS-010','1.0.0','2085139054fde1a89dd39349c5246be8659b3f86e16e5df8bd2c879da5d4c02e','policy-packages/agcf/AGCF-AWS-010/1.0.0.json'),
+('AGCF-AWS-011','1.0.0','9ca94d96b62255aff0b50627bce8a40a93b8958b1a28868c29eab35127d480da','policy-packages/agcf/AGCF-AWS-011/1.0.0.json'),
+('AGCF-AWS-012','1.0.0','07cc0a7ce59e1691a3b05fb5b35ef25533a91dda201a96423108429edbea5d40','policy-packages/agcf/AGCF-AWS-012/1.0.0.json'),
+('AGCF-AWS-013','1.0.0','ad4f6868de61f569dc70460d3c146a948aee1191c660cc189800d546f02cdd3c','policy-packages/agcf/AGCF-AWS-013/1.0.0.json'),
+('AGCF-AWS-014','1.0.0','7dcf639821e689065acde25d6ee6e641b80e01eb473f03b6d4ef11ae65b623c0','policy-packages/agcf/AGCF-AWS-014/1.0.0.json'),
+('AGCF-AWS-015','1.0.0','e9a5a7eed7500f691aec17b5ef623e0e6dfdac7c55c3e54c01f93633c930b84a','policy-packages/agcf/AGCF-AWS-015/1.0.0.json'),
+('AGCF-AWS-016','1.0.0','63b237f362088e6e18fe80b313c6a2d0f8cbe1c8b72f7b0d523251097e822d75','policy-packages/agcf/AGCF-AWS-016/1.0.0.json'),
+('AGCF-AWS-017','1.0.0','92032a2275adb81da31144fba77922b2466e398dece88862760f29b84911c799','policy-packages/agcf/AGCF-AWS-017/1.0.0.json'),
+('AGCF-AWS-018','1.0.0','33027bed112f7fb9e19f2f532c04a7996dc105c76b9aa931e859d72aa797b927','policy-packages/agcf/AGCF-AWS-018/1.0.0.json'),
+('AGCF-AWS-019','1.0.0','c8ce30888a018c8442570d5cc4f803285682a6cf8bd81886a30fa13172c7edcd','policy-packages/agcf/AGCF-AWS-019/1.0.0.json'),
+('AGCF-AWS-020','1.0.0','5600cba4b91ce8eb887aa61252cd19620274a3818f3df6ac9c5338b88dde04ed','policy-packages/agcf/AGCF-AWS-020/1.0.0.json'),
+('AGCF-AWS-021','1.0.0','a2f3b5aa79d35ca337633c73ecb65635ce29f2feba47945ed63449f4408e1391','policy-packages/agcf/AGCF-AWS-021/1.0.0.json'),
+('AGCF-AWS-022','1.0.0','17b466fce5a0933cd2f29a16ba150570968b5bd7bdbb7c100fe9247c53b3effe','policy-packages/agcf/AGCF-AWS-022/1.0.0.json'),
+('AGCF-AWS-023','1.0.0','46bd7553eb526bbdc0020e2471c68d8e708897765a5a680e923790778db323b6','policy-packages/agcf/AGCF-AWS-023/1.0.0.json'),
+('AGCF-AWS-024','1.0.0','32493d9bac26e8c6392bc9e0be84bb475257836e4b95e8cb3a33b435bd483a69','policy-packages/agcf/AGCF-AWS-024/1.0.0.json'),
+('AGCF-AWS-025','1.0.0','8d45578380aee8ad28aa11817b4fac1e767322c216a0c25b859d95bd12910c34','policy-packages/agcf/AGCF-AWS-025/1.0.0.json'),
+('AGCF-AWS-026','1.0.0','00f9dbf74b2df8503837a8d898285bbb83ef77008ef19f449d0f32ab47d81e81','policy-packages/agcf/AGCF-AWS-026/1.0.0.json'),
+('AGCF-AWS-027','1.0.0','60357eaee299c5f144c7c9979655d44f81fae435acf0b218186aa5045ab4a331','policy-packages/agcf/AGCF-AWS-027/1.0.0.json'),
+('AGCF-AWS-028','1.0.0','7790daf45be65ae53c8e236df812d4015709b651405a3103726017662f775153','policy-packages/agcf/AGCF-AWS-028/1.0.0.json'),
+('AGCF-AWS-029','1.0.0','c0591f1280f470e380698f3ad97e4162b314d3eff20988f819d57be51f76e429','policy-packages/agcf/AGCF-AWS-029/1.0.0.json'),
+('AGCF-AWS-030','1.0.0','136d320464e1b73b69caa7aefebd72e73caf94328c986bc78fc66cf7813a09ae','policy-packages/agcf/AGCF-AWS-030/1.0.0.json'),
+('AGCF-AWS-031','1.0.0','2a234e76ad25868156e3292f6c599149fbefd375585273e6b5d8fc7c2c75fe55','policy-packages/agcf/AGCF-AWS-031/1.0.0.json'),
+('AGCF-AWS-032','1.0.0','cd0298bd26d3ae64f730b55da8ccccdcd4a4cdb81ef4913b8e775b1f9f25f202','policy-packages/agcf/AGCF-AWS-032/1.0.0.json'),
+('AGCF-AWS-033','1.0.0','9723cada991dc4c9de96f16e50e67fd13b320f5d61294c96a7fa11d45b5fe382','policy-packages/agcf/AGCF-AWS-033/1.0.0.json'),
+('AGCF-AWS-034','1.0.0','468d4f2f64d16d755e2268d4817e3743b40bdbec76ed2ff447b2482c88d3ee24','policy-packages/agcf/AGCF-AWS-034/1.0.0.json'),
+('AGCF-AWS-035','1.0.0','d4b365402012676f0a0250ba30c6570a2b6ecb1dbe4b3c460e123fad162313cf','policy-packages/agcf/AGCF-AWS-035/1.0.0.json'),
+('AGCF-AWS-036','1.0.0','fc02fa9441435d43ae05ac28673c413059567c4eb3106fec0fe0e5230b0ff9c2','policy-packages/agcf/AGCF-AWS-036/1.0.0.json'),
+('AGCF-AWS-037','1.0.0','eb83fa2afdb801fd67a1cf37c3b6214be2b19774e3abd06ca146ed3315739c21','policy-packages/agcf/AGCF-AWS-037/1.0.0.json'),
+('AGCF-AWS-038','1.0.0','377f6069bef60525f43d1fe5bda8ff8d5cde4334fd355937a58378efaa371967','policy-packages/agcf/AGCF-AWS-038/1.0.0.json'),
+('AGCF-AWS-039','1.0.0','f65fb7507d1e5625e4a32f4014d03f520cba80c5eb48f67478469a1ad0781623','policy-packages/agcf/AGCF-AWS-039/1.0.0.json'),
+('AGCF-AWS-040','1.0.0','dc51be86de53ca4594aa1d24b2154dc9754bdd9c9fdd624c0b2ecda6494e8bae','policy-packages/agcf/AGCF-AWS-040/1.0.0.json'),
+('AGCF-AWS-041','1.0.0','2f70c284e52f484754686fea1ccf9db91ca3c448a641410eee9896e199ccbdd3','policy-packages/agcf/AGCF-AWS-041/1.0.0.json'),
+('AGCF-AWS-042','1.0.0','0dc897d54f3830b093789a4233df1d78c21d3897a1b6235f8b42243353e2ae5b','policy-packages/agcf/AGCF-AWS-042/1.0.0.json'),
+('AGCF-AWS-043','1.0.0','a4c50aa5003455b38f9f2c48952062c3c9d89a76a6255b460ebdf8451490655d','policy-packages/agcf/AGCF-AWS-043/1.0.0.json'),
+('AGCF-AWS-044','1.0.0','05a02f13eee7643f7bc75b58fe1a9079797a8507eb4f79d241a7aabf28d68e51','policy-packages/agcf/AGCF-AWS-044/1.0.0.json'),
+('AGCF-AWS-045','1.0.0','568301c4417b9b7726722add6a9b4b1cca2ad9bb3755c2b8186e6a11cf0ca3b5','policy-packages/agcf/AGCF-AWS-045/1.0.0.json'),
+('AGCF-AWS-046','1.0.0','4a2e475e377d89afe650a69065cd045019ba0bafa4164f598726bc3770eb5bc9','policy-packages/agcf/AGCF-AWS-046/1.0.0.json'),
+('AGCF-AWS-047','1.0.0','99cfd58324c35c39ee91af86462ed4ba8b6005561e4579cbd27cefe3edaf1a9d','policy-packages/agcf/AGCF-AWS-047/1.0.0.json'),
+('AGCF-AWS-048','1.0.0','ba738411028ebcceedb01f44d74ae96a0010d3ef1a9e85c2479b8c4a4a125d32','policy-packages/agcf/AGCF-AWS-048/1.0.0.json'),
+('AGCF-AWS-049','1.0.0','d346a10537f2e6cf0e6e0a78bf69bd64529e1c21cf8c4fd4e978b093721abebb','policy-packages/agcf/AGCF-AWS-049/1.0.0.json'),
+('AGCF-AWS-050','1.0.0','4ef980e6a022d78ff83a2ef042f92e51b9a9013f3e44b66789fef6fd8ac6ff58','policy-packages/agcf/AGCF-AWS-050/1.0.0.json'),
+('AGCF-AWS-051','1.0.0','6c6418efcd439c170bcf5cf68d1691c71f40a5d55a1daaeaab79dcaeabda1d4f','policy-packages/agcf/AGCF-AWS-051/1.0.0.json'),
+('AGCF-AWS-052','1.0.0','6a8eb00ba0c2971b2edfd6943e11ca50f72cc5d981b325a06b0094b44f7f1fe0','policy-packages/agcf/AGCF-AWS-052/1.0.0.json'),
+('AGCF-AWS-053','1.0.0','816a3b1ffd6622d4fa2896f33695ff58b6474dd900c4f4abbfbad2b0e498632b','policy-packages/agcf/AGCF-AWS-053/1.0.0.json'),
+('AGCF-AWS-054','1.0.0','4b1a97e38b1d182bdeb22fda62d4273071940660b5ae4f68a13c14c7db578340','policy-packages/agcf/AGCF-AWS-054/1.0.0.json'),
+('AGCF-AWS-055','1.0.0','7e671e094188d22f289ee1a6708daf9e49fc0475d310d9a8275aa405de9070f7','policy-packages/agcf/AGCF-AWS-055/1.0.0.json'),
+('AGCF-AWS-056','1.0.0','725539d6b65c7952d4aee935e4f8973f73da00920c2704d54ae3e6ec83b594e1','policy-packages/agcf/AGCF-AWS-056/1.0.0.json'),
+('AGCF-AWS-057','1.0.0','4ebf2481c85b86751e5559850be809c1bbb6a6cabfe4f55f3013ee22575b75f7','policy-packages/agcf/AGCF-AWS-057/1.0.0.json'),
+('AGCF-AWS-058','1.0.0','e82012c3453635e1024af03d6b16f52629b71ed65c22aaa965fa473d38243d28','policy-packages/agcf/AGCF-AWS-058/1.0.0.json'),
+('AGCF-AWS-059','1.0.0','1245dc9f019ba7cab57df7a0e1dcaf9262437915dc7b81c9bf8d474d5f835986','policy-packages/agcf/AGCF-AWS-059/1.0.0.json'),
+('AGCF-AWS-060','1.0.0','e2d673b71ed7fd5785c588c1a90fb3a26c8d6db42a5274e4b87dd4fb0454577d','policy-packages/agcf/AGCF-AWS-060/1.0.0.json'),
+('AGCF-AWS-061','1.0.0','ea22a87f5e05e89b16b3b044f6c1f0c1118dc472d6cc4b0d7247c1dce44cd92c','policy-packages/agcf/AGCF-AWS-061/1.0.0.json'),
+('AGCF-AWS-062','1.0.0','b50d61c519e83a4dc6b97480d28ede27ab41562ac98f7acbc17f7feaf7208265','policy-packages/agcf/AGCF-AWS-062/1.0.0.json'),
+('AGCF-AWS-063','1.0.0','ca0390e0157638dc7eba759b7c7d5e4841a5a85fcc4356e511af8540e9c7ab80','policy-packages/agcf/AGCF-AWS-063/1.0.0.json'),
+('AGCF-AWS-064','1.0.0','0604be8c6c7822a05f6527acd80443dd2c8a423b5171172a16a60a4bc7b591e5','policy-packages/agcf/AGCF-AWS-064/1.0.0.json'),
+('AGCF-AWS-065','1.0.0','00868538a96e53778413aa54530378d8aa363a1ea14adf0bc7d8c960ac9a343e','policy-packages/agcf/AGCF-AWS-065/1.0.0.json'),
+('AGCF-AWS-066','1.0.0','7cde89aba8accd3367cd452614defc11c66f83679c6285a877f82a5499c9afd7','policy-packages/agcf/AGCF-AWS-066/1.0.0.json'),
+('AGCF-AWS-067','1.0.0','8f78ac884e75213443cf552ff01f538c90ed3e69feac1778f50781f05ba8e1c6','policy-packages/agcf/AGCF-AWS-067/1.0.0.json'),
+('AGCF-AWS-068','1.0.0','38fe98563122b0f80f02a78fb6945e6ebc127e137b96ae7a201c5be8efd7ec0b','policy-packages/agcf/AGCF-AWS-068/1.0.0.json'),
+('AGCF-AWS-069','1.0.0','fc7c1e8d34741a61e9a276409fe868e632c653c64ba8a2511257cf0ad5ec7761','policy-packages/agcf/AGCF-AWS-069/1.0.0.json'),
+('AGCF-AWS-070','1.0.0','d64d01a0d1b951006359f5321fb7fa85ded55a242e0c0076a2224c82075f9963','policy-packages/agcf/AGCF-AWS-070/1.0.0.json'),
+('AGCF-AWS-071','1.0.0','56c5d728cf1d7eade6a455cce0484baebbfbc3e355ddc0adfa515b75e3857f25','policy-packages/agcf/AGCF-AWS-071/1.0.0.json'),
+('AGCF-AWS-072','1.0.0','4be06c4433280d058f82ef2e437179d3c96404aa828cb76b0351da4ab1f32238','policy-packages/agcf/AGCF-AWS-072/1.0.0.json'),
+('AGCF-AZR-001','1.0.0','046bbffeaa50c65541cdb7742dcf4ced919d025579045d2007af0d84092704e2','policy-packages/agcf/AGCF-AZR-001/1.0.0.json'),
+('AGCF-AZR-002','1.0.0','6439276140620f364748a6c4dff16c7f68c4fa8934336fa3b0c0686c0f481608','policy-packages/agcf/AGCF-AZR-002/1.0.0.json'),
+('AGCF-AZR-003','1.0.0','df812e74b06ec3d28df42cccd2c4e6394a03e8650a76b24ce1a12cfe016eb47d','policy-packages/agcf/AGCF-AZR-003/1.0.0.json'),
+('AGCF-AZR-004','1.0.0','7cdc37529db58523b5fbe9c8bf7a8b1c77884d147533ba8c384c623b51d4bcc1','policy-packages/agcf/AGCF-AZR-004/1.0.0.json'),
+('AGCF-AZR-005','1.0.0','bedc94b31e40aa4f55664b99b7dacacd73667a482068f3e36e2daf01bfb54aaf','policy-packages/agcf/AGCF-AZR-005/1.0.0.json'),
+('AGCF-AZR-006','1.0.0','2af6dcd38095ab9090be5ff78990ccf8afba8042ea693603eaa08083f46dfd3b','policy-packages/agcf/AGCF-AZR-006/1.0.0.json'),
+('AGCF-AZR-007','1.0.0','10f2a258b173eb96c6f05e9b63fafbe4dd5dd3db8bf3a52bfdac51e8fb62e593','policy-packages/agcf/AGCF-AZR-007/1.0.0.json'),
+('AGCF-AZR-008','1.0.0','ece3b78208cfaae29c247c8ff78a1554f387b1c94d8617ad59677f64d2e5f2fb','policy-packages/agcf/AGCF-AZR-008/1.0.0.json'),
+('AGCF-AZR-009','1.0.0','98eb727f433b21c7bbb7966cd8c7a3bd384ad692845fbe6775e9b1fe264b6e7b','policy-packages/agcf/AGCF-AZR-009/1.0.0.json'),
+('AGCF-AZR-010','1.0.0','a54b33061982f59777b5aa68c4ed9f7b06b960eaf56eee683e4afe5e317c5dea','policy-packages/agcf/AGCF-AZR-010/1.0.0.json'),
+('AGCF-AZR-011','1.0.0','065cf0952abfc7d4a84f26f7e9a353fcf52d5451d9d09c4355c710fae4d49bc6','policy-packages/agcf/AGCF-AZR-011/1.0.0.json'),
+('AGCF-AZR-012','1.0.0','664aca53cd6c3ed7f437dfa42cca2372280a3066797a9a4fba7c98c8cd45f79a','policy-packages/agcf/AGCF-AZR-012/1.0.0.json'),
+('AGCF-AZR-013','1.0.0','9e824a72c65ea1ba5c97d77caa043cef4da26951a62f5bc5716669f4f50ff4d5','policy-packages/agcf/AGCF-AZR-013/1.0.0.json'),
+('AGCF-AZR-014','1.0.0','c17014f0ca16723456cc795d8b04c52f784298d79f1f3254837b39e1c341c16e','policy-packages/agcf/AGCF-AZR-014/1.0.0.json'),
+('AGCF-AZR-015','1.0.0','52a3ebeb4e58935dc7b1a6b5837b1319bf26d98d4c9c1532cc2ccf84ab06450c','policy-packages/agcf/AGCF-AZR-015/1.0.0.json'),
+('AGCF-AZR-016','1.0.0','3071eec263ebb4a9d468da373cd2d7d6aa2d80925277828f7ac069de7fc72a4f','policy-packages/agcf/AGCF-AZR-016/1.0.0.json'),
+('AGCF-AZR-017','1.0.0','2616adf6abb03e4fcf61349130285dceb34122f2198da2ca35f52ac254f39359','policy-packages/agcf/AGCF-AZR-017/1.0.0.json'),
+('AGCF-AZR-018','1.0.0','999807ed8ca6bd7ba48349624be80bb44b4ea70e33a9c6a8f12ebff3550e7184','policy-packages/agcf/AGCF-AZR-018/1.0.0.json'),
+('AGCF-AZR-019','1.0.0','d444cf2eabef606ab116a7bab9dd4f112b8c3e7f91d31e90151540f3badecc4b','policy-packages/agcf/AGCF-AZR-019/1.0.0.json'),
+('AGCF-AZR-020','1.0.0','055a6129236c68ef0997e2486d3b1aed1ca25be2fe376167ea34e4d9a6afb97a','policy-packages/agcf/AGCF-AZR-020/1.0.0.json'),
+('AGCF-AZR-021','1.0.0','e4e301f70db0173986a0064c08067a528c8956e2703697e6f6101760c5492250','policy-packages/agcf/AGCF-AZR-021/1.0.0.json'),
+('AGCF-AZR-022','1.0.0','5ed0d2f2958c4c71f29e16601ef01bebf77ae8905f0f42954c64d0025d832108','policy-packages/agcf/AGCF-AZR-022/1.0.0.json'),
+('AGCF-AZR-023','1.0.0','e50b5f26ed18870f2723e9ea177effab94e25cbf0dad9f501c386ae5b10a075f','policy-packages/agcf/AGCF-AZR-023/1.0.0.json'),
+('AGCF-AZR-024','1.0.0','74d0fd1107a27fbee282e4fe9a2e2b99977668adc79715b277ca0ca6abf1520a','policy-packages/agcf/AGCF-AZR-024/1.0.0.json'),
+('AGCF-AZR-025','1.0.0','ca67ac614ec02a61f27d2bb4118bd51f0132c5f662421b22825612006b7e87c8','policy-packages/agcf/AGCF-AZR-025/1.0.0.json'),
+('AGCF-AZR-026','1.0.0','534500676194bbde05c1c2071fb22612c101a7b7994f6f8a1c793754a854810c','policy-packages/agcf/AGCF-AZR-026/1.0.0.json'),
+('AGCF-AZR-027','1.0.0','31946f2b9733f78d7a02865edf162a74ef6c295e9adf19832466e9981c3bb833','policy-packages/agcf/AGCF-AZR-027/1.0.0.json'),
+('AGCF-AZR-028','1.0.0','a1b5d9432ee0554b15446b519ceefc2100e4010fb0b2cb82f615fef949061233','policy-packages/agcf/AGCF-AZR-028/1.0.0.json'),
+('AGCF-AZR-029','1.0.0','e484838e945bd0df97f75305668091f5397e4f39f6a991505513a6ba43f92884','policy-packages/agcf/AGCF-AZR-029/1.0.0.json'),
+('AGCF-AZR-030','1.0.0','114068db61bb49bcbee8f502f4608b8b384b6dd7336cdbf679cd6464eb24fb95','policy-packages/agcf/AGCF-AZR-030/1.0.0.json'),
+('AGCF-AZR-031','1.0.0','9bcaf2cc4a18af2a5f7d9234c5ba8606a12b27eda294d10220cdd3dc8db272a1','policy-packages/agcf/AGCF-AZR-031/1.0.0.json'),
+('AGCF-AZR-032','1.0.0','0f05267df3a5c72b4210721794a71b91560e321c3bce4c12926cad6aed51e62c','policy-packages/agcf/AGCF-AZR-032/1.0.0.json'),
+('AGCF-AZR-033','1.0.0','5e82e65006e3da5e89d9d8434d8b60d755346c2d8bad321e4c84dd1360761574','policy-packages/agcf/AGCF-AZR-033/1.0.0.json'),
+('AGCF-AZR-034','1.0.0','b83b09e4a30b83798f1437128487e27d41207fcd678d9f7e686e372655693a91','policy-packages/agcf/AGCF-AZR-034/1.0.0.json'),
+('AGCF-AZR-035','1.0.0','dbaef20696b1421c7317995dfc6f4da96247edf8f4bbb1554f6921aa92ef49dd','policy-packages/agcf/AGCF-AZR-035/1.0.0.json'),
+('AGCF-AZR-036','1.0.0','65195885a5619fe3a73b2e3ab3347ed95753683d7bdef486b438fd339cb0efe5','policy-packages/agcf/AGCF-AZR-036/1.0.0.json'),
+('AGCF-AZR-037','1.0.0','4e751fda2d083554bc1023bac70e8323813872b8edfc158dab7354a86a9b2cd1','policy-packages/agcf/AGCF-AZR-037/1.0.0.json'),
+('AGCF-AZR-038','1.0.0','bff48e1563aaa8090c6d9a915c40e72dd1307c8ed56535c72c3529ac6d3bf290','policy-packages/agcf/AGCF-AZR-038/1.0.0.json'),
+('AGCF-AZR-039','1.0.0','b13e699106326a27eccbd9cd7e2d63b292ac1218d0c5cff0d72a8f985e9f1f4c','policy-packages/agcf/AGCF-AZR-039/1.0.0.json'),
+('AGCF-AZR-040','1.0.0','c6723ee8888588f091002423ed3cfa0de7e7e6a5ea5811c69075299b37373624','policy-packages/agcf/AGCF-AZR-040/1.0.0.json'),
+('AGCF-AZR-041','1.0.0','3793eae46d61e0829fbbca9ca844a3b14f6fbcf91ae5b74aa02978b9dcc979de','policy-packages/agcf/AGCF-AZR-041/1.0.0.json'),
+('AGCF-AZR-042','1.0.0','ba202b1b71c4d8765f48a840d670ee1e06977926a5f7a2131d967256d5c9d70c','policy-packages/agcf/AGCF-AZR-042/1.0.0.json'),
+('AGCF-AZR-043','1.0.0','bf535779c6ad183ba407495f8f5698b60db12fafc5db2cc99cd7de24cab4b68a','policy-packages/agcf/AGCF-AZR-043/1.0.0.json'),
+('AGCF-AZR-044','1.0.0','c2c4e0d6e10540e01845d1a670099c0234a31e8b7dc089e12abee4d3a7a8c565','policy-packages/agcf/AGCF-AZR-044/1.0.0.json'),
+('AGCF-AZR-045','1.0.0','84f7987ca19ad9cf69bf7ef3a7eb59265f1d8ee3f12f287fc401ef0c8248e898','policy-packages/agcf/AGCF-AZR-045/1.0.0.json'),
+('AGCF-AZR-046','1.0.0','fe6b8e09e3f66b43a8aadb0eaec06129c94dffbf275c230e129d3ed5a56b88f2','policy-packages/agcf/AGCF-AZR-046/1.0.0.json'),
+('AGCF-AZR-047','1.0.0','335a98f32fe7a5a7e12b9a5c3bab773890bbc1b85b75b4bc51bc88fb2c059a21','policy-packages/agcf/AGCF-AZR-047/1.0.0.json'),
+('AGCF-AZR-048','1.0.0','b01c06b890df243e2b8645dd0534a871a1cd0b7c6457c8f6cb4428c3d6bc6c1d','policy-packages/agcf/AGCF-AZR-048/1.0.0.json'),
+('AGCF-AZR-049','1.0.0','9616857c48f05dc504b81711b31e55ebcff91fc4c39ae9ac69f49b41450ed909','policy-packages/agcf/AGCF-AZR-049/1.0.0.json'),
+('AGCF-AZR-050','1.0.0','faa4944111b07d7bf826b730aa8b9778ee765e64948ecf173adb3321d53dc352','policy-packages/agcf/AGCF-AZR-050/1.0.0.json'),
+('AGCF-AZR-051','1.0.0','02273a88d7435c80f5c6b9afa47798dec110352c5fd624f6a103578eeeda3fc6','policy-packages/agcf/AGCF-AZR-051/1.0.0.json'),
+('AGCF-AZR-052','1.0.0','e97e5df9fe344b33075c07d3ea9f578b4313bf6b50efa8bd3fa77902543b3901','policy-packages/agcf/AGCF-AZR-052/1.0.0.json'),
+('AGCF-AZR-053','1.0.0','8b7e98a5a1ffbbe0a5c5cce0e416eccdcd0a3e821f5aee4ab19f86773c816ded','policy-packages/agcf/AGCF-AZR-053/1.0.0.json'),
+('AGCF-AZR-054','1.0.0','9ff00b52ec011a1d5ea3575274a3fc978c8321a7f347e8fbfdae631dc04c1f4a','policy-packages/agcf/AGCF-AZR-054/1.0.0.json'),
+('AGCF-AZR-055','1.0.0','87e7d4025ef67aec744a3a3ab56db267a01142f8e0a1b9022267ea675f1e3167','policy-packages/agcf/AGCF-AZR-055/1.0.0.json'),
+('AGCF-AZR-056','1.0.0','c65d68a6c45b28ff8c17d943824bfb226e0521362ece941a7b877a4ed9951357','policy-packages/agcf/AGCF-AZR-056/1.0.0.json'),
+('AGCF-AZR-057','1.0.0','438e0b4d0376f3173e23efd7f2c87b213d3135397b86b8ca1349620b515e95ef','policy-packages/agcf/AGCF-AZR-057/1.0.0.json'),
+('AGCF-AZR-058','1.0.0','751f3c437672b737fe172e13153c2b93430103b705d41899452b625b41c6a3ad','policy-packages/agcf/AGCF-AZR-058/1.0.0.json'),
+('AGCF-AZR-059','1.0.0','0e2a862d3ac3e53cfb9df8a8f3b4346d8c13d1d22bb4836caf84ead67e4735d2','policy-packages/agcf/AGCF-AZR-059/1.0.0.json'),
+('AGCF-AZR-060','1.0.0','1720a4c88e6095ddc109e67f074a0726a1722e3e11294402b87b94646a674524','policy-packages/agcf/AGCF-AZR-060/1.0.0.json'),
+('AGCF-AZR-061','1.0.0','3fbe44e7f135abc0cddf72358ea9588b6481931d1b9f18114727211b058451a0','policy-packages/agcf/AGCF-AZR-061/1.0.0.json'),
+('AGCF-AZR-062','1.0.0','ee8b9effd3f9dbca12106a0e96c853b9707d0c2b8b88e431e4d0da4f4ccae159','policy-packages/agcf/AGCF-AZR-062/1.0.0.json'),
+('AGCF-AZR-063','1.0.0','206baff9f75fa53e5cf9effc18a96fd5f60ff2322ac1911fb53aecf4159a904f','policy-packages/agcf/AGCF-AZR-063/1.0.0.json'),
+('AGCF-AZR-064','1.0.0','3e31720f666b0c5d3853700db8ddfb339f7e4bc2cb6330f14c2c377ce35a16e1','policy-packages/agcf/AGCF-AZR-064/1.0.0.json'),
+('AGCF-AZR-065','1.0.0','58a09b7cb68fb30b08ae12af745a5a69a20446df7587fde75b704c4b0483cdda','policy-packages/agcf/AGCF-AZR-065/1.0.0.json'),
+('AGCF-AZR-066','1.0.0','c2cbf73d5bb0ffa5aad29f15ac50b3d8421397b4db8a03639e32f96c86165860','policy-packages/agcf/AGCF-AZR-066/1.0.0.json'),
+('AGCF-AZR-067','1.0.0','bdcc7f582f83ee92d4d84fb97d63970e01ab8bada67035519aa1304eda7cebb3','policy-packages/agcf/AGCF-AZR-067/1.0.0.json'),
+('AGCF-AZR-068','1.0.0','f73b582a881bf256f67e31f504ea706fac65942f89fa91ce7f637dd3033363b3','policy-packages/agcf/AGCF-AZR-068/1.0.0.json'),
+('AGCF-AZR-069','1.0.0','771ef58fc5c984f1d67964649d97600fd772f19dad0a2298f01f0733ca5cd3d3','policy-packages/agcf/AGCF-AZR-069/1.0.0.json'),
+('AGCF-AZR-070','1.0.0','0aa2935fe1f01465f87fcd3e74f5878faa0746da947b2930a51c5edc7f8dda45','policy-packages/agcf/AGCF-AZR-070/1.0.0.json'),
+('AGCF-AZR-071','1.0.0','5875020211d7f6a177a017a7a61dba4369e099a50698db5bb02a631531a7a9a4','policy-packages/agcf/AGCF-AZR-071/1.0.0.json'),
+('AGCF-AZR-072','1.0.0','848568738e9733674a5b6cb76a9438a35742919b644799c1c65567473836a499','policy-packages/agcf/AGCF-AZR-072/1.0.0.json'),
+('AGCF-AZR-073','1.0.0','7cc28e0d9f5e84b4d368e6097eb45ae09206a979938a51a7c1ae7aaff6b658ef','policy-packages/agcf/AGCF-AZR-073/1.0.0.json'),
+('AGCF-AZR-074','1.0.0','c0e4f1952361bd54103cb1a76265c74afb7115bd2e5e7675a2dce114aef1191f','policy-packages/agcf/AGCF-AZR-074/1.0.0.json'),
+('AGCF-AZR-075','1.0.0','c82fa5e59641fdcdd4266de421986006f2bd956e656aaf766b8626e09df9528d','policy-packages/agcf/AGCF-AZR-075/1.0.0.json'),
+('AGCF-XSP-001','1.0.0','e94674a32c10d0c6002826434944f523f1e1180139134b4be21e5a34f1ccfa9a','policy-packages/agcf/AGCF-XSP-001/1.0.0.json'),
+('AGCF-XSP-002','1.0.0','c5924043d588c67f2031ac30ebe4df12f9b569ed35815fd3f8bc3f2e9e687fc2','policy-packages/agcf/AGCF-XSP-002/1.0.0.json'),
+('AGCF-XSP-003','1.0.0','dc97f04ed54742f22c6508c48895137b030a4dbcd5bd1b9ba62ee841b53876db','policy-packages/agcf/AGCF-XSP-003/1.0.0.json'),
+('AGCF-XSP-004','1.0.0','10d8195e99d426cfd7e7de6205af391fb95aed50c2136efeacf4ac6054be909d','policy-packages/agcf/AGCF-XSP-004/1.0.0.json'),
+('AGCF-XSP-005','1.0.0','c91296a7958e37a3d29f78d08304b5310d06f9cb8883ef35851e2b44da4d75bc','policy-packages/agcf/AGCF-XSP-005/1.0.0.json'),
+('AGCF-XSP-006','1.0.0','d7907c4de2724d819152f823c92799c27d7bc977b79bd23fe4f2fa43f41162c1','policy-packages/agcf/AGCF-XSP-006/1.0.0.json'),
+('AGCF-XSP-007','1.0.0','38295898e29907ea76b52a7479ec72a4afdf5540c774064cc4472bda9785349a','policy-packages/agcf/XSP-007/1.0.0.json'),
+('AGCF-XSP-008','1.0.0','fedfbfb21240fd6dd5e9da910cfac2fae4599aeb383a55618ec87e76c56c955b','policy-packages/agcf/XSP-008/1.0.0.json'),
+('AGCF-XSP-009','1.0.0','2cee0cc2e9ebef9f2b57106b67ff555e68b41ac3b5b09a0f5f06e4667e5f181e','policy-packages/agcf/XSP-009/1.0.0.json'),
+('AGCF-XSP-010','1.0.0','50abb49aeb5585c9a0b06f94bf61ff4c6445681490ea3dbc07f8e4bc5fc7d89a','policy-packages/agcf/XSP-010/1.0.0.json'),
+('AGCF-XSP-011','1.0.0','762dce72867d65581ee9a27b48940d002d71571a473db671bae76feb73d09064','policy-packages/agcf/XSP-011/1.0.0.json'),
+('AGCF-XSP-012','1.0.0','91886fbbcabb756256ba2cc63451b299b15ab5dad6208d2a077892a73159af80','policy-packages/agcf/XSP-012/1.0.0.json')
+), changed AS (
+    SELECT expected.*
+      FROM expected
+      JOIN platform.ai_grid_policy_versions policy
+        ON policy.policy_id = expected.policy_id AND policy.version = expected.version
+     WHERE policy.package_digest IS DISTINCT FROM expected.package_digest
+        OR policy.package_source_ref IS DISTINCT FROM expected.package_source_ref
+)
 UPDATE platform.ai_grid_policy_versions policy
    SET package_digest = expected.package_digest,
        package_source_ref = expected.package_source_ref
-  FROM ai_grid_bundled_catalog_changed expected
+  FROM changed expected
  WHERE policy.policy_id = expected.policy_id
    AND policy.version = expected.version
    AND (policy.package_digest IS DISTINCT FROM expected.package_digest
@@ -676,17 +1012,7 @@ UPDATE platform.ai_grid_policy_versions policy
 
 ALTER TABLE platform.ai_grid_policy_versions ENABLE TRIGGER trg_ai_grid_phase_1_preview_digest_change;
 ALTER TABLE platform.ai_grid_policy_versions ENABLE TRIGGER trg_ai_grid_approved_package_immutable;
-
-UPDATE platform.ai_grid_policy_distribution distribution
-   SET approved_package_digest = expected.package_digest,
-       release_decision_id = md5('ai-grid-bundled-catalog-repair:' || expected.policy_id || ':' || expected.version || ':' || expected.package_digest)::uuid,
-       updated_by = 'ai-grid-catalog-repair',
-       updated_at = now()
-  FROM ai_grid_bundled_catalog_changed expected
- WHERE distribution.policy_id = expected.policy_id
-   AND distribution.pinned_version = expected.version
-   AND (distribution.approved_package_digest IS DISTINCT FROM expected.package_digest
-        OR distribution.release_decision_id IS DISTINCT FROM md5('ai-grid-bundled-catalog-repair:' || expected.policy_id || ':' || expected.version || ':' || expected.package_digest)::uuid);
+ALTER TABLE platform.ai_grid_policy_distribution ENABLE TRIGGER trg_ai_grid_distribution_approval;
 
 INSERT INTO platform.ai_grid_policy_distribution
     (policy_id,available,default_selection,rollout_stage,updated_by)
