@@ -838,26 +838,28 @@ public class CustomerDemoDatasetService {
             DemoVulnerability vulnerability = VULNERABILITIES.get(i);
             jdbcTemplate.update("""
                     INSERT INTO campaign_vulnerabilities
-                        (id, campaign_id, vulnerability_id, external_id, title, severity, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                        (id, campaign_id, vulnerability_id, tenant_id, external_id, title, severity, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (campaign_id, external_id) DO NOTHING
                     """, stableId(tenantId, "campaign-vulnerability:" + campaignId + ":" + vulnerability.externalId()),
-                    campaignId, vulnerabilityIds.get(i), vulnerability.externalId(), vulnerability.title(),
+                    campaignId, vulnerabilityIds.get(i), tenantId, vulnerability.externalId(), vulnerability.title(),
                     vulnerability.severity(), ts(now.minus(5, ChronoUnit.DAYS)));
         }
         jdbcTemplate.update("""
-                INSERT INTO campaign_notes (id, campaign_id, author, body, created_at)
-                VALUES (?, ?, 'security@kanra.example',
+                INSERT INTO campaign_notes (id, campaign_id, tenant_id, author, body, created_at)
+                VALUES (?, ?, ?, 'security@kanra.example',
                         'Payment and customer-facing services are prioritized for the first release train.', ?)
                 ON CONFLICT (id) DO NOTHING
-                """, stableId(tenantId, "campaign-note:" + campaignOne), campaignOne, ts(now.minus(2, ChronoUnit.DAYS)));
+                """, stableId(tenantId, "campaign-note:" + campaignOne), campaignOne, tenantId,
+                ts(now.minus(2, ChronoUnit.DAYS)));
         jdbcTemplate.update("""
                 INSERT INTO campaign_activities
-                    (id, campaign_id, activity_type, actor, body, metadata_json, created_at)
-                VALUES (?, ?, 'OWNER_NOTIFIED', 'demo-seeder',
+                    (id, campaign_id, tenant_id, activity_type, actor, body, metadata_json, created_at)
+                VALUES (?, ?, ?, 'OWNER_NOTIFIED', 'demo-seeder',
                         'Application owners received the remediation brief.', '{"channel":"email"}'::jsonb, ?)
                 ON CONFLICT (id) DO NOTHING
-                """, stableId(tenantId, "campaign-activity:" + campaignOne), campaignOne, ts(now.minus(1, ChronoUnit.DAYS)));
+                """, stableId(tenantId, "campaign-activity:" + campaignOne), campaignOne, tenantId,
+                ts(now.minus(1, ChronoUnit.DAYS)));
 
         for (int i = 0; i < 6; i++) {
             jdbcTemplate.update("""
