@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 npm run dev           # dev server on port 5173 (strictly)
-npm run build         # tsc -b --force && vite build
+npm run build         # tsc -b --force && vite build && node scripts/verify-production-bundle.mjs
 npm run lint          # eslint .
 npm run typecheck     # tsc -b --noEmit (no output files)
 npm run test:unit     # vitest run (all tests, no watch)

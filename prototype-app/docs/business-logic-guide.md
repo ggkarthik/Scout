@@ -1,6 +1,6 @@
 # VulnWatch — End-to-End Business Logic Guide
 
-Last updated: 2026-08-18
+Last updated: 2026-09-08
 
 **Audience:** Engineers and product stakeholders who need to understand how the platform works end-to-end.
 
@@ -49,7 +49,7 @@ Demo tenants auto-expire after 7 days. `DemoTenantExpiryJob` runs hourly, marks 
 
 ### Tenant-Authorized Support Access
 
-`TenantSupportAccessController` (added with `V45__tenant_access_membership_provenance.sql`) lets a tenant admin grant a time-boxed, break-glass platform-owner access grant (`POST /api/tenants/{tenantId}/support-grants`, `TENANT_ADMIN`), which the invited platform owner then accepts (`POST /api/auth/support-grants/{grantId}/accept`). This is distinct from — and layers on top of — the existing `tenant_support_grants` table and `TenantSupportGrant` lifecycle described elsewhere in this doc; the new piece is that the *tenant* can initiate the grant rather than only the platform owner requesting access.
+`TenantSupportAccessController` (its supporting schema predates the migration-history reset and now lives in the `tenant/V1__tenant_schema.sql` baseline) lets a tenant admin grant a time-boxed, break-glass platform-owner access grant (`POST /api/tenants/{tenantId}/support-grants`, `TENANT_ADMIN`), which the invited platform owner then accepts (`POST /api/auth/support-grants/{grantId}/accept`). This is distinct from — and layers on top of — the existing `tenant_support_grants` table and `TenantSupportGrant` lifecycle described elsewhere in this doc; the new piece is that the *tenant* can initiate the grant rather than only the platform owner requesting access.
 
 ---
 
@@ -109,7 +109,7 @@ SBOMs arrive via three paths:
 
 ### Azure Discovery
 
-`AzureDiscoveryController` (`/api/connectors/azure-discovery`) mirrors the AWS Discovery architecture for Azure subscriptions (added in migrations V40/V41, newer and less battle-tested than AWS Discovery).
+`AzureDiscoveryController` (`/api/connectors/azure-discovery`) mirrors the AWS Discovery architecture for Azure subscriptions (newer and less battle-tested than AWS Discovery).
 
 **Flow:**
 1. Resolve credentials via `CLIENT_SECRET` or `MANAGED_IDENTITY` auth
@@ -323,7 +323,7 @@ A **Campaign** groups findings/CVEs into a tracked remediation effort:
 
 ## AI Security / AI Grid Pipeline
 
-Not to be confused with [AI Integration (OpenAI)](#ai-integration-openai) above — that section covers VulnWatch *using* an LLM internally (EOL slug suggestion, CVE investigation summaries). This section covers VulnWatch *discovering and governing other systems'* AI/ML resources (Bedrock agents, Azure AI Foundry projects, MCP servers, etc.) as a security posture management capability, entitlement-gated per tenant behind the `ai.security` key (`TenantEntitlementService.AI_SECURITY`). It backs the `/findings/ai`, `/policies`, and `/inventory/ai` frontend routes and lives in its own top-level backend package, `com.prototype.vulnwatch.aisecurity` (11 controllers, 37 services — separate from the main `controller`/`service` packages).
+Not to be confused with [AI Integration (OpenAI)](#ai-integration-openai) above — that section covers VulnWatch *using* an LLM internally (EOL slug suggestion, CVE investigation summaries). This section covers VulnWatch *discovering and governing other systems'* AI/ML resources (Bedrock agents, Azure AI Foundry projects, MCP servers, etc.) as a security posture management capability, entitlement-gated per tenant behind the `ai.security` key (`TenantEntitlementService.AI_SECURITY`). It backs the `/findings/ai`, `/policies`, and `/inventory/ai` frontend routes and lives in its own top-level backend package, `com.prototype.vulnwatch.aisecurity` (14 controllers, 48 services — separate from the main `controller`/`service` packages).
 
 AI Grid is the sole policy and findings generation. It evaluates governed, versioned policies against discovered artifacts; canonical findings retain the host workflow. `AiSecurityController` remains only for shared artifact inventory, graph, discovery-run, and compatibility finding reads.
 
@@ -397,7 +397,7 @@ A separate platform-owner-only track gates what AI Grid content ever reaches ten
 - Azure Discovery mirrors the AWS Discovery architecture but is newer (V40/V41) and less exercised in production.
 - S.AI Risk Score and S.AI Priority are computed entirely in the browser — not stored in the database.
 - ServiceNow integration is read-heavy (finding → incident creation, then status polling) but not event-driven.
-- Multi-tenant schema-per-tenant isolation is implemented (`TenantAwareDataSource`, `TenantSchemaService`, `ProductionSafetyValidator`) and `TenantService.getDefaultTenant()` is no longer used by controllers or services. Row-level security policies are created on every provisioned tenant schema, but full RLS *enforcement* across existing production tenants remains gated behind `V29__tenant_rls_rollout_gate.sql` pending verification that the production/preprod database runtime role is non-superuser and lacks `BYPASSRLS`.
+- Multi-tenant schema-per-tenant isolation is implemented (`TenantAwareDataSource`, `TenantSchemaService`, `ProductionSafetyValidator`) and `TenantService.getDefaultTenant()` is no longer used by controllers or services. Row-level security policies are created on every provisioned tenant schema, but full RLS *enforcement* across existing production tenants remains gated behind `ProductionSafetyValidator.validateRuntimeRoleCannotBypassRls()` pending verification that the production/preprod database runtime role is non-superuser and lacks `BYPASSRLS`.
 - AI Security / AI Grid (see above) — see its own "Known Limitations" subsection for module-specific caveats (JdbcTemplate-only data access, Azure kill switch, read-only Macie/Purview integration).
 - `EntitlementShadowSweepService` (every 30 min by default) computes corrected-vs-legacy entitlement decisions for every active tenant/key so shadow-mode coverage doesn't depend on the feature being exercised live — a sign that at least one entitlement migration is still running in shadow/compare mode rather than fully cut over.
 - `FindingDeltaQueueService` has a second scheduled method (`recoverStaleProcessingEntriesOnSchedule`, 1 min by default) beyond the documented 2-second drain — it recovers queue entries stuck in `PROCESSING` after a worker dies mid-batch.

@@ -16,7 +16,7 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 @EnabledIfSystemProperty(named = "run.postgres.it", matches = "true")
 class SchemaUpgradePathPostgresIntegrationTest {
 
-    private static final String CURRENT_SCHEMA_VERSION = "4";
+    private static final String CURRENT_SCHEMA_VERSION = "5";
     private static final LocalPostgresTestDatabase.DatabaseConfig DATABASE =
             LocalPostgresTestDatabase.provision("schema_upgrade_path");
 
@@ -33,6 +33,7 @@ class SchemaUpgradePathPostgresIntegrationTest {
         assertEquals(1, historyCount("2"));
         assertEquals(1, historyCount("3"));
         assertEquals(1, historyCount("4"));
+        assertEquals(1, historyCount("5"));
         assertEquals(180, queryForInt(DATABASE, "select count(*) from platform.ai_grid_policy_versions"));
         assertEquals(1, queryForInt(DATABASE, "select count(*) from information_schema.schemata where schema_name='tenant_default'"));
     }
