@@ -27,6 +27,7 @@ jobs:
           scan-ref: .
           format: sarif
           output: trivy-fs.sarif
+          scanners: vuln
           severity: CRITICAL
           exit-code: '1'
 
@@ -53,6 +54,7 @@ jobs:
           image-ref: vulnwatch-backend:${{ github.sha }}
           format: sarif
           output: trivy-backend.sarif
+          scanners: vuln
           severity: CRITICAL
           exit-code: '1'
 
@@ -73,6 +75,7 @@ jobs:
           image-ref: vulnwatch-frontend:${{ github.sha }}
           format: sarif
           output: trivy-frontend.sarif
+          scanners: vuln
           severity: CRITICAL
           exit-code: '1'
 
