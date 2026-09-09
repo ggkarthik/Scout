@@ -44,7 +44,6 @@ import com.prototype.vulnwatch.repo.VulnerabilityRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
 import java.time.Instant;
-import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -295,7 +294,7 @@ class CveDetailControllerPostgresIntegrationTest {
     @Test
     void cveDetailUsesActorTenantUuidForInvestigationsAndAssessments() throws Exception {
         Tenant defaultTenant = createTenant(TenantService.DEFAULT_TENANT_NAME);
-        Tenant legacyShadowTenant = createTenantWithId("Legacy Workspace", new UUID(0L, 2L));
+        Tenant legacyShadowTenant = createLegacyShadowTenant("Legacy Workspace");
         String cveId = "CVE-2099-9905";
         Vulnerability vulnerability = createVulnerability(cveId);
 
@@ -318,7 +317,7 @@ class CveDetailControllerPostgresIntegrationTest {
     @Test
     void submitInvestigationPersistsAgainstActorTenantUuidInsteadOfLegacyShadowTenant() throws Exception {
         Tenant defaultTenant = createTenant(TenantService.DEFAULT_TENANT_NAME);
-        Tenant legacyShadowTenant = createTenantWithId("Legacy Workspace", new UUID(0L, 2L));
+        Tenant legacyShadowTenant = createLegacyShadowTenant("Legacy Workspace");
         String cveId = "CVE-2099-9906";
         createVulnerability(cveId);
 
@@ -526,10 +525,9 @@ class CveDetailControllerPostgresIntegrationTest {
         return tenantService.getDefaultTenant();
     }
 
-    private Tenant createTenantWithId(String name, UUID id) {
+    private Tenant createLegacyShadowTenant(String name) {
         return tenantRepository.findByNameIgnoreCase(name).orElseGet(() -> {
             Tenant tenant = new Tenant();
-            tenant.setId(id);
             tenant.setName(name);
             tenant.setSchemaName("tenant_legacy_shadow");
             return tenantRepository.save(tenant);
