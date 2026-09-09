@@ -11,6 +11,7 @@ import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.Map;
 import org.springframework.beans.factory.ObjectProvider;
@@ -141,6 +142,11 @@ public class AiGridController {
     @PostMapping("/ai-assessment-runs/{id}/replay")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
     public AiGridApiService.AssessmentRun replay(@PathVariable UUID id) { return api.replay(tenant(), id); }
+    @PostMapping("/ai-assessments/execute")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    public AiGridApiService.PolicyExecutionResult execute(@RequestBody ExecutePoliciesRequest request) {
+        return api.executeSelectedPolicies(tenant(), request.policyIds());
+    }
     @GetMapping("/ai-policies") public List<AiGridApiService.PolicyView> policies() { return api.policies(tenant()); }
     /** Rich tenant policy view retained while the UI moves to the governed route. */
     @GetMapping("/ai-policies/details")
@@ -213,6 +219,7 @@ public class AiGridController {
         return tenant;
     }
     public record SelectionRequest(String selection, String reason) {}
+    public record ExecutePoliciesRequest(Set<String> policyIds) {}
     public record PolicyStateRequest(boolean enabled) {}
     public record ScopeUpdateRequest(String mode, String conditionLogic, List<PolicyScopeConditionResponse> conditions) {}
     public record ExceptionRequest(UUID artifactId, String override, String reason) {}

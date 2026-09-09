@@ -177,6 +177,29 @@ public class AiGridApiService {
         }));
     }
 
+    public PolicyExecutionResult executeSelectedPolicies(Tenant tenant, Set<String> policyIds) {
+        if (policyIds == null || policyIds.isEmpty()) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, "Select at least one policy");
+        }
+        return tenantExecution.run(tenant, () -> transactions.execute(status -> {
+            UUID runId = jdbc.query("""
+                    select run_id from ai_grid_snapshot_manifests
+                     group by run_id order by max(observed_at) desc, run_id desc limit 1
+                    """, rs -> rs.next() ? rs.getObject(1, UUID.class) : null);
+            if (runId == null) {
+                throw new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.CONFLICT, "No immutable AI artifact snapshot is available");
+            }
+            int evaluatedPolicies = assessments.evaluateRun(tenant, runId, Set.copyOf(policyIds));
+            if (evaluatedPolicies == 0) {
+                throw new org.springframework.web.server.ResponseStatusException(
+                        org.springframework.http.HttpStatus.BAD_REQUEST, "Selected policies are not published for this tenant");
+            }
+            return new PolicyExecutionResult(runId, policyIds.size(), evaluatedPolicies);
+        }));
+    }
+
     public AiGridRunMetricsService.RunMetrics runMetrics(Tenant tenant, UUID runId) {
         return tenantExecution.run(tenant, () -> {
             AiGridRunMetricsService.RunMetrics result = metrics.metrics(runId);
@@ -207,11 +230,15 @@ public class AiGridApiService {
                        p.policy_id, p.version, p.name, p.severity, p.lifecycle, p.workflow_class,
                        coalesce(s.selection, d.default_selection, p.default_selection) selection,
                        p.control_objective_id, p.provider, p.evaluation_mode,
+                       p.artifact_types_json::text artifact_types_json,
+                       p.required_resource_families_json::text required_resource_families_json,
                        p.base_evidence_tiers_json::text base_evidence_tiers_json,
                        p.conditional_capabilities_json::text conditional_capabilities_json,
                        p.required_capabilities_json::text required_capabilities_json,
                        p.framework_mappings_json::text framework_mappings_json,
-                       coalesce(readiness.readiness, 'NOT_EVALUATED') readiness
+                       coalesce(readiness.readiness, 'NOT_EVALUATED') readiness,
+                       assessment_totals.failed_artifacts,
+                       assessment_totals.total_artifacts
                   from platform.ai_grid_policy_versions p
                   join platform.ai_grid_policy_distribution d on d.policy_id = p.policy_id
                   left join ai_grid_policy_selections s on s.policy_id = p.policy_id
@@ -220,6 +247,18 @@ public class AiGridApiService {
                        where r.policy_id = p.policy_id and r.policy_version = p.version
                        order by r.computed_at desc, r.run_id desc limit 1
                   ) readiness on true
+                  left join lateral (
+                      select count(*) filter (where a.decision = 'FAIL') failed_artifacts,
+                             count(*) total_artifacts
+                        from ai_grid_assessments a
+                       where a.policy_id = p.policy_id
+                         and a.policy_version = p.version
+                         and a.subject_type = 'ARTIFACT'
+                         and a.run_id = (
+                             select run_id from ai_grid_snapshot_manifests
+                              group by run_id order by max(observed_at) desc, run_id desc limit 1
+                         )
+                  ) assessment_totals on true
                  where p.release_family in ('AGCF_PHASE_1', 'AGCF_PHASE_2')
                    and p.lifecycle in ('VALIDATED', 'APPROVED', 'PUBLISHED', 'CANARY') and d.available = true
                    and ((d.rollout_stage = 'GENERAL_AVAILABILITY')
@@ -228,9 +267,11 @@ public class AiGridApiService {
                 """, Map.of("tenantId", tenant.getId().toString()), (rs, n) -> new PolicyView(rs.getString("policy_id"), rs.getString("version"),
                 rs.getString("name"), rs.getString("severity"), rs.getString("lifecycle"),
                 rs.getString("workflow_class"), rs.getString("selection"), rs.getString("control_objective_id"),
-                rs.getString("provider"), rs.getString("evaluation_mode"), rs.getString("base_evidence_tiers_json"),
+                rs.getString("provider"), rs.getString("evaluation_mode"), rs.getString("artifact_types_json"),
+                rs.getString("required_resource_families_json"), rs.getString("base_evidence_tiers_json"),
                 rs.getString("conditional_capabilities_json"), rs.getString("required_capabilities_json"),
-                rs.getString("framework_mappings_json"), rs.getString("readiness"))));
+                rs.getString("framework_mappings_json"), rs.getString("readiness"),
+                rs.getLong("failed_artifacts"), rs.getLong("total_artifacts"))));
     }
 
     public List<PolicyView> policyVersions(Tenant tenant, String policyId) {
@@ -238,6 +279,8 @@ public class AiGridApiService {
                 select p.policy_id, p.version, p.name, p.severity, p.lifecycle, p.workflow_class,
                        coalesce(s.selection, p.default_selection) selection,
                        p.control_objective_id, p.provider, p.evaluation_mode,
+                       p.artifact_types_json::text artifact_types_json,
+                       p.required_resource_families_json::text required_resource_families_json,
                        p.base_evidence_tiers_json::text base_evidence_tiers_json,
                        p.conditional_capabilities_json::text conditional_capabilities_json,
                        p.required_capabilities_json::text required_capabilities_json,
@@ -252,9 +295,10 @@ public class AiGridApiService {
                 rs.getString("version"), rs.getString("name"), rs.getString("severity"),
                 rs.getString("lifecycle"), rs.getString("workflow_class"), rs.getString("selection"),
                 rs.getString("control_objective_id"), rs.getString("provider"), rs.getString("evaluation_mode"),
+                rs.getString("artifact_types_json"), rs.getString("required_resource_families_json"),
                 rs.getString("base_evidence_tiers_json"), rs.getString("conditional_capabilities_json"),
                 rs.getString("required_capabilities_json"), rs.getString("framework_mappings_json"),
-                "NOT_EVALUATED")));
+                "NOT_EVALUATED", 0L, 0L)));
     }
 
     public void updateSelection(Tenant tenant, String policyId, String selection, String actor, String reason) {
@@ -514,12 +558,14 @@ public class AiGridApiService {
                            String provenance, String evidenceClass, Instant observedAt, String schemaVersion) {}
     public record AssessmentRun(UUID runId, Instant startedAt, Instant completedAt,
                                 long assessments, long noDecision) {}
+    public record PolicyExecutionResult(UUID runId, int requestedPolicies, int evaluatedPolicies) {}
     public record PolicyView(String policyId, String version, String name, String severity,
                              String lifecycle, String workflowClass, String selection,
                              String controlObjectiveId, String provider, String evaluationMode,
+                             String artifactTypesJson, String requiredResourceFamiliesJson,
                              String baseEvidenceTiersJson, String conditionalCapabilitiesJson,
                              String requiredCapabilitiesJson, String frameworkMappingsJson,
-                             String readiness) {}
+                             String readiness, long failedArtifacts, long totalArtifacts) {}
     public record SystemLineage(UUID eventId, String eventType, UUID runId, String rationale,
                                 String actor, Instant createdAt, String participantRole) {}
     public record GraphEdge(UUID id, UUID sourceArtifactId, UUID targetArtifactId, String relationshipType,

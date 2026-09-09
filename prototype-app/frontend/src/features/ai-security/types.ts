@@ -91,11 +91,15 @@ export type AiGridPolicy = {
   controlObjectiveId: string;
   provider: string;
   evaluationMode: string;
+  artifactTypesJson: string;
+  requiredResourceFamiliesJson: string;
   baseEvidenceTiersJson: string;
   conditionalCapabilitiesJson: string;
   requiredCapabilitiesJson: string;
   frameworkMappingsJson: string;
   readiness: 'READY' | 'PARTIAL' | 'BLOCKED' | 'NO_RESOURCES' | 'NOT_APPLICABLE' | 'NOT_EVALUATED';
+  failedArtifacts: number;
+  totalArtifacts: number;
 };
 
 export type AiGridPolicyDistribution = {
@@ -398,6 +402,12 @@ export type AiGridRunMetrics = {
   firstDecisionAt: string | null;
   firstFindingAt: string | null;
   firstGapAt: string | null;
+};
+
+export type AiGridPolicyExecutionResult = {
+  runId: string;
+  requestedPolicies: number;
+  evaluatedPolicies: number;
 };
 
 export type AiSecurityArtifact = {

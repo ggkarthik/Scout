@@ -75,6 +75,9 @@ app:
   ai-security:
     grid:
       enabled: ${APP_AI_GRID_ENABLED:true}
+      # Demo-only convenience: publish the source-controlled bundled catalog to all
+      # active tenants at startup. Governance APIs remain enabled and this is off by default.
+      demo-auto-publish-bundled-policies: ${APP_AI_GRID_DEMO_AUTO_PUBLISH_BUNDLED_POLICIES:false}
     aws:
       max-concurrent: ${APP_AI_SECURITY_AWS_MAX_CONCURRENT:2}
       admission-timeout-seconds: ${APP_AI_SECURITY_AWS_ADMISSION_TIMEOUT_SECONDS:30}

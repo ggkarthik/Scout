@@ -34,11 +34,15 @@ function buildPolicy(overrides: Partial<AiGridPolicy> = {}): AiGridPolicy {
     controlObjectiveId: 'AGCF-OBJ-AWS-001',
     provider: 'AWS',
     evaluationMode: 'ARTIFACT_FACTS',
+    artifactTypesJson: '["AI_AGENT"]',
+    requiredResourceFamiliesJson: '["BEDROCK"]',
     baseEvidenceTiersJson: '["E0"]',
     conditionalCapabilitiesJson: '[]',
     requiredCapabilitiesJson: '["BEDROCK_KNOWLEDGE_BASES"]',
     frameworkMappingsJson: '[]',
     readiness: 'READY',
+    failedArtifacts: 1,
+    totalArtifacts: 3,
     ...overrides,
   };
 }
@@ -48,15 +52,15 @@ describe('AiPoliciesPage', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders one row per policy with governed metadata and readiness', async () => {
+  it('renders one row per policy with governed metadata and artifact coverage', async () => {
     vi.spyOn(api, 'listAiGridPolicies').mockResolvedValue([buildPolicy()]);
     renderPoliciesPage();
 
     expect(await screen.findByText('Public knowledge-base S3 source')).toBeInTheDocument();
     expect(screen.getByText('CRITICAL')).toBeInTheDocument();
-    expect(screen.getByText('AGCF-OBJ-AWS-001')).toBeInTheDocument();
-    expect(screen.getByText('Artifact Facts')).toBeInTheDocument();
-    expect(screen.getByText('Ready')).toBeInTheDocument();
+    expect(screen.getByText('1 / 3')).toBeInTheDocument();
+    expect(screen.getByText('Ai Agent')).toBeInTheDocument();
+    expect(screen.getByText('aws')).toBeInTheDocument();
   });
 
   it('navigates to the policy detail page when a row is clicked', async () => {
@@ -79,7 +83,7 @@ describe('AiPoliciesPage', () => {
     expect(screen.getByRole('heading', { name: 'Public knowledge-base S3 source' })).toBeInTheDocument();
   });
 
-  it('groups by provider and opens metadata in the policy overview', async () => {
+  it('renders one policy list and opens metadata in the policy overview', async () => {
     vi.spyOn(api, 'listAiGridPolicies').mockResolvedValue([
       buildPolicy({
         policyId: 'AGCF-AWS-013', name: 'Sensitive-data agent lacks PII guardrail',
@@ -100,8 +104,10 @@ describe('AiPoliciesPage', () => {
     renderPoliciesPage();
 
     await screen.findByText('Sensitive-data agent lacks PII guardrail');
-    // Two provider groups render as separate section headings.
-    expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(2);
+    // Policies from all providers share one table; provider is shown in its column.
+    expect(screen.queryAllByRole('heading', { level: 3 })).toHaveLength(0);
+    expect(screen.getAllByRole('columnheader')).toHaveLength(8);
+    expect(screen.getByRole('checkbox', { name: 'Select Sensitive-data agent lacks PII guardrail' })).toBeInTheDocument();
     // A conditional-capability policy is flagged, but metadata is no longer inline.
     expect(screen.getByText(/needs capability/)).toBeInTheDocument();
     expect(screen.queryByText('Required connector capabilities')).not.toBeInTheDocument();

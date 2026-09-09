@@ -541,6 +541,7 @@ import type {
   AiGridPolicySelection,
   AiGridOwner,
   AiGridRunMetrics,
+  AiGridPolicyExecutionResult,
   AiGridExposurePage,
   AiGridExposureDetail,
   AiExposureIntelligenceOverview,
@@ -1449,6 +1450,10 @@ export const api = {
   getAiGridRunMetrics: (runId: string) => request<AiGridRunMetrics>(
     `/ai-assessment-runs/${encodeURIComponent(runId)}/metrics`,
   ),
+  executeAiGridPolicies: (policyIds: string[]) => request<AiGridPolicyExecutionResult>('/ai-assessments/execute', {
+    method: 'POST',
+    body: JSON.stringify({ policyIds }),
+  }),
   listAiGridExposures: (cursor?: string, limit = 50) => {
     const params = new URLSearchParams({ limit: String(limit) });
     if (cursor) params.set('cursor', cursor);

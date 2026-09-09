@@ -58,7 +58,15 @@ public class AiGridAssessmentService {
     }
 
     public void evaluateRun(Tenant tenant, UUID runId) {
+        evaluateRun(tenant, runId, Set.of());
+    }
+
+    /** Evaluate only the requested published policies when a non-empty filter is supplied. */
+    public int evaluateRun(Tenant tenant, UUID runId, Set<String> policyIds) {
         List<Policy> policies = loadPublishedPolicies(tenant);
+        if (policyIds != null && !policyIds.isEmpty()) {
+            policies = policies.stream().filter(policy -> policyIds.contains(policy.id())).toList();
+        }
         Map<String, ScopeConfig> scopes = loadScopes();
         Map<String, Map<String, String>> overrides = loadOverrides();
         Map<String, Map<String, Object>> parameters = loadParameters();
@@ -87,7 +95,7 @@ public class AiGridAssessmentService {
                         : policies.stream().flatMap(policy -> policy.artifactTypes().stream()).distinct().toList()), (rs, n) -> new Artifact(rs.getObject("id", UUID.class),
                 rs.getString("artifact_type"), rs.getString("native_kind"), rs.getString("account_id"), rs.getString("region"),
                 rs.getString("provider"), rs.getString("name"), rs.getObject("manifest_id", UUID.class)));
-        if (artifacts.isEmpty()) return;
+        if (artifacts.isEmpty()) return policies.size();
         Instant evaluationAsOf = evaluationAsOf(runId);
         RunEvaluationCache cache = new RunEvaluationCache(runId);
         boolean findingChanged = false;
@@ -112,6 +120,7 @@ public class AiGridAssessmentService {
             }
         }
         if (findingChanged) findings.refreshProjectionAfterCommit(tenant);
+        return policies.size();
     }
 
     private boolean evaluateSubject(Tenant tenant, UUID runId, Instant evaluationAsOf,
