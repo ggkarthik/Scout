@@ -2,7 +2,7 @@
 
 This document describes the React/TypeScript frontend for VulnWatch (package name `vulnwatch-frontend`). It is derived entirely from reading the source code in `frontend/src/`.
 
-Last updated: 2026-08-18
+Last updated: 2026-09-08
 
 ---
 
@@ -95,7 +95,7 @@ All routes are registered in `src/App.tsx` using React Router v7 nested routes. 
 | `/exposure` | `ExposureDashboardPage` | Risk-focused exec overview (Overview tab) |
 | `/findings` | `FindingsPage` | Active findings list with server+client-side filters |
 | `/findings/:displayId` | `FindingDetailPage` | Single finding detail, workflow, and AI remediation |
-| `/operations/:operationsView?` | `OperationalDashboardPage` | Default `pipeline`; also `platform-health` (older/`quality` keys alias to `pipeline`) |
+| `/operations/:operationsView?` | `OperationalDashboardPage` | Default `pipeline`; also `platform-health` (the `quality` view now redirects to `/inventory` with quality-tab search params instead of rendering here — see note below) |
 | `/vuln-repo` | `VulnRepoDashboardPage` | Vulnerability Repository dashboard |
 | `/vuln-repo/org-cves/:cveId?` | `VulnRepoWorkbenchRoute` (`VulnRepoOrgCvePage`) | Unified Vulnerability Records — CVE Assessment Workbench |
 | `/vuln-repo/vulnerabilities` | `VulnRepoVulnerabilitiesPage` | Vulnerability Intelligence — global CVE feed |
@@ -119,16 +119,20 @@ All routes are registered in `src/App.tsx` using React Router v7 nested routes. 
 | `/findings/ai/exposures/:exposureId` | `AiExposuresPage` (detail branch) | Single exposure detail — root cause, evidence history, accept/false-positive disposition |
 | `/policies` | `AiPoliciesPage` | Tenant view of AI Grid policies — enable/disable, severity/search filter |
 | `/policies/:policyId` | `AiPolicyDetailPage` (via `AiPolicyDetailRoute`) | AI policy detail — overview/configure(scope, exceptions, parameters)/findings/artifacts tabs |
-| `/connect/:connectView?` | `ConnectRoute` (`ConnectPage`) | Default `sources`; also `connectors`, `run-history`, `processing-jobs` |
+| `/connect/:connectView?` | `ConnectRoute` (`ConnectPage`) | Default `sources`; also `run-history` |
 | `/admin/:adminView?` | `AdminRoute` (`UserManagementPage`) | Default `users`; Invites, Support Access, Roles, Service Accounts, Audit |
-| `/platform/:platformView?` | `PlatformRoute` (`PlatformConsolePage`) | Default `tenants`; platform owner console. `ai-policies` sub-view renders `PlatformAiPolicyStudio` (governed AI Grid policy catalog rollout/impact-preview/reconciliation/portfolio) |
-| `/configurations/:configView?` | `ConfigurationsPage` | Default `sla`; SLA, Triage, Automation, Ownership, Vuln Sources, Findings Score, Suppression, Auto-Finding |
+| `/platform/:platformView?` | `PlatformRoute` (`PlatformConsolePage`) | Default `tenants`; platform owner console. `ai-policies` sub-view renders `PlatformAiPolicyStudio` (governed AI Grid policy catalog rollout/impact-preview/reconciliation/portfolio); nav label for this tab is "Policy Distribution" |
+| `/configurations/:configView?` | `ConfigurationsPage` | Default `sla`; SLA, Triage, Automation, Ownership, Findings Score, Suppression, Auto-Finding (Vulnerability Sources moved to the Connect page — see below) |
+| `/authorized-workspaces` | `AuthorizedWorkspacesRoute` (`AuthorizedWorkspacesPage`) | Platform-owner-only list of tenant-approved support access grants |
 | `/demo` | `DemoLandingPage` | Public demo landing |
+| `/demo/blog` | `BlogIndexPage` | Public demo blog index |
+| `/demo/blog/zero-day-response-hours-not-weeks` | `ZeroDayBlogPage` | Public demo blog post |
 | `/demo/request` | `DemoRequestPage` | Demo request form |
 | `/demo/request/success` | `DemoRequestSuccessPage` | Demo request success |
 | `/demo/expired` | `DemoExpiredPage` | Demo expiry notice |
 | `/invite/:token` | `DemoInvitePage` (public) | Demo invite accept flow |
 | `/tenant-invite/:token` | `TenantInvitePage` (public) | Tenant invite accept flow |
+| `/setup/:token` | `SetupSessionPage` (public) | Platform-owner one-time password-setup link |
 | `/login` | `LoginPage` | Login |
 | `*` | Redirect to `/` | Catch-all fallback |
 
@@ -293,10 +297,10 @@ Files: `types.ts`, `queries.ts`
 
 Files: `types.ts`, `queries.ts`
 
-**Types:** `OperationalDashboard` with sections `executiveHealth`, `ingestionEfficiency`, `normalizationQuality`, `correlationEffectiveness`, `noiseLifecycle`, `apiReadPath`, `freshnessDrift`, `metricCatalog`; `OperationalQualityIssue`, `OperationalQualityIssueDetail`, `SloStatus`, `SloEntry`
+**Types:** `OperationalDashboard` with sections `executiveHealth`, `ingestionEfficiency`, `normalizationQuality`, `correlationEffectiveness`, `noiseLifecycle`, `apiReadPath`, `freshnessDrift`, `metricCatalog`; `OperationalQualityIssue`, `OperationalQualityIssueDetail`, `SloStatus`, `SloEntry`. The type still exists but is no longer what the Pipeline view actually fetches — see `PipelinePayload` below.
 
 **Queries:**
-- `useOperationsViewQuery(selectedView)` — loads Pipeline or Platform Health data in parallel via `Promise.all`; `refetchInterval = OPERATIONS_REFRESH_INTERVAL_MS = 15s`
+- `useOperationsViewQuery(selectedView)` — loads Pipeline or Platform Health data in parallel via `Promise.all`; `refetchInterval = OPERATIONS_REFRESH_INTERVAL_MS = 15s`. The Pipeline branch resolves a `PipelinePayload` (`{ ingestion, freshness }` only — normalization/correlation/noise are no longer fetched here; that analysis moved to Inventory's quality tabs).
 - `useOperationalQualitySummaryQuery()`, `useOperationalQualityIssuesQuery()`, `useOperationalQualityIssueDetailQuery()`
 - Mutations: `useApplyNormalizationOverrideMutation`, `useRevokeNormalizationOverrideMutation`, `useApplyCorrelationOverrideMutation`, `useRevokeCorrelationOverrideMutation`
 
@@ -888,12 +892,16 @@ These are different pages backed by different API endpoints — do not confuse t
 
 1. Add the connector ID to the `ConnectorId` union in `ConnectPage.tsx`.
 2. Add to the `CONNECTORS` array with `id`, `name`, `summary`, `icon`.
-3. Add to the appropriate category list (Vulnerability Intelligence, CMDB/Inventory Sources, or Cloud Discovery).
+3. Add to the appropriate category list — `CMDB_CONNECTOR_IDS`, `CLOUD_CONNECTOR_IDS`, or `AI_CONNECTOR_IDS` in `ConnectPage.tsx` (there is no rendered "Vulnerability Intelligence" connector-card category anymore — see below).
 4. Add a `case` in `ConnectorDetailContent` that renders the connector's config component.
+
+Note: `endoflife-date`, `euvd-feed`, `jvn-feed`, and `sbom-github` are declared in the `ConnectorId` union and `CONNECTORS` array (with `ConnectorDetailContent` cases) but are not in any of the three category lists above, so they currently render no clickable card anywhere in the UI — likely a gap worth a follow-up ticket.
 
 ### Configurations page sections
 
-8 sections in sidebar order: SLA & Remediation -> S.AI Prioritization (AI badge) -> Workflow Automation -> Ownership -> Vulnerability Sources -> Findings Score -> Suppression Rules -> Auto-Finding Rules. All except Ownership and Vulnerability Sources persist to a single `RiskPolicy` record via `PUT /api/risk-policy`. Call `applyTriageDefaults()` on API responses to fill missing triage fields for older backends that predate the 6 triage weight fields.
+7 sections in sidebar order: SLA & Remediation -> S.AI Prioritization (AI badge) -> Workflow Automation -> Ownership -> Findings Score -> Suppression Rules -> Auto-Finding Rules. All except Ownership persist to a single `RiskPolicy` record via `PUT /api/risk-policy`. Call `applyTriageDefaults()` on API responses to fill missing triage fields for older backends that predate the 6 triage weight fields.
+
+Vulnerability Sources (the per-tenant feed filter rule editor, `VulnerabilitySourcesSection`) is no longer a Configurations tab — it now renders inside a collapsible "Vulnerability Intelligence" accordion on the Connect page (`/connect/sources`, gated by `canManageSourceFilters(actor)`).
 
 ### Test infrastructure
 
@@ -940,7 +948,7 @@ The insight chips are generated client-side from the fetched data and link direc
 
 ### OperationalDashboardPage view keys
 
-Two nav items shown: `pipeline` and `platform-health`. The `quality` view key exists in the type but has legacy aliases mapping to `pipeline`. Views `dashboard`, `overview`, `ingestion-efficiency`, `ingestion`, `normalization-quality`, `normalization`, `correlation`, `noise` all alias to `pipeline`.
+Two nav items shown: `pipeline` and `platform-health`. The `quality` view key redirects to `/inventory` with quality-tab search params (`inventoryTabs=quality-normalization|quality-correlation|quality-eol|quality-vex`) instead of rendering inside Operations — Correlation/Normalization/EOL/VEX quality analytics now live under Inventory. `PipelinePayload` itself only carries `{ ingestion, freshness }` now; the older `getOperationalNormalizationQuality`/`getOperationalCorrelationEffectiveness`/`getOperationalNoiseLifecycle` API methods have no call sites left in `src/`.
 
 ### Never-touch list (from project CLAUDE.md)
 

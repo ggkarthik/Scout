@@ -1,6 +1,6 @@
 # VulnWatch Architecture
 
-Last updated: 2026-08-18
+Last updated: 2026-09-08
 
 ---
 
@@ -18,7 +18,7 @@ VulnWatch is a security operations prototype: SBOM ingestion → vulnerability i
 │  Spring Boot 3.3.2 — Java 17 (port 8080)                            │
 │  ┌──────────────┐  ┌────────────────┐  ┌──────────────────────────┐ │
 │  │ Controllers  │  │   Services     │  │  Scheduled Jobs          │ │
-│  │ (54 REST)    │  │   (288)        │  │  (daily + hourly + 2s)   │ │
+│  │ (58 REST)    │  │   (299)        │  │  (daily + hourly + 2s)   │ │
 │  └──────┬───────┘  └───────┬────────┘  └──────────────────────────┘ │
 │         │                  │                                         │
 │  ┌──────▼──────────────────▼──────┐   ┌────────────────────────────┐│
@@ -36,7 +36,7 @@ VulnWatch is a security operations prototype: SBOM ingestion → vulnerability i
                                         └────────────────────────────┘
 ```
 
-Of the 54 controllers / 288 services, 11 controllers / 37 services live under `com.prototype.vulnwatch.aisecurity` — a separate top-level package implementing AI Security / AI Grid posture management (see [Core Data Flow](#7-ai-security--ai-grid) below and `docs/business-logic-guide.md#ai-security--ai-grid-pipeline`). Its tables are read/written via `JdbcTemplate` directly, bypassing the Spring Data JPA path shown above.
+Of the 58 controllers / 299 services, 14 controllers / 48 services live under `com.prototype.vulnwatch.aisecurity` — a separate top-level package implementing AI Security / AI Grid posture management (see [Core Data Flow](#7-ai-security--ai-grid) below and `docs/business-logic-guide.md#ai-security--ai-grid-pipeline`). Its tables are read/written via `JdbcTemplate` directly, bypassing the Spring Data JPA path shown above.
 
 ---
 
@@ -48,7 +48,7 @@ Three ingestion paths populate the inventory:
 
 **SBOM ingestion** (CycloneDX / SPDX):
 - File upload or configured endpoint fetch → `SbomIngestionService` → parse → normalize CPEs → write `inventory_components` + `inventory_component_cpe_map`
-- GitHub repos or GHCR images → `GithubSbomIngestionService` → same normalization pipeline
+- GitHub repos or GHCR images → `GithubSbomIngestionCoordinator` → same normalization pipeline
 - Runs every 5 minutes for configured sources; on-demand via upload
 
 **CMDB sync:**
@@ -163,13 +163,13 @@ HTTP Request
 
 ### Tenant Schema Control Plane
 
-Per-tenant DDL is no longer applied by the application's own startup Flyway run. A second, independent Flyway migration line lives under `backend/src/main/resources/db/migration/tenant/` (its own `<schema>.tenant_schema_history` table per tenant, baselined at version 41), separate from the platform-only `postgres_reset/` line (each file there must start with a `-- migration-guard: platform-only` comment, enforced by `PostgresResetMigrationGuardTest`).
+Per-tenant DDL is no longer applied by the application's own startup Flyway run. A second, independent Flyway migration line lives under `backend/src/main/resources/db/migration/tenant/` (its own `<schema>.tenant_schema_history` table per tenant, currently a single `V1__tenant_schema.sql` baseline created by the one-time migration-history reset), separate from the platform-only `postgres_reset/` line (each file there must start with a `-- migration-guard: platform-only` comment, enforced by `PostgresResetMigrationGuardTest`).
 
 `TenantSchemaMigrationService` drives the rollout: hold a Postgres advisory lock → migrate the `tenant_default` template and compute a SHA-256 **structural fingerprint** (normalized dump of every column/constraint/index/sequence/RLS policy) → migrate one canary tenant → migrate the rest in batches of 10, comparing each tenant's post-migration fingerprint against the template and failing (`DRIFTED`) rather than silently diverging. Every step is recorded in `platform.tenant_schema_versions`, surfaced by `TenantSchemaStatusService`/`TenantSchemaStatusController` (`GET /api/platform/tenant-schema-status`, shown in the Platform Console) and by `TenantSchemaReadinessHealthIndicator` (an actuator health contributor gated behind `app.tenancy.enforce-schema-version=true`).
 
-For production, the same rollout runs from `ProductionBootstrapCli` — a standalone `main()` that skips Spring/JPA entirely — invoked by a temporary Render "migrator" web service (`backend/scripts/run-render-migration.sh`) rather than the long-running API service. See [Deployment](#deployment) and `docs/p0-production-runbook.md`.
+For production, the same rollout runs from `ProductionBootstrapCli` — a standalone `main()` that skips Spring/JPA entirely — invoked by a temporary Render "migrator" web service (`backend/scripts/run-render-migration.sh`) rather than the long-running API service. See [Deployment](#deployment) below; there is no committed operational runbook right now (a prior reference to `docs/p0-production-runbook.md` pointed at a file that has since been deleted).
 
-**RLS rollout status:** row-level security policies are created on every provisioned tenant schema at provisioning time, and `tenant/V42__enforce_tenant_rls.sql` is the mechanism that retroactively backfills a `tenant_id` column (if missing) and turns on `FORCE ROW LEVEL SECURITY` per table, per tenant schema, as each tenant is carried through the control-plane rollout above. `V29__tenant_rls_rollout_gate.sql` (platform line) remains the pre-flight gate confirming the production/preprod runtime role is non-superuser and lacks `BYPASSRLS` before this enforcement is allowed to proceed — see `ProductionSafetyValidator`.
+**RLS rollout status:** row-level security policies are created on every provisioned tenant schema at provisioning time, and the mechanism that retroactively backfills a `tenant_id` column (if missing) and turns on `FORCE ROW LEVEL SECURITY` per table is now baked directly into `tenant/V1__tenant_schema.sql` rather than a later numbered migration, applied per tenant schema as each tenant is carried through the control-plane rollout above. `ProductionSafetyValidator.validateRuntimeRoleCannotBypassRls()` (platform line) remains the pre-flight gate confirming the production/preprod runtime role is non-superuser and lacks `BYPASSRLS` before this enforcement is allowed to proceed.
 
 ---
 
@@ -286,7 +286,7 @@ All API calls go through `src/api/client.ts`. Base URL: `VITE_API_BASE` (default
 - **Backend container:** `eclipse-temurin:17-jre`, non-root user, port 8080, JVM flags: `-XX:MaxRAMPercentage=60.0 -XX:InitialRAMPercentage=10.0 -XX:MaxMetaspaceSize=192m -XX:+ExitOnOutOfMemoryError`
 - **Frontend (production):** Vercel deploys `prototype-app/frontend` using `frontend/vercel.json`; `https://scoutgrid.io` is the sole public frontend origin. The Vercel configuration provides SPA rewrites and browser security headers. `frontend/Dockerfile.ci` builds the same static bundle only for CI image-security checks; it is not a deployment artifact.
 - **AWS (validation environment):** ECS Fargate (public subnet, assign_public_ip=true), ALB, RDS PostgreSQL db.t4g.small (private subnet), S3 + CloudFront OAC for frontend
-- **Render (preprod / customer-validation environment):** `render.yaml` (repo root) defines `scout-backend` only; no Render frontend is supported. The Docker web service is built from `prototype-app/backend`, running `SPRING_PROFILES_ACTIVE=preprod` (which enables `require-production-secrets`, disables API-key auth, and — atypically — allows HMAC JWT signing in production via `APP_ALLOW_HMAC_IN_PRODUCTION=true`, for the credential-login flow used before full OIDC is wired up). The permanent web service is only ever given the restricted `scout_runtime` Postgres role (`DB_URL`/`DB_USERNAME`/`DB_PASSWORD` are `sync: false` — set manually in the Render dashboard) and never the owner/migration role. Schema bootstrap and migration run separately: see "Tenant Schema Control Plane" above and `docs/p0-production-runbook.md` for the temporary-migrator-service procedure (`backend/scripts/run-render-migration.sh` running `ProductionBootstrapCli`, plus `backend/scripts/provision-runtime-role.sql` / `docs/production-database-roles.sql` for the least-privilege role grants). After a successful run the migrator service is held open in a completion-only maintenance state rather than exiting, so Render's process supervisor doesn't restart it and re-run the privileged bootstrap.
+- **Render (preprod / customer-validation environment):** `render.yaml` (repo root) defines `scout-backend` only; no Render frontend is supported. The Docker web service is built from `prototype-app/backend`, running `SPRING_PROFILES_ACTIVE=preprod` (which enables `require-production-secrets`, disables API-key auth, and — atypically — allows HMAC JWT signing in production via `APP_ALLOW_HMAC_IN_PRODUCTION=true`, for the credential-login flow used before full OIDC is wired up). The permanent web service is only ever given the restricted `scout_runtime` Postgres role (`DB_URL`/`DB_USERNAME`/`DB_PASSWORD` are `sync: false` — set manually in the Render dashboard) and never the owner/migration role. Schema bootstrap and migration run separately: see "Tenant Schema Control Plane" above for the mechanics; the temporary-migrator-service procedure is `backend/scripts/run-render-migration.sh` running `ProductionBootstrapCli`, and the least-privilege role grants are automated by `backend/scripts/provision-runtime-role.sql`. (Prior references here to `docs/p0-production-runbook.md` and `docs/production-database-roles.sql` pointed at files that don't exist in this repository — read the two scripts directly.) After a successful run the migrator service is held open in a completion-only maintenance state rather than exiting, so Render's process supervisor doesn't restart it and re-run the privileged bootstrap.
 
 For deployment-facing environment variables and operational endpoints, see [Backend](backend.md).
 
@@ -298,7 +298,7 @@ For deployment-facing environment variables and operational endpoints, see [Back
 
 2. **Deterministic correlation** — `ApplicabilityDecisionService` applies version constraints mechanically. The system does not use AI for correlation — AI is used only for EOL slug suggestion and investigation summaries.
 
-3. **Schema-per-tenant over row-level isolation** — row-level security with a `tenant_id` column was rejected because it requires every query to include a filter, which is easy to miss. Schema-level isolation via `search_path` enforces isolation at the database connection level.
+3. **Schema-per-tenant as the primary isolation boundary** — row-level security alone (a `tenant_id` column with no schema separation) was rejected as the *sole* mechanism because it requires every query to include a filter, which is easy to miss. Schema-level isolation via `search_path` enforces isolation at the database connection level; RLS is additionally enforced per tenant schema as defense-in-depth (see "Tenant Schema Control Plane" above), not as a replacement for it.
 
 4. **Projection tables over on-the-fly joins** — the `org_cve_records` rollup and `vulnerability_intel_summary` exist because joining `component_vulnerability_states × vulnerabilities × inventory_components` at query time is too slow at scale. The projections trade storage for query speed.
 

@@ -42,7 +42,7 @@ npm install
 npm run dev           # dev server on port 5173 (strictly)
 npm run lint          # eslint .
 npm run typecheck     # tsc -b --noEmit
-npm run build         # tsc -b --force && vite build
+npm run build         # tsc -b --force && vite build && node scripts/verify-production-bundle.mjs
 npm run test:unit     # vitest run (non-watch)
 npm run test:coverage # vitest run --coverage (enforces line/branch thresholds)
 npx vitest run src/pages/FindingsPage.test.tsx  # run a single test file
@@ -50,7 +50,7 @@ npx vitest run src/pages/FindingsPage.test.tsx  # run a single test file
 
 Frontend CI gates: `npm run lint` → `npm run typecheck` → `npm run build` → `npm run test:coverage` (vitest with coverage thresholds enforced).
 
-Backend CI gates: `mvn -q verify` runs Surefire + Failsafe + JaCoCo `check` (line-coverage floor) + SpotBugs. Repo-wide, `gitleaks` (config: `.gitleaks.toml`, also wired as a `pre-commit` hook via `.pre-commit-config.yaml`) scans for committed secrets — see the credential-incident-gate procedure in `docs/p0-production-runbook.md` if it ever finds one in history.
+Backend CI gates: `mvn -q verify` runs Surefire + Failsafe + JaCoCo `check` (line-coverage floor) + SpotBugs. Repo-wide, `gitleaks` (config: `.gitleaks.toml`, also wired as a `pre-commit` hook via `.pre-commit-config.yaml`) scans for committed secrets — there is no committed credential-incident-gate runbook right now (a prior reference to `docs/p0-production-runbook.md` was removed when that file was deleted; someone should author a replacement if this procedure needs to be written down again).
 
 ## Architecture
 
@@ -69,19 +69,19 @@ See `backend/CLAUDE.md` and `frontend/CLAUDE.md` for directory-specific runtime 
 
 | Package | Contents |
 |---|---|
-| `controller/` | 43 REST controllers under `/api/**` |
+| `controller/` | 44 REST controllers under `/api/**` |
 | `service/` | 251 business-logic services (plus subpackages `cbom/`, `cmdbingestion/`, `sbomingestion/`, `vulningestion/` — the latter holds the NVD/KEV/GHSA/CSAF/EUVD/JVN sync logic and `@Scheduled` entry points) |
 | `domain/` | 121 JPA entities (assets, inventory, vulns, findings, policies, CMDB, EOL, SCCM, AWS/Azure discovery, campaigns, BOM/CBOM) |
-| `dto/` | 263 API request/response objects |
+| `dto/` | 264 API request/response objects |
 | `repo/` | 77 Spring Data JPA repositories |
 | `client/` | 22 external API clients (NVD, EUVD, JVN, GHSA, CSAF, EPSS, GitHub, ServiceNow, SCCM, endoflife.date, AWS, Azure, OpenAI, Resend) |
 | `config/` | Spring beans and security configuration (`SecurityConfig`, `ApiKeyAuthenticationFilter`, `TenantAwareDataSource`, `ProductionSafetyValidator`) |
 | `security/` | `SensitiveTenantAction` annotation + interceptor, `PasswordSetupCookieService`, `PublicEndpointRateLimiter` (5 files) |
 | `util/` | CPE handling, version comparison, SBOM parsing |
-| `migration/` | Standalone (non-Spring) production bootstrap: `ProductionBootstrapCli` (platform + tenant schema migration, runtime-role provisioning, control-plane verification, optional platform-owner setup-link email), `PlatformOwnerSetupLinkIssuer`, `TenantSchemaMigrationCli` (compatibility shim delegating to `ProductionBootstrapCli`) |
+| `migration/` | Standalone (non-Spring) production bootstrap: `ProductionBootstrapCli` (platform + tenant schema migration, runtime-role provisioning, control-plane verification, optional platform-owner setup-link email), `PlatformOwnerSetupLinkIssuer`, `TenantSchemaMigrationCli` (compatibility shim delegating to `ProductionBootstrapCli`), plus `TenantSchemaFingerprint` and `PackagedMigrationCatalog` (5 files total) |
 | `web/`, `tools/` | `PlatformAdminRequestPaths` (request-path classifier — no call site found outside its own test as of this writing); `LegacyGithubSyncRunBackfillTool` (standalone CLI) |
 
-A separate top-level package, `com.prototype.vulnwatch.aisecurity` (own `controller/`, `service/`, `model/`, `policy/`, `aws/`, `azure/` subpackages — 11 controllers, 37 services), implements **AI Security / AI Grid**: discovery and governance of AI/ML resources (Bedrock agents, Azure AI Foundry projects, MCP servers, etc.) found in the org's cloud accounts, entitlement-gated per tenant (`ai.security`). Its tables have no JPA entity or repository — they're accessed via `JdbcTemplate` directly. See "AI Security / AI Grid" in `docs/backend.md` and `docs/business-logic-guide.md#ai-security--ai-grid-pipeline`.
+A separate top-level package, `com.prototype.vulnwatch.aisecurity` (own `controller/`, `service/`, `model/`, `policy/`, `aws/`, `azure/` subpackages — 14 controllers, 48 services), implements **AI Security / AI Grid**: discovery and governance of AI/ML resources (Bedrock agents, Azure AI Foundry projects, MCP servers, etc.) found in the org's cloud accounts, entitlement-gated per tenant (`ai.security`). Its tables have no JPA entity or repository — they're accessed via `JdbcTemplate` directly. See "AI Security / AI Grid" in `docs/backend.md` and `docs/business-logic-guide.md#ai-security--ai-grid-pipeline`.
 
 Newer, less-obvious controllers (outside `aisecurity`) worth knowing about: `CampaignController` (`/api/campaigns` — remediation campaign lifecycle, see below), `CbomController` (`/api/bom/cbom` — cloud bill-of-materials posture), `BomController` (`/api/bom`) for general BOM ingestion, `AzureDiscoveryController` (`/api/connectors/azure-discovery`), `TenantSchemaStatusController` (`/api/platform/tenant-schema-status` — per-tenant schema migration status; see "Tenant Schema Control Plane" in `docs/backend.md`), `DemoDatasetController` (`POST /api/platform/tenants/{tenantId}/demo-data`, `PLATFORM_OWNER` — manual demo dataset provisioning), and `TenantSupportAccessController` (`/api/tenants/{tenantId}/support-grants` + `/api/auth/support-grants/**` — tenant-initiated break-glass support access).
 
@@ -127,7 +127,7 @@ Authorization rules: `/api/platform/**` and `/api/operations/**` require `ROLE_P
 
 Schema-per-tenant isolation is fully implemented, not aspirational: `TenantAwareDataSource` sets `search_path` + `app.current_tenant_id` per connection checkout (reset on return), `TenantSchemaService` clones `tenant_default` (tables, sequences, defaults, FKs, and RLS policies) to provision new tenant schemas, and `ProductionSafetyValidator` runs 11+ startup checks gating unsafe config in production. `TenantService.getDefaultTenant()` is no longer called from any controller or service — that single-tenant fallback pattern has been removed. Tenant creation is now asynchronous: `POST /api/platform/tenants` returns 202 and the tenant sits in `PROVISIONING` status until the tenant schema control plane (below) actually creates and migrates its schema; `TenantLifecycleGuardService` denies workspace entry to anything other than `ACTIVE`.
 
-Row-level security policies are created on each tenant schema at provisioning time. Full RLS *enforcement* is rolled out per-tenant by the **tenant schema control plane**: a second Flyway migration line under `backend/src/main/resources/db/migration/tenant/` (separate from `postgres_reset/`, its own `tenant_schema_history` table per schema), applied by `TenantSchemaMigrationService` (dev) or the standalone `ProductionBootstrapCli` (production) — never by the application's own startup Flyway run. `tenant/V42__enforce_tenant_rls.sql` backfills `tenant_id` and turns on `FORCE ROW LEVEL SECURITY` per table as each tenant is migrated (template → canary → batches of 10, verified by comparing a structural SHA-256 fingerprint against the template). `V29__tenant_rls_rollout_gate.sql` (platform line) remains the pre-flight gate confirming the production/preprod runtime role is non-superuser and lacks `BYPASSRLS` before this rollout is allowed to run. See `docs/database.md#tenant-schema-control-plane` and `docs/p0-production-runbook.md` for the full mechanics and the Render deployment procedure.
+Row-level security policies are created on each tenant schema at provisioning time. Full RLS *enforcement* is rolled out per-tenant by the **tenant schema control plane**: a second Flyway migration line under `backend/src/main/resources/db/migration/tenant/` (separate from `postgres_reset/`, its own `tenant_schema_history` table per schema), applied by `TenantSchemaMigrationService` (dev) or the standalone `ProductionBootstrapCli` (production) — never by the application's own startup Flyway run. RLS enforcement (backfilling `tenant_id` and turning on `FORCE ROW LEVEL SECURITY` per table) is baked directly into `tenant/V1__tenant_schema.sql` and rolls out per tenant (template → canary → batches of 10, verified by comparing a structural SHA-256 fingerprint against the template) rather than via a separate later migration. `ProductionSafetyValidator.validateRuntimeRoleCannotBypassRls()` is the pre-flight gate confirming the production/preprod runtime role is non-superuser and lacks `BYPASSRLS` before this rollout is allowed to run. See `docs/database.md#tenant-schema-control-plane` for the full mechanics and the Render deployment procedure.
 
 ### Frontend Navigation
 
@@ -141,7 +141,7 @@ Top-level routes and their paths:
 | `/exposure` | `ExposureDashboardPage` | Risk-focused overview (Overview) |
 | `/findings` | `FindingsPage` | Active findings |
 | `/findings/:displayId` | `FindingDetailPage` | Single finding detail |
-| `/operations/:operationsView?` | `OperationalDashboardPage` | Default `pipeline`; sub-views `pipeline`, `platform-health` (`quality` and older keys alias to `pipeline`) |
+| `/operations/:operationsView?` | `OperationalDashboardPage` | Default `pipeline`; sub-views `pipeline`, `platform-health` (`quality` redirects to `/inventory` with quality-tab search params instead of rendering here — see note below) |
 | `/vuln-repo` | `VulnRepoDashboardPage` | Vulnerability Repository dashboard |
 | `/vuln-repo/org-cves/:cveId?` | `VulnRepoOrgCvePage` | **Unified Records** — org-correlated CVEs (CVE Assessment Workbench) |
 | `/vuln-repo/vulnerabilities` | `VulnRepoVulnerabilitiesPage` | **Intelligence** — all ingested CVEs (global feed) |
@@ -163,16 +163,17 @@ Top-level routes and their paths:
 | `/admin/:adminView?` | `UserManagementPage` | Default `users`; tenant + service-account administration |
 | `/platform/:platformView?` | `PlatformConsolePage` | Default `tenants`; platform-owner console. `ai-policies` sub-view is `PlatformAiPolicyStudio` (governed AI Grid policy rollout/impact-preview/reconciliation) |
 | `/configurations/:configView?` | `ConfigurationsPage` | Default `sla`; risk policy, SLA, scoring, automation |
+| `/authorized-workspaces` | `AuthorizedWorkspacesPage` (via `AuthorizedWorkspacesRoute`) | Platform-owner-only list of tenant-approved support access grants |
 | `/login` | `LoginPage` | Credential login |
 
 **`/end-of-life` no longer renders a dedicated EOL page** — it redirects to `/platform/eol` for platform-scope owners, or `/exposure` otherwise. **Legacy redirects:** `/vulnerability-intelligence*` paths redirect to their `/vuln-repo/*` equivalents.
 
 **AI Security routing:** all `/findings/ai*`, `/policies*`, and `/inventory/ai*` routes are wrapped in `AiSecurityRoute`, redirecting to `/exposure` unless `canUseEntitlement(actor, 'ai.security')` is true and the actor is not in platform scope — an **entitlement** (per-tenant plan flag, `src/features/auth/entitlements.ts`), a separate mechanism from the role checks above. There is no shared `:aiView?` optional-param pattern for these routes; each sub-page is its own literal route.
 
-Demo/public routes (outside auth boundary): `/demo`, `/demo/request`, `/demo/request/success`, `/demo/expired`, `/invite/:token`, `/tenant-invite/:token`.
+Demo/public routes (outside auth boundary): `/demo`, `/demo/blog`, `/demo/blog/zero-day-response-hours-not-weeks`, `/demo/request`, `/demo/request/success`, `/demo/expired`, `/invite/:token`, `/tenant-invite/:token`, `/setup/:token`.
 
 Overview (`/exposure`) is reserved for risk metrics and risk-focused summaries only. Do not place operational, pipeline, quality, freshness, correlation-efficiency, or CSAF/VEX analytics panels on Overview; those belong under Operational Dashboard.
-Correlation Efficiency and CSAF/VEX Quality Analytics live under Operations → Pipeline.
+Correlation Efficiency and CSAF/VEX Quality Analytics have moved off Operations → Pipeline and now live under Inventory (reached via `/operations/quality` redirecting to `/inventory` with quality-tab search params); `PipelinePayload` itself only carries ingestion/freshness data now.
 
 All API calls go through `src/api/client.ts`. Base URL defaults to `http://localhost:8080/api` (via `VITE_API_BASE`). Auth headers are injected on every request.
 
@@ -240,26 +241,27 @@ Sidebar-nav layout. Sections in order (leftmost first):
 | 2 | `triage` | **S.AI Prioritization** `AI` | 6 triage urgency signal weight sliders + live Triage Score Simulator |
 | 3 | `automation` | **Workflow Automation** | Auto-close rules (enabled/days), finding generation mode (AUTO/MANUAL) |
 | 4 | `ownership` | **Ownership** | Rule-based user/group assignment; conditions stored in `ownership_rules` table (V1 baseline) |
-| 5 | `vulnerability-sources` | **Vulnerability Sources** | Per-tenant feed filter rules; which sources participate in tenant correlation (`vulnerability_source_filter_configs`, V1 baseline) |
-| 6 | `findings-score` | **Findings Score** | Custom attribute-based scoring rules (table + column + operator + value + weight); live simulator; max 10 columns; weights sum to 1.0; stored as `findings_score_config` JSONB in `risk_policies`; evaluated at query time by `FindingsScoreService`; returned as `findingsScore` (0–10) on every `FindingResponse`; `POST /api/risk-policy/recompute-findings-scores` triggers `FindingsScoreRecomputeService.recomputeAll()` for all OPEN findings |
-| 7 | `suppress` | **Suppression Rules** | Create rules that suppress CVE or Finding records when matching conditions are met; each rule has name, state (DRAFT/APPROVED/IN_REVIEW/REJECTED/EXPIRED), record type (CVE/FINDING), valid from/to, execution order, and free-form reason; persisted to `suppression_rules` table via `GET/POST/PUT/DELETE /api/suppression-rules` |
-| 8 | `auto-findings` | **Auto-Finding Rules** | Automatically create findings based on CVE, software, and asset criteria |
+| 5 | `findings-score` | **Findings Score** | Custom attribute-based scoring rules (table + column + operator + value + weight); live simulator; max 10 columns; weights sum to 1.0; stored as `findings_score_config` JSONB in `risk_policies`; evaluated at query time by `FindingsScoreService`; returned as `findingsScore` (0–10) on every `FindingResponse`; `POST /api/risk-policy/recompute-findings-scores` triggers `FindingsScoreRecomputeService.recomputeAll()` for all OPEN findings |
+| 6 | `suppress` | **Suppression Rules** | Create rules that suppress CVE or Finding records when matching conditions are met; each rule has name, state (DRAFT/APPROVED/IN_REVIEW/REJECTED/EXPIRED), record type (CVE/FINDING), valid from/to, execution order, and free-form reason; persisted to `suppression_rules` table via `GET/POST/PUT/DELETE /api/suppression-rules` |
+| 7 | `auto-findings` | **Auto-Finding Rules** | Automatically create findings based on CVE, software, and asset criteria |
 
-All sections except Ownership and Vulnerability Sources persist to a single `RiskPolicy` record via `PUT /api/risk-policy`.
+All sections except Ownership persist to a single `RiskPolicy` record via `PUT /api/risk-policy`.
 `applyTriageDefaults()` normalises API responses for older backends that predate the 6 triage weight fields
 (fills missing triage fields with sensible defaults rather than crashing).
 
+**Vulnerability Sources moved off this page.** The per-tenant feed filter rule editor (`VulnerabilitySourcesSection`, `vulnerability_source_filter_configs`) is no longer a Configurations tab — it now renders inside a collapsible "Vulnerability Intelligence" accordion on the Connect page (`/connect/sources`, gated by `canManageSourceFilters(actor)`).
+
 ### Connect Page Architecture
 
-`ConnectPage` (`/connect/:connectView?`) is a multi-category connector catalog with views:
-`sources` (default), `connectors`, `run-history`, and `processing-jobs`.
+`ConnectPage` (`/connect/:connectView?`) is a connector catalog with views: `sources` (default) and `run-history`.
 
-**Connector categories:**
+**Connector categories (rendered as connector-card grids under `sources`):**
 
-- **Vulnerability Intelligence** — `nvd-api`, `cisa-kev`, `ghsa-feed`, `microsoft-csaf-vex`, `redhat-csaf-vex`, `advisory-feed`, `endoflife-date`, `euvd-feed` (ENISA EU Vulnerability Database), `jvn-feed` (Japan Vulnerability Notes)
-- **CMDB / Inventory Sources** — `sbom-endpoint`, `sbom-github`, `bom-management` (SBOM/AI-BOM/CBOM/Vendor-BOM via URL or upload), `servicenow-cmdb`, `sccm-cmdb`
-- **Cloud Discovery** — `aws-discovery`, `azure-discovery`
-- **AI Security** (entitlement-gated, `ai.security`) — `ai-security-aws` (AWS Bedrock), `ai-security-azure` (Azure AI Foundry); config components `AiSecurityConnectorPage`, `AiSecurityAzureConnectorPage`
+- **Inventory — CMDB & SBOM** — `sbom-endpoint`, `bom-management` (SBOM/AI-BOM/CBOM/Vendor-BOM via URL or upload), `servicenow-cmdb`, `sccm-cmdb`
+- **Inventory — Cloud Sources** — `aws-discovery`, `azure-discovery`
+- **Inventory — AI** (entitlement-gated, `ai.security`) — `ai-security-aws` (AWS Bedrock), `ai-security-azure` (Azure AI Foundry); config components `AiSecurityConnectorPage`, `AiSecurityAzureConnectorPage`
+
+There is no "Vulnerability Intelligence" connector-card section anymore — see the accordion note above. `endoflife-date`, `euvd-feed`, `jvn-feed`, and `sbom-github` are still declared in the `ConnectorId` union and `CONNECTORS` array (with `ConnectorDetailContent` cases) but are not included in any of the three rendered category lists above, so they currently have no clickable card anywhere in the UI — likely a real gap worth a follow-up ticket rather than intentional.
 
 Clicking a connector card renders `ConnectorDetailContent` which delegates to a focused component per connector. Adding a new connector requires: add to `ConnectorId` union, `CONNECTORS` array, the appropriate category list, and a `ConnectorDetailContent` case.
 
@@ -277,12 +279,12 @@ Key connector components:
 
 There are now **two independent Flyway migration lines** — pick the right one:
 
-- **Platform/`public` schema**: after the one-time reset, use `postgres_reset/V{next}__description.sql`; V1 owns `public`, `platform`, and the empty `tenant_default`. Every file must open with `-- migration-guard: platform-only` and must not contain tenant DDL or placeholders.
-- **Per-tenant schema DDL** (every table that lives inside `tenant_default`/`tenant_<id>`, including RLS policy changes): create `backend/src/main/resources/db/migration/tenant/V{next}__description.sql`. This line is **not** run by the application's startup Flyway — it is applied once per tenant schema by `TenantSchemaMigrationService` (dev/test) or `ProductionBootstrapCli` (production), which migrate the `tenant_default` template first, verify a structural fingerprint, then roll out to a canary tenant and the rest in batches of 10. Files may use the `${tenantId}`/`${tenantSchema}` Flyway placeholders. Current latest: `V64__ai_artifact_unknown_sensitivity.sql` — everything from `V45` onward is AI Security / AI Grid schema, and unlike the rest of the codebase these tables have no JPA entity/repository (accessed via `JdbcTemplate` in `aisecurity.service`). See `docs/database.md#tenant-schema-control-plane` and `docs/database.md#ai-security--ai-grid-tables` for the full mechanics.
+- **Platform/`public` schema**: after the one-time reset, use `postgres_reset/V{next}__description.sql`; `V1__platform_schema.sql` owns `public`, `platform`, and the empty `tenant_default`. Every file must open with `-- migration-guard: platform-only` and must not contain tenant DDL or placeholders.
+- **Per-tenant schema DDL** (every table that lives inside `tenant_default`/`tenant_<id>`, including RLS policy changes): create `backend/src/main/resources/db/migration/tenant/V{next}__description.sql`. This line is **not** run by the application's startup Flyway — it is applied once per tenant schema by `TenantSchemaMigrationService` (dev/test) or `ProductionBootstrapCli` (production), which migrate the `tenant_default` template first, verify a structural fingerprint, then roll out to a canary tenant and the rest in batches of 10. Files may use the `${tenantId}`/`${tenantSchema}` Flyway placeholders. Current latest: `tenant/V1__tenant_schema.sql` — the one-time reset consolidated all schema, including AI Security / AI Grid tables, into this single baseline, so there is no longer a numbered boundary between "core" and "AI Grid" migrations. Unlike the rest of the codebase, AI Grid tables have no JPA entity/repository (accessed via `JdbcTemplate` in `aisecurity.service`). See `docs/database.md#tenant-schema-control-plane` and `docs/database.md#ai-security--ai-grid-tables` for the full mechanics.
 
-Never edit an already-applied migration file — with one narrow, already-made exception: `V14__github_sbom_source_token.sql` and `V23__default_risk_policy_presets.sql` were later edited to be schema-qualified/search-path-independent (a correctness fix required once tenant migrations stopped inheriting the request's `search_path`), not to change schema. Don't treat that as license to edit other applied migrations — it was a deliberate, reviewed exception for a specific search-path-safety bug, not a new norm.
+Never edit an already-applied migration file. (Before the one-time migration-history reset described below, a narrow exception existed for two pre-reset files that needed a schema-qualification fix — that fix is now simply part of the `V1` baselines, so no live exception currently applies; don't treat historical precedent as license to edit an applied migration today.)
 
-The baseline migration is `V1__platform_and_default_tenant_schemas.sql` — a large consolidated baseline (60+ tables) created when a prior drift-repair effort reset and renumbered the whole migration line; do not expect V1 to look like a "day one" schema. All statements use `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`, making the schema idempotent if replayed directly via psql.
+The baseline migrations are `postgres_reset/V1__platform_schema.sql` (69 tables, platform/`public` schema) and `tenant/V1__tenant_schema.sql` (113 tables, per-tenant schema) — two large, independent, pg_dump-generated baselines created by the one-time migration-history reset; do not expect either to look like a "day one" schema. All statements use `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`, making the schema idempotent if replayed directly via psql.
 
 ### Scheduled Jobs
 
@@ -310,6 +312,8 @@ The baseline migration is `V1__platform_and_default_tenant_schemas.sql` — a la
 | Every 3 sec (default) | Poll `ingestion_jobs` for AI Security AWS/Azure discovery jobs |
 | Every 60 sec (default) | Demote AI Grid validated exposures with expired evidence |
 | Daily 02:20 (default) | Sweep Azure AI credential profiles for expiry |
+| Every 5 sec (default) | Process pending AI Grid policy rollout tasks (`AiGridPolicyRolloutService`) |
+| Every 5 sec (default) | Process pending AI Grid policy deprecation tasks (`AiGridPolicyDeprecationService`) |
 | Hourly | Policy-based auto-close findings |
 | Hourly | Demo tenant expiry check |
 | Midnight | Nightly re-run of all approved suppression rules |
@@ -319,7 +323,7 @@ A handful of additional infra-level jobs also run (ingestion job polling every 2
 ### Known Limitations
 
 - `POST /api/cve-detail/{cveId}/suppress` persists suppression state via `OrgCveRecordService.suppress()` and returns a `SuppressionResponse`. Suppression expiry is handled by the 15-minute reopen job.
-- Multi-tenant schema-per-tenant isolation is implemented (see "Multi-Tenancy Status" above); `TenantService.getDefaultTenant()` is no longer used. Full RLS enforcement across production tenants remains gated behind `V29__tenant_rls_rollout_gate.sql`.
+- Multi-tenant schema-per-tenant isolation is implemented (see "Multi-Tenancy Status" above); `TenantService.getDefaultTenant()` is no longer used. Full RLS enforcement across production tenants remains gated by `ProductionSafetyValidator.validateRuntimeRoleCannotBypassRls()` (confirms the runtime role is non-superuser and lacks `BYPASSRLS` before enforcement is allowed to proceed).
 - The live CVE workflow is the CVE Assessment Workbench at `/vuln-repo/org-cves`. `CveDetailPage.tsx` exists but is not mounted in the router.
 - GHCR attestation ingestion does not yet perform cryptographic signature verification.
 - AI-assisted features (investigation summary, AI solution, AI actions) call OpenAI and are gated by `OPENAI_ENABLED`. Results are persisted on `org_cve_records` / `org_cve_ai_artifacts` so subsequent reads do not re-call the API.
@@ -327,12 +331,12 @@ A handful of additional infra-level jobs also run (ingestion job polling every 2
 - S.AI Risk Score and S.AI Priority are computed entirely in the browser from existing API data — they are not stored in the database and recalculate on every render.
 - SCCM sync (`SccmCmdbSyncService`) performs asset discovery and field mapping but does not yet support incremental delta sync — each run is a full sweep.
 - AWS Discovery (`aws-discovery` connector) is scoped to EC2 instances via SSM; multi-account/region support via `aws_discovery_targets` with cross-account role ARN + external ID.
-- Azure Discovery (`azure-discovery` connector, `V40`/`V41`) mirrors the AWS Discovery architecture (config + per-subscription targets, `CLIENT_SECRET` or `MANAGED_IDENTITY` auth) but is newer and less exercised in production than AWS Discovery.
+- Azure Discovery (`azure-discovery` connector) mirrors the AWS Discovery architecture (config + per-subscription targets, `CLIENT_SECRET` or `MANAGED_IDENTITY` auth) but is newer and less exercised in production than AWS Discovery.
 - Remediation Campaigns (`CampaignController`, `/vuln-repo/campaigns`) and CBOM/cloud-posture tracking (`CbomController`, `/api/bom/cbom`) are shipped and now covered in `docs/business-logic-guide.md` and `docs/database.md`, though not at the same field-level depth as the core finding/CVE workflow — read the controllers/DTOs directly if you need more.
 - AI Security / AI Grid (`com.prototype.vulnwatch.aisecurity`, entitlement-gated `ai.security`) is a large, separately-governed module — see `docs/business-logic-guide.md#ai-security--ai-grid-pipeline` for the full pipeline. Its tables have no JPA entity/repository (JdbcTemplate-only); Azure discovery is newer/less battle-tested than AWS and has its own kill switch; Macie/Purview integrations are strictly read-only against existing classification results.
-- The migration history reset is intentional and documented in `docs/adr-migration-reset-v1-baselines.md`; platform and tenant targets are independently resolved from their packaged V1 catalogs.
+- The migration history reset is intentional: the platform and tenant Flyway lines were each consolidated into a fresh `V1` baseline (`postgres_reset/V1__platform_schema.sql`, `tenant/V1__tenant_schema.sql`), independently resolved by `PackagedMigrationCatalog`. The ADR that documented this (`docs/adr-migration-reset-v1-baselines.md`) has been removed from the repository along with a handful of other superseded docs; if the rationale needs to be discoverable again, someone should re-author it rather than assume this bullet is a substitute.
 - `com.prototype.vulnwatch.web.PlatformAdminRequestPaths` has no call site found outside its own unit test as of this writing — likely incompletely wired up.
-- Several docs and this file reference `docs/p0-production-runbook.md` for the production bootstrap/Render migration procedure — **that file does not exist in the repository**. This is a pre-existing dangling reference, not something introduced by the AI Grid work; someone should either author it or remove the references.
+- Several docs and this file previously referenced `docs/p0-production-runbook.md` for the production bootstrap/Render migration procedure and `docs/production-database-roles.sql` for manual DBA role grants — **neither file exists in the repository**. These are pre-existing dangling references (the runbook doc has since been deleted outright); someone should author replacements or remove the remaining references in `backend/CLAUDE.md`, `docs/backend.md`, and `docs/architecture.md`.
 
 ### GitHub Token
 
@@ -400,4 +404,4 @@ A change is done when **all** of these are true:
 - Files added to `frontend/src/components/` larger than ~300 lines — split into a feature directory under `frontend/src/features/<feature>/`.
 # Database migration rules
 
-The database uses independent V1 Flyway baselines: platform V1 owns `public`, `platform`, and the empty `tenant_default` schema; tenant V1 owns complete per-tenant DDL, RLS, constraints, and tenant-safe seeds. Migration files are append-only and applied migrations must never be edited, deleted, renamed, or moved. Fresh PostgreSQL validation, migration-validation, PostgreSQL integration, and an up-to-date/merge-queue branch are required before merge. Follow `docs/adr-migration-reset-v1-baselines.md` for the one-time reset and shared-environment procedure.
+The database uses independent V1 Flyway baselines: platform V1 owns `public`, `platform`, and the empty `tenant_default` schema; tenant V1 owns complete per-tenant DDL, RLS, constraints, and tenant-safe seeds. Migration files are append-only and applied migrations must never be edited, deleted, renamed, or moved. Fresh PostgreSQL validation, migration-validation, PostgreSQL integration, and an up-to-date/merge-queue branch are required before merge. (The ADR that documented the one-time reset and shared-environment procedure, `docs/adr-migration-reset-v1-baselines.md`, has been removed from the repo — re-author it if this procedure needs to be written down again.)
