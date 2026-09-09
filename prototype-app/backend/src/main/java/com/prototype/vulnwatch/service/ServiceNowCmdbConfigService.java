@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.client.http.OutboundFailureDecision;
 import com.prototype.vulnwatch.client.http.OutboundHttpClient;
+import com.prototype.vulnwatch.client.http.OutboundHostPolicy;
 import com.prototype.vulnwatch.client.http.OutboundPolicy;
 import com.prototype.vulnwatch.client.http.OutboundPolicyFactory;
 import com.prototype.vulnwatch.domain.ServiceNowAuthType;
@@ -75,6 +76,7 @@ public class ServiceNowCmdbConfigService {
     private final ObjectMapper objectMapper;
     private final TenantQuotaService tenantQuotaService;
     private final CredentialEncryptionService credentialEncryptionService;
+    private final OutboundHostPolicy outboundHostPolicy;
 
     @Value("${app.cmdb.servicenow.base-url:}")
     private String fallbackBaseUrl;
@@ -91,7 +93,8 @@ public class ServiceNowCmdbConfigService {
             OutboundPolicyFactory outboundPolicyFactory,
             ObjectMapper objectMapper,
             TenantQuotaService tenantQuotaService,
-            CredentialEncryptionService credentialEncryptionService
+            CredentialEncryptionService credentialEncryptionService,
+            OutboundHostPolicy outboundHostPolicy
     ) {
         this.serviceNowCmdbConfigRepository = serviceNowCmdbConfigRepository;
         this.outboundHttpClient = outboundHttpClient;
@@ -99,6 +102,19 @@ public class ServiceNowCmdbConfigService {
         this.objectMapper = objectMapper;
         this.tenantQuotaService = tenantQuotaService;
         this.credentialEncryptionService = credentialEncryptionService;
+        this.outboundHostPolicy = outboundHostPolicy;
+    }
+
+    public ServiceNowCmdbConfigService(
+            ServiceNowCmdbConfigRepository serviceNowCmdbConfigRepository,
+            OutboundHttpClient outboundHttpClient,
+            OutboundPolicyFactory outboundPolicyFactory,
+            ObjectMapper objectMapper,
+            TenantQuotaService tenantQuotaService,
+            CredentialEncryptionService credentialEncryptionService
+    ) {
+        this(serviceNowCmdbConfigRepository, outboundHttpClient, outboundPolicyFactory, objectMapper,
+                tenantQuotaService, credentialEncryptionService, new OutboundHostPolicy("servicenow=acme.service-now.example"));
     }
 
     @Transactional(readOnly = true)
@@ -315,6 +331,11 @@ public class ServiceNowCmdbConfigService {
     private void validate(ServiceNowRuntimeConfig config) {
         if (!hasText(config.baseUrl())) {
             throw new ResponseStatusException(BAD_REQUEST, "ServiceNow base URL is required");
+        }
+        try {
+            outboundHostPolicy.validate("servicenow", java.net.URI.create(config.baseUrl().trim()));
+        } catch (IllegalArgumentException ex) {
+            throw new ResponseStatusException(BAD_REQUEST, "ServiceNow base URL is not an approved public HTTPS endpoint", ex);
         }
         if (config.authType() == ServiceNowAuthType.BASIC && !hasText(config.username())) {
             throw new ResponseStatusException(BAD_REQUEST, "ServiceNow username is required for basic auth");

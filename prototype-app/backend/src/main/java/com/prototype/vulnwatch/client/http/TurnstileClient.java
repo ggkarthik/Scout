@@ -36,7 +36,7 @@ public class TurnstileClient {
         }
         body.add("idempotency_key", UUID.randomUUID().toString());
         HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+        headers.setContentType(new MediaType(MediaType.APPLICATION_FORM_URLENCODED, java.nio.charset.StandardCharsets.UTF_8));
         try {
             return restTemplate.postForObject(
                     SITEVERIFY_URL,

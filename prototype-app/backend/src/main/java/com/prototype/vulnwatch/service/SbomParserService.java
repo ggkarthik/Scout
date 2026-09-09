@@ -20,19 +20,15 @@ import java.util.Set;
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.parsers.ParserConfigurationException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
+import org.xml.sax.SAXException;
 
 @Service
 public class SbomParserService {
-    private static final Logger log = LoggerFactory.getLogger(SbomParserService.class);
-
     private final ObjectMapper objectMapper;
 
     public SbomParserService(ObjectMapper objectMapper) {
@@ -259,35 +255,22 @@ public class SbomParserService {
     Document buildXmlDocument(byte[] content) throws Exception {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         factory.setNamespaceAware(true);
-        // Disable external entity expansion to prevent XXE attacks.
-        setFeatureIfSupported(factory, XMLConstants.FEATURE_SECURE_PROCESSING, true);
-        setFeatureIfSupported(factory, "http://xml.org/sax/features/external-general-entities", false);
-        setFeatureIfSupported(factory, "http://xml.org/sax/features/external-parameter-entities", false);
-        setFeatureIfSupported(factory, "http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
+        // These are mandatory security controls. If the parser cannot enforce
+        // them, fail closed instead of accepting potentially hostile XML.
+        factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+        factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+        factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false);
         factory.setExpandEntityReferences(false);
-        // Restrict external DTD/schema access (JAXP 1.5+, defense-in-depth).
-        setAttributeIfSupported(factory, XMLConstants.ACCESS_EXTERNAL_DTD, "");
-        setAttributeIfSupported(factory, XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
         DocumentBuilder builder = factory.newDocumentBuilder();
-        // Suppress SAX error output for schema validation errors
+        builder.setEntityResolver((publicId, systemId) -> {
+            throw new SAXException("External entity resolution is disabled");
+        });
         builder.setErrorHandler(null);
         return builder.parse(new ByteArrayInputStream(content));
-    }
-
-    private void setFeatureIfSupported(DocumentBuilderFactory factory, String feature, boolean enabled) {
-        try {
-            factory.setFeature(feature, enabled);
-        } catch (ParserConfigurationException | IllegalArgumentException ex) {
-            log.debug("XML parser does not support feature {}={} for SBOM parsing", feature, enabled, ex);
-        }
-    }
-
-    private void setAttributeIfSupported(DocumentBuilderFactory factory, String attribute, String value) {
-        try {
-            factory.setAttribute(attribute, value);
-        } catch (IllegalArgumentException ex) {
-            log.debug("XML parser does not support attribute {}={} for SBOM parsing", attribute, value, ex);
-        }
     }
 
     /** Returns true if the element's local name matches (handles both namespace-aware and unaware). */

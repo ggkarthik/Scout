@@ -2,9 +2,11 @@ package com.prototype.vulnwatch.config;
 
 import com.prototype.vulnwatch.service.TenantContext;
 import com.prototype.vulnwatch.client.http.OutboundHttpClient;
+import com.prototype.vulnwatch.client.http.OutboundHostPolicy;
 import com.prototype.vulnwatch.client.http.OutboundPolicyDefaults;
 import com.prototype.vulnwatch.client.http.OutboundPolicyFactory;
 import java.time.Duration;
+import java.net.http.HttpClient;
 import org.springframework.core.task.TaskDecorator;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.RestTemplateBuilder;
@@ -12,6 +14,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 
 @Configuration
 public class HttpClientConfig {
@@ -19,12 +22,21 @@ public class HttpClientConfig {
     @Bean
     public RestTemplate restTemplate(
             RestTemplateBuilder builder,
+            OutboundHostPolicy outboundHostPolicy,
             @Value("${app.http.connect-timeout-ms:5000}") long connectTimeoutMs,
             @Value("${app.http.read-timeout-ms:30000}") long readTimeoutMs
     ) {
+        HttpClient httpClient = HttpClient.newBuilder()
+                .followRedirects(HttpClient.Redirect.NEVER)
+                .build();
         return builder
                 .setConnectTimeout(Duration.ofMillis(connectTimeoutMs))
                 .setReadTimeout(Duration.ofMillis(readTimeoutMs))
+                .requestFactory(() -> new JdkClientHttpRequestFactory(httpClient))
+                .additionalInterceptors((request, body, execution) -> {
+                    outboundHostPolicy.validateAny(request.getURI());
+                    return execution.execute(request, body);
+                })
                 .build();
     }
 
@@ -53,8 +65,15 @@ public class HttpClientConfig {
     }
 
     @Bean
-    public OutboundHttpClient outboundHttpClient(RestTemplate restTemplate) {
-        return new OutboundHttpClient(restTemplate);
+    public OutboundHostPolicy outboundHostPolicy(
+            @Value("${app.http.outbound.allowed-hosts:}") String allowedHosts
+    ) {
+        return new OutboundHostPolicy(allowedHosts);
+    }
+
+    @Bean
+    public OutboundHttpClient outboundHttpClient(RestTemplate restTemplate, OutboundHostPolicy outboundHostPolicy) {
+        return new OutboundHttpClient(restTemplate, outboundHostPolicy);
     }
 
     @Bean(name = {"ingestionExecutor", "sbomJobExecutor"})

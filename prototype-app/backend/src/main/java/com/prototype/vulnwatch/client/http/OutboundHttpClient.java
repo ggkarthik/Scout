@@ -17,6 +17,7 @@ public class OutboundHttpClient {
     private static final Logger LOG = LoggerFactory.getLogger(OutboundHttpClient.class);
 
     private final RestTemplate restTemplate;
+    private final OutboundHostPolicy hostPolicy;
     private final LongSupplier currentTimeMillis;
     private final SleepStrategy sleepStrategy;
     private final ConcurrentHashMap<String, ProviderPacingState> pacingByProvider = new ConcurrentHashMap<>();
@@ -24,6 +25,7 @@ public class OutboundHttpClient {
     public OutboundHttpClient(RestTemplate restTemplate) {
         this(
                 restTemplate,
+                OutboundHostPolicy.forTests(),
                 System::currentTimeMillis,
                 millis -> {
                     if (millis > 0) {
@@ -33,14 +35,35 @@ public class OutboundHttpClient {
         );
     }
 
+    public OutboundHttpClient(RestTemplate restTemplate, OutboundHostPolicy hostPolicy) {
+        this(
+                restTemplate,
+                hostPolicy,
+                System::currentTimeMillis,
+                millis -> {
+                    if (millis > 0L) Thread.sleep(millis);
+                }
+        );
+    }
+
+    OutboundHttpClient(
+            RestTemplate restTemplate,
+            OutboundHostPolicy hostPolicy,
+            LongSupplier currentTimeMillis,
+            SleepStrategy sleepStrategy
+    ) {
+        this.restTemplate = restTemplate;
+        this.hostPolicy = hostPolicy;
+        this.currentTimeMillis = currentTimeMillis;
+        this.sleepStrategy = sleepStrategy;
+    }
+
     OutboundHttpClient(
             RestTemplate restTemplate,
             LongSupplier currentTimeMillis,
             SleepStrategy sleepStrategy
     ) {
-        this.restTemplate = restTemplate;
-        this.currentTimeMillis = currentTimeMillis;
-        this.sleepStrategy = sleepStrategy;
+        this(restTemplate, OutboundHostPolicy.forTests(), currentTimeMillis, sleepStrategy);
     }
 
     public <T, E extends Exception> ResponseEntity<T> exchange(
@@ -128,10 +151,7 @@ public class OutboundHttpClient {
             sleep(waitMs, policy.providerKey(), "request pacing");
             try {
                 URI uri = URI.create(endpoint);
-                String scheme = uri.getScheme();
-                if (scheme == null || (!scheme.equalsIgnoreCase("https") && !scheme.equalsIgnoreCase("http"))) {
-                    throw new IllegalArgumentException("Outbound requests must use http or https: " + endpoint);
-                }
+                hostPolicy.validate(policy.providerKey(), uri);
                 return restTemplate.exchange(uri, method, requestEntity, responseType);
             } finally {
                 state.lastRequestCompletedAtMs = currentTimeMillis.getAsLong();

@@ -179,6 +179,9 @@ app:
       max-backoff-ms: ${HTTP_OUTBOUND_MAX_BACKOFF_MS:60000}
       honor-retry-after: ${HTTP_OUTBOUND_HONOR_RETRY_AFTER:true}
       retry-on-network-errors: ${HTTP_OUTBOUND_RETRY_ON_NETWORK_ERRORS:true}
+      # Semicolon-separated provider=exact.hostname mappings. Dynamic providers
+      # (servicenow and sbom-endpoint) must be explicitly configured per deployment.
+      allowed-hosts: ${HTTP_OUTBOUND_ALLOWED_HOSTS:github=api.github.com;nvd=services.nvd.nist.gov;epss=api.first.org;eol=endoflife.date;openai=api.openai.com;resend=api.resend.com;turnstile=challenges.cloudflare.com;kev=www.cisa.gov;jvn=jvndb.jvn.jp;euvd=euvdservices.enisa.europa.eu;csaf-microsoft=msrc.microsoft.com;csaf-redhat=security.access.redhat.com;csaf-cisa=www.cisa.gov}
   openai:
     api-key: ${OPENAI_API_KEY:}
     base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}

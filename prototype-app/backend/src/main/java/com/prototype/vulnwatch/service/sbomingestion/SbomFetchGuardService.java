@@ -1,32 +1,29 @@
 package com.prototype.vulnwatch.service.sbomingestion;
 
 import java.io.IOException;
-import java.net.InetAddress;
 import java.net.URI;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
-import java.util.Set;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
+import com.prototype.vulnwatch.client.http.OutboundHostPolicy;
+import org.springframework.beans.factory.annotation.Value;
 
 @Service
 public class SbomFetchGuardService {
 
     private final long maxPayloadBytes;
     private final boolean allowUserAuthHeader;
-    private final String allowedHostsCsv;
+    private final OutboundHostPolicy outboundHostPolicy;
 
     public SbomFetchGuardService(
             @Value("${app.sbom-fetch.max-payload-bytes:5242880}") long maxPayloadBytes,
             @Value("${app.sbom-fetch.allow-user-auth-header:false}") boolean allowUserAuthHeader,
-            @Value("${app.sbom-fetch.allowed-hosts:}") String allowedHostsCsv
+            OutboundHostPolicy outboundHostPolicy
     ) {
         this.maxPayloadBytes = maxPayloadBytes;
         this.allowUserAuthHeader = allowUserAuthHeader;
-        this.allowedHostsCsv = allowedHostsCsv;
+        this.outboundHostPolicy = outboundHostPolicy;
     }
 
     public HttpHeaders buildEndpointHeaders(String authorizationHeader) throws IOException {
@@ -57,24 +54,10 @@ public class SbomFetchGuardService {
             throw new IOException("Source URL host is required");
         }
 
-        // Explicitly allowed hosts (e.g. localhost in local dev) bypass scheme and address checks
-        String normalizedHost = host.trim().toLowerCase(Locale.ROOT);
-        if (allowedHosts().contains(normalizedHost)) {
-            return;
-        }
-
-        if (!"https".equalsIgnoreCase(uri.getScheme())) {
-            throw new IOException("Only HTTPS source URLs are allowed");
-        }
-
-        InetAddress[] addresses = InetAddress.getAllByName(normalizedHost);
-        if (addresses.length == 0) {
-            throw new IOException("Unable to resolve source URL host");
-        }
-        for (InetAddress address : addresses) {
-            if (isBlockedAddress(address)) {
-                throw new IOException("Source URL resolves to a blocked internal address");
-            }
+        try {
+            outboundHostPolicy.validate("sbom-endpoint", uri);
+        } catch (IllegalArgumentException ex) {
+            throw new IOException("Source URL is not an approved public HTTPS endpoint", ex);
         }
     }
 
@@ -84,24 +67,4 @@ public class SbomFetchGuardService {
         }
     }
 
-    private Set<String> allowedHosts() {
-        if (allowedHostsCsv == null || allowedHostsCsv.isBlank()) {
-            return Set.of();
-        }
-        Set<String> values = new HashSet<>();
-        for (String host : allowedHostsCsv.split(",")) {
-            if (host != null && !host.isBlank()) {
-                values.add(host.trim().toLowerCase(Locale.ROOT));
-            }
-        }
-        return values;
-    }
-
-    private boolean isBlockedAddress(InetAddress address) {
-        return address.isAnyLocalAddress()
-                || address.isLoopbackAddress()
-                || address.isLinkLocalAddress()
-                || address.isSiteLocalAddress()
-                || address.isMulticastAddress();
-    }
 }
