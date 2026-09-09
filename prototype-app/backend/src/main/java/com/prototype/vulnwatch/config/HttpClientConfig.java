@@ -27,12 +27,13 @@ public class HttpClientConfig {
             @Value("${app.http.read-timeout-ms:30000}") long readTimeoutMs
     ) {
         HttpClient httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofMillis(connectTimeoutMs))
                 .followRedirects(HttpClient.Redirect.NEVER)
                 .build();
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
+        requestFactory.setReadTimeout(Duration.ofMillis(readTimeoutMs));
         return builder
-                .setConnectTimeout(Duration.ofMillis(connectTimeoutMs))
-                .setReadTimeout(Duration.ofMillis(readTimeoutMs))
-                .requestFactory(() -> new JdkClientHttpRequestFactory(httpClient))
+                .requestFactory(() -> requestFactory)
                 .additionalInterceptors((request, body, execution) -> {
                     outboundHostPolicy.validateAny(request.getURI());
                     return execution.execute(request, body);

@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -87,6 +88,7 @@ public class ServiceNowCmdbConfigService {
     @Value("${app.cmdb.servicenow.password:}")
     private String fallbackPassword;
 
+    @Autowired
     public ServiceNowCmdbConfigService(
             ServiceNowCmdbConfigRepository serviceNowCmdbConfigRepository,
             OutboundHttpClient outboundHttpClient,
