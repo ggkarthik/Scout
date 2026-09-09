@@ -20,6 +20,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Resolve backend dependencies
+        working-directory: prototype-app/backend
+        run: mvn -q -DskipTests dependency:go-offline
+
       - name: Run Trivy on filesystem
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -29,7 +39,7 @@ jobs:
           output: trivy-fs.sarif
           scanners: vuln
           severity: CRITICAL
-          exit-code: '1'
+          exit-code: '0'
 
       - name: Upload filesystem scan results
         uses: github/codeql-action/upload-sarif@v3
@@ -37,6 +47,9 @@ jobs:
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-filesystem
+
+      - name: Enforce filesystem vulnerability gate
+        run: trivy fs --scanners vuln --severity CRITICAL --exit-code 1 .
 
   images:
     name: Docker image scan
@@ -56,7 +69,7 @@ jobs:
           output: trivy-backend.sarif
           scanners: vuln
           severity: CRITICAL
-          exit-code: '1'
+          exit-code: '0'
 
       - name: Upload backend image scan results
         uses: github/codeql-action/upload-sarif@v3
@@ -77,7 +90,7 @@ jobs:
           output: trivy-frontend.sarif
           scanners: vuln
           severity: CRITICAL
-          exit-code: '1'
+          exit-code: '0'
 
       - name: Upload frontend image scan results
         uses: github/codeql-action/upload-sarif@v3
@@ -85,3 +98,8 @@ jobs:
         with:
           sarif_file: trivy-frontend.sarif
           category: trivy-frontend-image
+
+      - name: Enforce image vulnerability gate
+        run: |
+          trivy image --scanners vuln --severity CRITICAL --exit-code 1 vulnwatch-backend:${{ github.sha }}
+          trivy image --scanners vuln --severity CRITICAL --exit-code 1 vulnwatch-frontend:${{ github.sha }}

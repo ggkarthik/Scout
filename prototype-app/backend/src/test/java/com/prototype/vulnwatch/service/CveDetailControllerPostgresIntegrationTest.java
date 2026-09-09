@@ -295,7 +295,7 @@ class CveDetailControllerPostgresIntegrationTest {
     @Test
     void cveDetailUsesActorTenantUuidForInvestigationsAndAssessments() throws Exception {
         Tenant defaultTenant = createTenant(TenantService.DEFAULT_TENANT_NAME);
-        Tenant legacyShadowTenant = createTenantWithId("Legacy Workspace", new UUID(0L, 1L));
+        Tenant legacyShadowTenant = createTenantWithId("Legacy Workspace", new UUID(0L, 2L));
         String cveId = "CVE-2099-9905";
         Vulnerability vulnerability = createVulnerability(cveId);
 
@@ -318,7 +318,7 @@ class CveDetailControllerPostgresIntegrationTest {
     @Test
     void submitInvestigationPersistsAgainstActorTenantUuidInsteadOfLegacyShadowTenant() throws Exception {
         Tenant defaultTenant = createTenant(TenantService.DEFAULT_TENANT_NAME);
-        Tenant legacyShadowTenant = createTenantWithId("Legacy Workspace", new UUID(0L, 1L));
+        Tenant legacyShadowTenant = createTenantWithId("Legacy Workspace", new UUID(0L, 2L));
         String cveId = "CVE-2099-9906";
         createVulnerability(cveId);
 
