@@ -25,7 +25,14 @@ public class AiGridPolicyShippingStatusService {
         return TenantContext.runAsPlatform(() -> {
             Map<String, String> expectedDigests = bundledManifest();
             long expected = expectedDigests.size();
-            long installed = count("select count(*) from platform.ai_grid_policy_versions where package_source_ref like :bundled", Map.of("bundled", BUNDLED));
+            // Historical bundled package versions can remain immutable after a
+            // successor is shipped. Count only the manifest's exact policy
+            // identities so those retained versions cannot make a complete
+            // current catalog look over- or under-installed.
+            long installed = expectedDigests.keySet().stream().filter(key -> count("""
+                    select count(*) from platform.ai_grid_policy_versions
+                     where policy_id=:policyId and version=:version
+                    """, Map.of("policyId", key.split("@", 2)[0], "version", key.split("@", 2)[1])) == 1).count();
             long published = count("select count(*) from platform.ai_grid_policy_versions where package_source_ref like :bundled and lifecycle='PUBLISHED'", Map.of("bundled", BUNDLED));
             long distributed = count("""
                     select count(*) from platform.ai_grid_policy_versions p join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id
