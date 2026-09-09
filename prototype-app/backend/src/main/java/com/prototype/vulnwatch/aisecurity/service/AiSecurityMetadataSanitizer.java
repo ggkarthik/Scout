@@ -77,6 +77,7 @@ public class AiSecurityMetadataSanitizer {
             "piiEntityCount", "principalId", "principalType", "privateEndpoint", "privateEndpointCount",
             "productionVariants", "profanityFilterEnabled", "protocol", "providerName", "provisioningState",
             "public", "publicContentAccess", "publicNetworkAccess", "publicNetworkUnrestricted",
+            "publiclyAccessible", "publicEndpoint",
             "raiBasePolicyName", "raiCustomBlocklistCount", "raiFilterCount", "raiFilterEvidenceComplete",
             "raiNonBlockingFilterCount", "raiNonBlockingFilterObserved", "raiPolicyMode", "raiPolicyName",
             "referenceOnly", "referencedBy", "resourceGroup", "retrievalMode", "roleDefinitionId", "s3Buckets",

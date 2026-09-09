@@ -576,9 +576,8 @@ public class AiGridAssessmentService {
 
     /**
      * Stable identity of an AI posture finding: tenant + policy + subject artifact.
-     * Shared with {@code AiGridPhase1PolicyMigrationService} so that re-keying a legacy
-     * finding to its replacement policy yields the exact fingerprint the replacement
-     * adapter will compute on its next assessment — the finding is reconciled, not duplicated.
+     * Stable across re-assessment so an existing posture finding is reconciled rather
+     * than duplicated when its policy is evaluated again.
      */
     public static String postureFindingFingerprint(UUID tenantId, String policyId, UUID subjectId) {
         try {

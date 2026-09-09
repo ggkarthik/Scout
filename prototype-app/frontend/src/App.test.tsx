@@ -57,7 +57,7 @@ describe('App test persona switcher', () => {
     const { default: App } = await import('./App');
     renderWithProviders(<App />, { route: '/' });
 
-    expect(await screen.findByRole('heading', { name: /The AI-First Exposure Management Platform Powered/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /The Exposure Management Platform Powered by AI Grid/i })).toBeInTheDocument();
     expect(screen.queryByText('Loading page...')).not.toBeInTheDocument();
   });
 
@@ -170,7 +170,8 @@ describe('App test persona switcher', () => {
     expect(await screen.findByRole('button', { name: 'Tenant Management' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Tenant context switcher')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'End-of-Life' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Policies' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Policy Distribution' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'AI Policies' })).not.toBeInTheDocument();
     const platformViews = await screen.findByLabelText('Platform views');
     expect(within(platformViews).getByLabelText('Tenant Management')).toBeInTheDocument();
     expect(within(platformViews).queryByText('AI Policy Studio')).not.toBeInTheDocument();
@@ -188,10 +189,10 @@ describe('App test persona switcher', () => {
     const { default: App } = await import('./App');
     renderWithProviders(<App />, { route: '/platform/tenants' });
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Policies' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Policy Distribution' }));
 
     expect(await screen.findByRole('heading', { name: 'Policy distribution' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Policies' })).toHaveClass('active');
+    expect(screen.getByRole('button', { name: 'Policy Distribution' })).toHaveClass('active');
     expect(screen.queryByLabelText('Platform views')).not.toBeInTheDocument();
   });
 

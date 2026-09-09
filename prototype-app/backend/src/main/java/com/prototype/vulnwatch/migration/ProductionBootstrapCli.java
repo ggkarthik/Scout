@@ -582,9 +582,11 @@ public final class ProductionBootstrapCli {
                 .placeholders(java.util.Map.of(
                         "tenantId", tenant.tenantId().toString(),
                         "tenantSchema", tenant.schemaName()))
+                .callbacks(new TenantSearchPathFlywayCallback(tenant.schemaName()))
                 .validateOnMigrate(true)
                 .outOfOrder(false)
-                .initSql("SET statement_timeout = '5min'")
+                .initSql("SET search_path TO " + quotedIdentifier(tenant.schemaName())
+                        + ", public; SET statement_timeout = '5min'")
                 .load();
     }
 

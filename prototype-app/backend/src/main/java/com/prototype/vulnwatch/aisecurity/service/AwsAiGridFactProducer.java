@@ -22,7 +22,7 @@ public class AwsAiGridFactProducer implements AiGridFactProducer {
             AiGridFactProducerSupport.copy(input, "minimumStrength",
                     "bedrock.guardrail.minimum_strength_configured", facts);
         }
-        AiGridFactProducerSupport.copy(input, "publicNetworkUnrestricted", "network.public_access_configured", facts);
+        copyPublicAccess(input, facts);
         AiGridFactProducerSupport.copy(input, "s3Public", "data.s3_public_access_configured", facts);
         if (input.attributes().hasNonNull("functionUrlAuthType")) {
             AiGridFactProducerSupport.copy(input, "functionUrlAuthType", "compute.lambda_url_auth_type_configured", facts);
@@ -129,5 +129,12 @@ public class AwsAiGridFactProducer implements AiGridFactProducer {
             }
         }
         return List.copyOf(facts);
+    }
+
+    private void copyPublicAccess(FactInput input, List<ProducedFact> facts) {
+        String attribute = input.attributes().hasNonNull("publicNetworkUnrestricted") ? "publicNetworkUnrestricted"
+                : input.attributes().hasNonNull("publiclyAccessible") ? "publiclyAccessible"
+                : input.attributes().hasNonNull("publicEndpoint") ? "publicEndpoint" : null;
+        if (attribute != null) AiGridFactProducerSupport.copy(input, attribute, "network.public_access_configured", facts);
     }
 }

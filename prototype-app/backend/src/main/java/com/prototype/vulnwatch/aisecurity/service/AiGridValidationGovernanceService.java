@@ -444,7 +444,8 @@ public class AiGridValidationGovernanceService {
             int reviewersRequired = List.of("HIGH", "CRITICAL").contains(severity) ? 2 : 1;
             List<ResolvedSample> samples = jdbc.query("""
                     select s.id, s.predicted_finding,
-                           array_agg(l.label order by l.reviewer) labels,
+                           coalesce(array_agg(l.label order by l.reviewer) filter (where l.label is not null),
+                                    ARRAY[]::varchar[]) labels,
                            count(distinct l.reviewer) reviewer_count,
                            a.final_label
                       from platform.ai_grid_precision_samples s
@@ -491,57 +492,6 @@ public class AiGridValidationGovernanceService {
                     .addValue("precision", precision).addValue("lower", precision == null ? null : interval[0])
                     .addValue("upper", precision == null ? null : interval[1]).addValue("id", reviewId));
             return precisionReview(reviewId);
-        }));
-    }
-
-    public ReleaseDecision publishPolicy(String policyId, String version, String actor) {
-        return TenantContext.runAsPlatform(() -> transactions.execute(status -> {
-            PolicyCandidate candidate = policyCandidate(policyId, version);
-            String digest = digest(candidate.digestMaterial());
-            String packageDigest = candidate.packageDigest() == null ? digest : candidate.packageDigest();
-            if (candidate.packageDigest() == null) {
-                jdbc.update("update platform.ai_grid_policy_versions set package_digest=:digest where policy_id=:policyId and version=:version",
-                        Map.of("digest", packageDigest, "policyId", policyId, "version", version));
-            }
-            AnswerKeyGate answerKey = answerKeyGate(policyId, version, digest);
-            PrecisionReview precision = candidate.requiresPrecisionReview()
-                    ? passingPrecisionReview(policyId, version, digest) : null;
-            List<String> blockers = new ArrayList<>();
-            if (actor.equals(candidate.authoredBy())) {
-                blockers.add("Independent author and approver are required");
-            }
-            if (answerKey == null) blockers.add("No fresh, certified, passing answer-key run for this policy digest");
-            if (candidate.requiresPrecisionReview() && precision == null) {
-                blockers.add("No passing precision review for this policy digest");
-            }
-            UUID decisionId = UUID.randomUUID();
-            if (!blockers.isEmpty()) {
-                String reason = String.join("; ", blockers);
-                insertReleaseDecision(decisionId, policyId, version, "BLOCKED", answerKey, precision, reason, actor);
-                return new ReleaseDecision(decisionId, policyId, version, false, reason,
-                        answerKey == null ? null : answerKey.runId(), precision == null ? null : precision.id());
-            }
-            if (!List.of("VALIDATED", "APPROVED", "CANARY", "PUBLISHED").contains(candidate.lifecycle())) {
-                String reason = "Policy lifecycle must be VALIDATED, APPROVED, CANARY, or PUBLISHED";
-                insertReleaseDecision(decisionId, policyId, version, "BLOCKED", answerKey, precision, reason, actor);
-                return new ReleaseDecision(decisionId, policyId, version, false, reason,
-                        answerKey.runId(), precision == null ? null : precision.id());
-            }
-            jdbc.update("""
-                    update platform.ai_grid_policy_versions set lifecycle = 'RETIRED'
-                     where policy_id = :policyId and lifecycle = 'PUBLISHED' and version <> :version
-                    """, Map.of("policyId", policyId, "version", version));
-            String reason = "Answer-key and precision release gates passed";
-            insertReleaseDecision(decisionId, policyId, version, "APPROVED", answerKey, precision, reason, actor,
-                    packageDigest);
-            jdbc.update("""
-                    update platform.ai_grid_policy_versions
-                       set lifecycle = 'PUBLISHED', approved_by = :actor,
-                           approved_at = coalesce(approved_at, now()), published_at = now()
-                     where policy_id = :policyId and version = :version
-                    """, Map.of("actor", actor, "policyId", policyId, "version", version));
-            return new ReleaseDecision(decisionId, policyId, version, true, reason, answerKey.runId(),
-                    precision == null ? null : precision.id());
         }));
     }
 
@@ -1327,8 +1277,6 @@ public class AiGridValidationGovernanceService {
                                   String severity, String observedOutcome, boolean predictedFinding,
                                   String evidenceReference, UUID sourceTenantId, UUID sourceRunId,
                                   UUID sourceAssessmentId, String sourceDecisionFingerprint, String provenanceState) {}
-    public record ReleaseDecision(UUID id, String policyId, String policyVersion, boolean published, String reason,
-                                  UUID answerKeyRunId, UUID precisionReviewId) {}
     public record PolicyApproval(UUID approvalId, String policyId, String policyVersion, String packageDigest,
                                  boolean approved, String reason) {}
     public record PolicyPublication(String policyId, String policyVersion, String packageDigest, UUID approvalId,

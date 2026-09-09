@@ -2,6 +2,7 @@ package com.prototype.vulnwatch.service;
 
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.migration.PackagedMigrationCatalog;
+import com.prototype.vulnwatch.migration.TenantSearchPathFlywayCallback;
 import com.prototype.vulnwatch.migration.TenantSchemaFingerprint;
 import com.prototype.vulnwatch.repo.TenantRepository;
 import com.zaxxer.hikari.HikariDataSource;
@@ -185,9 +186,11 @@ public class TenantSchemaMigrationService {
                     .table("tenant_schema_history")
                     .locations("classpath:db/migration/tenant")
                     .placeholders(placeholders)
+                    .callbacks(new TenantSearchPathFlywayCallback(schema))
                     .validateOnMigrate(true)
                     .outOfOrder(false)
-                    .initSql("SET statement_timeout = '5min'")
+                    .initSql("SET search_path TO " + quotedIdentifier(schema)
+                            + ", public; SET statement_timeout = '5min'")
                     .load();
             flyway.migrate();
             int version = Integer.parseInt(flyway.info().current().getVersion().getVersion());
@@ -237,6 +240,10 @@ public class TenantSchemaMigrationService {
             statement.setString(1, LOCK_NAME);
             statement.execute();
         }
+    }
+
+    private static String quotedIdentifier(String identifier) {
+        return "\"" + identifier.replace("\"", "\"\"") + "\"";
     }
 
     private MigrationReport report(UUID runId, Instant startedAt, List<SchemaResult> results,
