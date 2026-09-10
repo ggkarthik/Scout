@@ -201,7 +201,10 @@ public class AiGridCoverageService {
                         union all
                         select c.*, 'FRAMEWORK', framework.key
                           from ai_grid_current_expected_candidates c
-                          cross join lateral jsonb_each(c.framework_mappings_json) framework
+                          cross join lateral jsonb_each(
+                              case when jsonb_typeof(c.framework_mappings_json) = 'object'
+                                   then c.framework_mappings_json else '{}'::jsonb end
+                          ) framework
                          where c.epoch_id = :epochId
                     )
                     select dimension, value, count(*) expected,

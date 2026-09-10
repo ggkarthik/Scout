@@ -54,14 +54,6 @@ SET evaluation_subject = CASE WHEN evaluation_mode = 'CORRELATION_PATH' THEN 'SY
 WHERE evaluation_subject IS NULL;
 ALTER TABLE platform.ai_grid_policy_versions ENABLE TRIGGER trg_ai_grid_approved_package_immutable;
 
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ai_grid_policy_artifact_types_nonempty_check' AND conrelid = 'platform.ai_grid_policy_versions'::regclass) THEN
-        ALTER TABLE platform.ai_grid_policy_versions ADD CONSTRAINT ai_grid_policy_artifact_types_nonempty_check
-            CHECK (jsonb_typeof(artifact_types_json) = 'array' AND jsonb_array_length(artifact_types_json) > 0);
-    END IF;
-END $$;
-
 COMMENT ON COLUMN platform.ai_grid_policy_versions.evaluation_subject IS 'Platform-owned subject boundary: artifact, relationship, system correlation, or resource configuration.';
 COMMENT ON COLUMN platform.ai_grid_policy_versions.relationship_types_json IS 'Platform-owned relationship bindings used by relationship and correlation policy evaluation.';
 COMMENT ON COLUMN platform.ai_grid_policy_versions.applicability_notes IS 'Human-readable platform explanation of the canonical applicability binding.';
