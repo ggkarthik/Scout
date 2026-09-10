@@ -54,44 +54,9 @@ export function PlatformAiPolicyStudio() {
   const [selection, setSelection] = React.useState('ALL');
   const [owasp, setOwasp] = React.useState('ALL');
   const [query, setQuery] = React.useState('');
-  const [activePolicyId, setActivePolicyId] = React.useState<string | null>(null);
-  const [approvalMessage, setApprovalMessage] = React.useState<string | null>(null);
-  const [devMessage, setDevMessage] = React.useState<string | null>(null);
-  const [publishMessage, setPublishMessage] = React.useState<string | null>(null);
   const catalog = useQuery({ queryKey: ['platform-ai-grid-policies'], queryFn: () => api.listPlatformAiGridPolicies() });
   const shipping = useQuery({ queryKey: ['platform-ai-grid-shipping-status'], queryFn: api.getPlatformAiGridShippingStatus });
-  const tenants = useQuery({ queryKey: ['platform-ai-grid-active-tenants'], queryFn: api.listTenants });
   const rollouts = useQuery({ queryKey: ['platform-ai-grid-policy-rollouts'], queryFn: api.listPlatformAiGridPolicyRollouts });
-  const invalidateLifecycle = () => void Promise.all([
-    client.invalidateQueries({ queryKey: ['platform-ai-grid-policies'] }),
-    client.invalidateQueries({ queryKey: ['platform-ai-grid-shipping-status'] }),
-    client.invalidateQueries({ queryKey: ['platform-ai-grid-policy-rollouts'] }),
-  ]);
-  const approve = useMutation({
-    mutationFn: ({ policyId, note }: { policyId: string; note: string }) => api.approvePlatformAiGridPolicy(policyId, note),
-    onSuccess: (result: { approved?: boolean; reason?: string }) => {
-      setApprovalMessage(result.approved ? 'Policy approved successfully.' : `Approval blocked: ${result.reason ?? 'release gates have not passed.'}`);
-      void Promise.all([
-        client.invalidateQueries({ queryKey: ['platform-ai-grid-policies'] }),
-        client.invalidateQueries({ queryKey: ['platform-ai-grid-shipping-status'] }),
-      ]);
-    },
-    onError: (error: Error) => setApprovalMessage(`Approval failed: ${error.message}`),
-  });
-  const devDeploy = useMutation({
-    mutationFn: ({ policyId, targetTenantIds, note }: { policyId: string; targetTenantIds: string[]; note: string }) => api.deployPlatformAiGridPolicyToDev(policyId, targetTenantIds, note),
-    onSuccess: () => { setDevMessage('Policy deployed to the selected dev/test tenants.'); void invalidateLifecycle(); },
-    onError: (error: Error) => setDevMessage(`Dev/test deployment failed: ${error.message}`),
-  });
-  const publish = useMutation({
-    mutationFn: ({ policyId, targetTenantIds, publishAll }: { policyId: string; targetTenantIds: string[]; publishAll: boolean }) => api.publishPlatformAiGridPolicy(policyId, targetTenantIds, publishAll),
-    onSuccess: () => { setPublishMessage('Policy published successfully.'); void invalidateLifecycle(); },
-    onError: (error: Error) => setPublishMessage(`Policy publication failed: ${error.message}`),
-  });
-  const deprecate = useMutation({
-    mutationFn: ({ policyId, reason }: { policyId: string; reason: string }) => api.deprecatePlatformAiGridPolicy(policyId, reason),
-    onSuccess: invalidateLifecycle,
-  });
   const retry = useMutation({
     mutationFn: api.retryPlatformAiGridPolicyRollout,
     onSuccess: () => void client.invalidateQueries({ queryKey: ['platform-ai-grid-policy-rollouts'] }),
@@ -116,10 +81,6 @@ export function PlatformAiPolicyStudio() {
     </div></header>
     <ShippingSummary status={shipping.data} />
       {shipping.data?.blockers.length ? <p className="notice error">{shipping.data.blockers.join(' · ')}</p> : null}
-      {approvalMessage ? <p className={`notice ${approvalMessage.startsWith('Policy approved') ? 'success' : 'error'}`}>{approvalMessage}</p> : null}
-      {devMessage ? <p className={`notice ${devMessage.startsWith('Policy deployed') ? 'success' : 'error'}`}>{devMessage}</p> : null}
-      {publishMessage ? <p className={`notice ${publishMessage.startsWith('Policy published') ? 'success' : 'error'}`}>{publishMessage}</p> : null}
-
     <section className="panel policy-catalog-panel">
       <div className="panel-header policy-catalog-header"><div><h3>Policy catalog</h3><p className="panel-caption">Deploy to dev/test, approve with evidence, then publish to selected tenants or all active tenants. Default selection and tenant rollout are tracked independently.</p></div>
         <span className="policy-results-count">{policies.length} of {catalog.data?.length ?? 0} policies</span></div>
@@ -135,7 +96,7 @@ export function PlatformAiPolicyStudio() {
       {catalog.isError ? <p className="notice error">The policy catalog could not be loaded.</p> : null}
       <div className="policy-management-layout">
         <div className="table-scroll policy-catalog-table"><table className="data-table"><thead><tr><th>Policy</th><th>Applicability</th><th>Native types</th><th>Framework mapping</th><th>Availability</th><th>Default selection</th><th>Rollout</th><th>Lifecycle</th><th aria-label="Actions" /></tr></thead>
-          <tbody>{policies.length === 0 ? <tr><td colSpan={9} className="policy-empty-cell">No policies match the selected filters.</td></tr> : policies.map((policy) => <tr key={policy.policyId} className={activePolicyId === policy.policyId ? 'policy-catalog-row active' : 'policy-catalog-row'}>
+          <tbody>{policies.length === 0 ? <tr><td colSpan={9} className="policy-empty-cell">No policies match the selected filters.</td></tr> : policies.map((policy) => <tr key={policy.policyId} className="policy-catalog-row">
             <td><strong>{policy.name}</strong><br /><small>{policy.policyId} · {policy.provider} · {policy.severity}</small></td>
             <td>{jsonLabels(policy.artifactTypesJson)}</td><td>{jsonLabels(policy.nativeKindsJson)}</td><td>{frameworkMappings(policy.frameworkMappingsJson)}</td><td><span className={statusClass(policy.available ? 'available' : 'unavailable')}>{policy.available ? 'Available' : 'Unavailable'}</span></td>
             <td><span className={statusClass(policy.defaultSelection)}>{policy.defaultSelection}</span><br /><small>Tenant default</small></td><td><span className={statusClass(policy.rolloutStage)}>{rolloutLabel(policy.rolloutStage)}</span></td><td><span className={statusClass(policy.lifecycle)}>{policy.lifecycle}</span></td>
@@ -157,7 +118,9 @@ function ShippingSummary({ status }: { status?: { expectedPolicies: number; inst
   return <section className="summary-strip policy-shipping-summary" aria-label="Shipping summary"><span><strong>{value('expectedPolicies')}</strong> catalog packages</span><span><strong>{value('installedPolicies')}</strong> installed</span><span><strong>{value('publishedPolicies')}</strong> published</span><span><strong>{value('distributedPolicies')}</strong> distributed</span><span><strong>{value('digestMatchedPolicies')}</strong> digest verified</span><span><strong>{value('rolloutPendingTenants')}</strong> tenant jobs pending</span></section>;
 }
 
-function PolicyConfigurationPanel({ policy, tenantIds, saving, onClose, onApprove, onDevDeploy, onPublish, onDeprecate }: { policy: AiGridPolicyDistribution | null; tenantIds: string[]; saving: boolean; onClose: () => void; onApprove: (policy: AiGridPolicyDistribution, note: string) => void; onDevDeploy: (policy: AiGridPolicyDistribution, targetTenantIds: string[], note: string) => void; onPublish: (policy: AiGridPolicyDistribution, targetTenantIds: string[], publishAll: boolean) => void; onDeprecate: (policy: AiGridPolicyDistribution, reason: string) => void }) {
+/* Legacy implementation retained temporarily for reference; the catalog now routes to a full policy page. */
+/* eslint-disable react-hooks/rules-of-hooks */
+function _PolicyConfigurationPanel({ policy, tenantIds, saving, onClose, onApprove, onDevDeploy, onPublish, onDeprecate }: { policy: AiGridPolicyDistribution | null; tenantIds: string[]; saving: boolean; onClose: () => void; onApprove: (policy: AiGridPolicyDistribution, note: string) => void; onDevDeploy: (policy: AiGridPolicyDistribution, targetTenantIds: string[], note: string) => void; onPublish: (policy: AiGridPolicyDistribution, targetTenantIds: string[], publishAll: boolean) => void; onDeprecate: (policy: AiGridPolicyDistribution, reason: string) => void }) {
   const [cohort, setCohort] = React.useState<string[]>([]);
   const [deprecationReason, setDeprecationReason] = React.useState('');
   const [testNote, setTestNote] = React.useState('');
@@ -175,3 +138,4 @@ function PolicyConfigurationPanel({ policy, tenantIds, saving, onClose, onApprov
     <details className="policy-technical-details"><summary>Policy implementation details</summary><dl><dt>Control objective</dt><dd>{detail.data?.controlObjectiveId ?? policy.controlObjectiveId ?? '—'}</dd><dt>Evaluation mode</dt><dd>{detail.data?.evaluationMode ?? policy.evaluationMode ?? '—'}</dd><dt>Source</dt><dd>{detail.data?.packageSourceRef ?? 'Loading…'}</dd></dl></details>
   </aside>;
 }
+/* eslint-enable react-hooks/rules-of-hooks */

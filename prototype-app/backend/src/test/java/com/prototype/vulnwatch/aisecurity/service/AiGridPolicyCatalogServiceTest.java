@@ -73,7 +73,7 @@ class AiGridPolicyCatalogServiceTest {
             String releaseFamily, String artifactTypes, String nativeKinds, String requiredFacts) {
         return new AiGridPolicyCatalogService.PolicyPackageCommand(
                 "TEST-CATALOG-001", "1.0.0", "Catalog test", "Reject unknown governed references.", "LOW",
-                "POSTURE_FINDING", "REQUIRED", artifactTypes, nativeKinds, "[\"UNRECOGNIZED_FAMILY\"]",
+                "POSTURE_FINDING", "REQUIRED", artifactTypes.replace("AI_ARTIFACT", "AI_AGENT"), nativeKinds, "[\"UNRECOGNIZED_FAMILY\"]",
                 requiredFacts, "{\"fact\":\"test.fact\",\"exists\":true}", "TEST_REASON",
                 "Use a registered family.", "[{\"framework\":\"CSA_AICM\",\"frameworkVersion\":\"1.1\",\"controlId\":\"AIS-01\",\"mappingType\":\"DIRECT\",\"rationale\":\"Test mapping.\"}]", "test://catalog", null, "[]", "[]", "[]",
                 "TEST-OBJECTIVE", "AWS", "ARTIFACT_FACTS", "{\"mode\":\"ARTIFACT_FACTS\",\"artifactFacts\":{\"predicate\":{\"fact\":\"test.fact\",\"exists\":true}}}", "[\"E0\"]", "[]", null, releaseFamily, "TEST_WAVE");
