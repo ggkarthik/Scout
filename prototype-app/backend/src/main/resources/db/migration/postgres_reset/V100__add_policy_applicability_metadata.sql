@@ -1,3 +1,4 @@
+-- migration-guard: platform-only
 -- Platform-owned applicability metadata. Tenants consume this catalog metadata but cannot edit it.
 ALTER TABLE platform.ai_grid_policy_versions
     ADD COLUMN IF NOT EXISTS evaluation_subject varchar(32) NOT NULL DEFAULT 'ARTIFACT',

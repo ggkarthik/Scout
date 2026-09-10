@@ -1,3 +1,4 @@
+-- migration-guard: platform-only
 -- Explicit ownership and tenant-boundary metadata for the governed policy catalog.
 ALTER TABLE platform.ai_grid_policy_versions
     ADD COLUMN IF NOT EXISTS governance_owner varchar(255),
@@ -21,4 +22,3 @@ ALTER TABLE platform.ai_grid_policy_versions
 
 COMMENT ON COLUMN platform.ai_grid_policy_versions.governance_owner IS 'Platform owner of the policy contract; tenant users cannot change this value.';
 COMMENT ON COLUMN platform.ai_grid_policy_versions.tenant_configurable IS 'Whether tenant administrators may configure scope, exceptions, and parameters.';
-
