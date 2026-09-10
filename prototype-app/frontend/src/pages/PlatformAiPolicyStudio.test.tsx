@@ -19,8 +19,8 @@ describe('PlatformAiPolicyStudio', () => {
     vi.spyOn(api, 'listPlatformAiGridPolicyRollouts').mockResolvedValue([]);
     renderWithProviders(<PlatformAiPolicyStudio />);
     expect(await screen.findByText('Guardrail attached')).toBeInTheDocument();
-    expect(screen.getByText('LLM01 (DIRECT)')).toBeInTheDocument();
+    expect(screen.getByText('OWASP GenAI LLM Top 10 · LLM01 (DIRECT)')).toBeInTheDocument();
     expect(screen.getByText('digest verified')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /manage guardrail attached/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /open guardrail attached/i })).toBeInTheDocument();
   });
 });
