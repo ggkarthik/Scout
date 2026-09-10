@@ -240,6 +240,10 @@ export function pathForPolicyDetail(policyId: string): string {
   return `/policies/${encodeURIComponent(policyId)}`;
 }
 
+export function pathForPlatformPolicyDetail(policyId: string): string {
+  return `/platform/ai-policies/${encodeURIComponent(policyId)}`;
+}
+
 export function pathForAiFindingDetail(findingId: string, returnTo?: string): string {
   const encodedFindingId = encodeURIComponent(findingId);
   if (!returnTo || returnTo.trim().length === 0) {

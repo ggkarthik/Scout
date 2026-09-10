@@ -231,6 +231,7 @@ public class AiGridApiService {
                        coalesce(s.selection, d.default_selection, p.default_selection) selection,
                        p.control_objective_id, p.provider, p.evaluation_mode,
                        p.artifact_types_json::text artifact_types_json,
+                       p.native_kinds_json::text native_kinds_json,
                        p.required_resource_families_json::text required_resource_families_json,
                        p.base_evidence_tiers_json::text base_evidence_tiers_json,
                        p.conditional_capabilities_json::text conditional_capabilities_json,
@@ -255,8 +256,12 @@ public class AiGridApiService {
                          and a.policy_version = p.version
                          and a.subject_type = 'ARTIFACT'
                          and a.run_id = (
-                             select run_id from ai_grid_snapshot_manifests
-                              group by run_id order by max(observed_at) desc, run_id desc limit 1
+                             select a_latest.run_id from ai_grid_assessments a_latest
+                              where a_latest.policy_id = p.policy_id
+                                and a_latest.policy_version = p.version
+                                and a_latest.subject_type = 'ARTIFACT'
+                              group by a_latest.run_id
+                              order by max(a_latest.evaluated_at) desc, a_latest.run_id desc limit 1
                          )
                   ) assessment_totals on true
                  where p.release_family in ('AGCF_PHASE_1', 'AGCF_PHASE_2')
@@ -268,7 +273,7 @@ public class AiGridApiService {
                 rs.getString("name"), rs.getString("severity"), rs.getString("lifecycle"),
                 rs.getString("workflow_class"), rs.getString("selection"), rs.getString("control_objective_id"),
                 rs.getString("provider"), rs.getString("evaluation_mode"), rs.getString("artifact_types_json"),
-                rs.getString("required_resource_families_json"), rs.getString("base_evidence_tiers_json"),
+                rs.getString("native_kinds_json"), rs.getString("required_resource_families_json"), rs.getString("base_evidence_tiers_json"),
                 rs.getString("conditional_capabilities_json"), rs.getString("required_capabilities_json"),
                 rs.getString("framework_mappings_json"), rs.getString("readiness"),
                 rs.getLong("failed_artifacts"), rs.getLong("total_artifacts"))));
@@ -280,6 +285,7 @@ public class AiGridApiService {
                        coalesce(s.selection, p.default_selection) selection,
                        p.control_objective_id, p.provider, p.evaluation_mode,
                        p.artifact_types_json::text artifact_types_json,
+                       p.native_kinds_json::text native_kinds_json,
                        p.required_resource_families_json::text required_resource_families_json,
                        p.base_evidence_tiers_json::text base_evidence_tiers_json,
                        p.conditional_capabilities_json::text conditional_capabilities_json,
@@ -295,7 +301,7 @@ public class AiGridApiService {
                 rs.getString("version"), rs.getString("name"), rs.getString("severity"),
                 rs.getString("lifecycle"), rs.getString("workflow_class"), rs.getString("selection"),
                 rs.getString("control_objective_id"), rs.getString("provider"), rs.getString("evaluation_mode"),
-                rs.getString("artifact_types_json"), rs.getString("required_resource_families_json"),
+                rs.getString("artifact_types_json"), rs.getString("native_kinds_json"), rs.getString("required_resource_families_json"),
                 rs.getString("base_evidence_tiers_json"), rs.getString("conditional_capabilities_json"),
                 rs.getString("required_capabilities_json"), rs.getString("framework_mappings_json"),
                 "NOT_EVALUATED", 0L, 0L)));
@@ -325,10 +331,12 @@ public class AiGridApiService {
             List<String> current = jdbc.query("select selection from ai_grid_policy_selections where policy_id = :id",
                     Map.of("id", policyId), (rs, n) -> rs.getString(1));
             jdbc.update("""
-                    insert into ai_grid_policy_selections (policy_id, tenant_id, selection, updated_by, reason)
-                    values (:policyId, :tenantId, :selection, :actor, :reason)
+                    insert into ai_grid_policy_selections
+                        (policy_id, tenant_id, selection, updated_by, reason, configuration_source, tenant_configured_at)
+                    values (:policyId, :tenantId, :selection, :actor, :reason, 'TENANT_OVERRIDE', now())
                     on conflict (policy_id) do update set selection = excluded.selection,
-                        updated_by = excluded.updated_by, reason = excluded.reason, updated_at = now()
+                        updated_by = excluded.updated_by, reason = excluded.reason, updated_at = now(),
+                        configuration_source = 'TENANT_OVERRIDE', tenant_configured_at = now()
                     """, new MapSqlParameterSource().addValue("policyId", policyId).addValue("tenantId", tenant.getId())
                     .addValue("selection", selection).addValue("actor", actor).addValue("reason", reason));
             jdbc.update("""
@@ -562,7 +570,7 @@ public class AiGridApiService {
     public record PolicyView(String policyId, String version, String name, String severity,
                              String lifecycle, String workflowClass, String selection,
                              String controlObjectiveId, String provider, String evaluationMode,
-                             String artifactTypesJson, String requiredResourceFamiliesJson,
+                             String artifactTypesJson, String nativeKindsJson, String requiredResourceFamiliesJson,
                              String baseEvidenceTiersJson, String conditionalCapabilitiesJson,
                              String requiredCapabilitiesJson, String frameworkMappingsJson,
                              String readiness, long failedArtifacts, long totalArtifacts) {}

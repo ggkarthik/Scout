@@ -56,6 +56,7 @@ public class AiGridPolicyCatalogService {
             JsonNode facts = tree(command.requiredFactsJson(), "requiredFactsJson");
             JsonNode predicate = tree(command.predicateJson(), "predicateJson");
             JsonNode artifactTypes = tree(command.artifactTypesJson(), "artifactTypesJson");
+            JsonNode nativeKinds = tree(emptyArray(command.nativeKindsJson()), "nativeKindsJson");
             JsonNode families = tree(command.requiredResourceFamiliesJson(), "requiredResourceFamiliesJson");
             JsonNode mappings = tree(command.frameworkMappingsJson(), "frameworkMappingsJson");
             JsonNode capabilities = tree(defaultArray(command.requiredCapabilitiesJson()), "requiredCapabilitiesJson");
@@ -65,9 +66,11 @@ public class AiGridPolicyCatalogService {
             JsonNode evidenceTiers = tree(command.baseEvidenceTiersJson(), "baseEvidenceTiersJson");
             JsonNode conditionalCapabilities = tree(defaultArray(command.conditionalCapabilitiesJson()), "conditionalCapabilitiesJson");
             JsonNode certificationProfile = nullableTree(command.certificationParameterProfileJson(), "certificationParameterProfileJson");
+            artifactTypes = normalizeArtifactTypes(artifactTypes, nativeKinds, command.evaluationMode(), command.name());
             if (!facts.isArray() || !artifactTypes.isArray() || !families.isArray() || !capabilities.isArray()
                     || !relationships.isArray() || !conditionalCapabilities.isArray() || !evidenceTiers.isArray()
                     || !mappings.isArray() || mappings.isEmpty()) bad("Invalid policy package shape");
+            validateArtifactTypes(artifactTypes);
             validateMappings(mappings);
             validateParameterDefinitions(parameterDefinitions, predicate);
             if (!"CORRELATION_PATH".equals(command.evaluationMode())) predicates.validate(predicate);
@@ -96,17 +99,19 @@ public class AiGridPolicyCatalogService {
                      required_resource_families_json,required_facts_json,predicate_json,reason_code,remediation,
                      framework_mappings_json,scope_resolution,parameter_definitions_json,package_digest,package_source_ref,authored_by,release_notes,
                      control_objective_id,provider,evaluation_mode,evaluation_definition_json,base_evidence_tiers_json,
-                     conditional_capabilities_json,certification_parameter_profile_json,release_family,release_wave)
+                     conditional_capabilities_json,certification_parameter_profile_json,release_family,release_wave,
+                     evaluation_subject,relationship_types_json,applicability_notes)
                     values (:id,:version,:name,:description,:severity,'DRAFT',:workflow,:selection,
                      cast(:artifactTypes as jsonb),cast(:nativeKinds as jsonb),cast(:capabilities as jsonb),cast(:relationships as jsonb),
                      cast(:families as jsonb),cast(:facts as jsonb),cast(:predicate as jsonb),:reason,:remediation,
                      cast(:mappings as jsonb),'STATIC',cast(:parameters as jsonb),:digest,:source,:actor,:notes,
                      :objective,:provider,:evaluationMode,cast(:definition as jsonb),cast(:evidenceTiers as jsonb),
-                     cast(:conditionalCapabilities as jsonb),cast(:certificationProfile as jsonb),:releaseFamily,:releaseWave)
+                     cast(:conditionalCapabilities as jsonb),cast(:certificationProfile as jsonb),:releaseFamily,:releaseWave,
+                     :evaluationSubject,cast(:relationshipTypes as jsonb),:applicabilityNotes)
                     """, new MapSqlParameterSource().addValue("id", command.policyId()).addValue("version", command.version())
                     .addValue("name", command.name()).addValue("description", command.description()).addValue("severity", command.severity())
                     .addValue("workflow", command.workflowClass()).addValue("selection", command.defaultSelection())
-                    .addValue("artifactTypes", artifactTypes.toString()).addValue("nativeKinds", emptyArray(command.nativeKindsJson()))
+                    .addValue("artifactTypes", artifactTypes.toString()).addValue("nativeKinds", nativeKinds.toString())
                     .addValue("capabilities", capabilities.toString()).addValue("relationships", relationships.toString())
                     .addValue("families", families.toString()).addValue("facts", facts.toString()).addValue("predicate", predicate.toString())
                     .addValue("reason", command.reasonCode()).addValue("remediation", command.remediation()).addValue("mappings", mappings.toString())
@@ -116,10 +121,44 @@ public class AiGridPolicyCatalogService {
                     .addValue("evaluationMode", command.evaluationMode()).addValue("definition", definition.toString())
                     .addValue("evidenceTiers", evidenceTiers.toString()).addValue("conditionalCapabilities", conditionalCapabilities.toString())
                     .addValue("certificationProfile", certificationProfile == null ? null : certificationProfile.toString())
-                    .addValue("releaseFamily", command.releaseFamily()).addValue("releaseWave", command.releaseWave()));
+                    .addValue("releaseFamily", command.releaseFamily()).addValue("releaseWave", command.releaseWave())
+                    .addValue("evaluationSubject", "CORRELATION_PATH".equals(command.evaluationMode()) ? "SYSTEM" : "ARTIFACT")
+                    .addValue("relationshipTypes", relationships.toString())
+                    .addValue("applicabilityNotes", applicabilityNotes(artifactTypes, command.evaluationMode())));
             audit.record("ai_grid.policy_package.imported", "ai_grid_policy", command.policyId() + ":" + command.version(), "{\"digest\":\"" + digest + "\"}");
             return version(command.policyId(), command.version());
         });
+    }
+
+    private JsonNode normalizeArtifactTypes(JsonNode declared, JsonNode nativeKinds, String evaluationMode, String policyName) {
+        if (declared != null && declared.isArray() && !declared.isEmpty()) return declared;
+        if ("CORRELATION_PATH".equals(evaluationMode)) return mapper.createArrayNode().add("SYSTEM");
+        String material = (policyName + " " + nativeKinds.toString()).toUpperCase(java.util.Locale.ROOT);
+        if (material.contains("GATEWAY")) return mapper.createArrayNode().add("MCP_GATEWAY");
+        if (material.contains("TARGET")) return mapper.createArrayNode().add("MCP_TARGET");
+        if (material.contains("MCP")) return mapper.createArrayNode().add("MCP_SERVER");
+        if (material.contains("AGENT")) return mapper.createArrayNode().add("AI_AGENT");
+        if (material.contains("GUARDRAIL") || material.contains("RAI") || material.contains("FILTER")) return mapper.createArrayNode().add("AI_GUARDRAIL");
+        if (material.contains("MODEL") || material.contains("ENDPOINT") || material.contains("SAGEMAKER")) return mapper.createArrayNode().add("AI_MODEL");
+        if (material.contains("SEARCH") || material.contains("KNOWLEDGE") || material.contains("DATA_SOURCE") || material.contains("DATASTORE")) return mapper.createArrayNode().add("KNOWLEDGE_BASE");
+        return mapper.createArrayNode().add("OTHER_AI_ARTIFACT");
+    }
+
+    private void validateArtifactTypes(JsonNode artifactTypes) {
+        Set<String> allowed = Set.of("AI_AGENT", "AI_MODEL", "AI_GUARDRAIL", "KNOWLEDGE_BASE",
+                "MCP_GATEWAY", "MCP_TARGET", "MCP_SERVER", "OTHER_AI_ARTIFACT", "SYSTEM",
+                "SUPPORTING_RESOURCE", "ACCOUNT_CONFIGURATION");
+        if (artifactTypes.isEmpty()) bad("artifactTypesJson must identify at least one canonical artifact type");
+        for (JsonNode type : artifactTypes) {
+            if (!type.isTextual() || !allowed.contains(type.asText())) bad("Unsupported canonical artifact type");
+        }
+    }
+
+    private String applicabilityNotes(JsonNode artifactTypes, String evaluationMode) {
+        if ("CORRELATION_PATH".equals(evaluationMode)) {
+            return "Evaluates governed relationships across multiple AI artifacts; SYSTEM is the evaluation subject.";
+        }
+        return "Applies to discovered artifacts classified as " + artifactTypes.toString() + ".";
     }
 
     public Distribution updateDistribution(String policyId, DistributionCommand command, String actor) {
@@ -215,6 +254,7 @@ public class AiGridPolicyCatalogService {
             select d.policy_id,d.available,d.default_selection,d.rollout_stage,d.canary_tenant_ids_json::text,d.pinned_version,d.updated_by,d.updated_at,
                    d.approved_package_digest,d.release_decision_id,
                    p.version,p.name,p.severity,p.lifecycle,p.control_objective_id,p.provider,p.evaluation_mode,
+                   p.artifact_types_json::text,p.native_kinds_json::text,
                    p.base_evidence_tiers_json::text,p.conditional_capabilities_json::text,p.framework_mappings_json::text,
                    p.release_family,p.release_wave
               from platform.ai_grid_policy_distribution d join lateral (
@@ -225,7 +265,7 @@ public class AiGridPolicyCatalogService {
                and (cast(:lifecycle as text) is null or p.lifecycle = cast(:lifecycle as text))
              order by p.provider,p.policy_id
             """, new MapSqlParameterSource().addValue("releaseFamily", family).addValue("lifecycle", lifecycleFilter),
-                (rs, n) -> new Distribution(rs.getString(1),rs.getBoolean(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7),rs.getTimestamp(8).toInstant(),rs.getString(9),rs.getObject(10, UUID.class),rs.getString(11),rs.getString(12),rs.getString(13),rs.getString(14),rs.getString(15),rs.getString(16),rs.getString(17),rs.getString(18),rs.getString(19),rs.getString(20),rs.getString(21),rs.getString(22))));
+                (rs, n) -> new Distribution(rs.getString(1),rs.getBoolean(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7),rs.getTimestamp(8).toInstant(),rs.getString(9),rs.getObject(10, UUID.class),rs.getString(11),rs.getString(12),rs.getString(13),rs.getString(14),rs.getString(15),rs.getString(16),rs.getString(17),rs.getString(18),rs.getString(19),rs.getString(20),rs.getString(21),rs.getString(22),rs.getString(23),rs.getString(24))));
     }
 
     public PolicyDetail detail(String policyId, String version) { return TenantContext.runAsPlatform(() -> {
@@ -235,7 +275,10 @@ public class AiGridPolicyCatalogService {
                    p.evaluation_definition_json::text,p.base_evidence_tiers_json::text,p.conditional_capabilities_json::text,
                    p.required_capabilities_json::text,p.required_relationships_json::text,p.required_resource_families_json::text,
                    p.native_kinds_json::text,p.required_facts_json::text,p.framework_mappings_json::text,p.certification_parameter_profile_json::text,
-                   p.package_digest,p.package_source_ref,p.release_family,p.release_wave
+                   p.package_digest,p.package_source_ref,p.release_family,p.release_wave,
+                   p.governance_owner,p.governance_status,p.tenant_configurable,p.governance_notes,
+                   p.approved_by,p.approved_at,p.published_at,
+                   p.evaluation_subject,p.relationship_types_json::text,p.applicability_notes
               from platform.ai_grid_policy_versions p
               left join platform.ai_grid_control_objectives o on o.control_objective_id=p.control_objective_id
              where p.policy_id=:id and p.version=:version
@@ -243,7 +286,11 @@ public class AiGridPolicyCatalogService {
                     rs.getString(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getString(5),rs.getString(6),rs.getString(7),rs.getString(8),
                     rs.getString(9),rs.getString(10),rs.getString(11),rs.getString(12),rs.getString(13),rs.getString(14),
                     tree(rs.getString(15)),tree(rs.getString(16)),tree(rs.getString(17)),tree(rs.getString(18)),tree(rs.getString(19)),tree(rs.getString(20)),
-                    tree(rs.getString(21)),tree(rs.getString(22)),tree(rs.getString(23)),nullableTree(rs.getString(24), "stored certification profile"),rs.getString(25),rs.getString(26),rs.getString(27),rs.getString(28)) : null);
+                    tree(rs.getString(21)),tree(rs.getString(22)),tree(rs.getString(23)),nullableTree(rs.getString(24), "stored certification profile"),rs.getString(25),rs.getString(26),rs.getString(27),rs.getString(28),
+                    rs.getString(29),rs.getString(30),rs.getBoolean(31),rs.getString(32),rs.getString(33),
+                    rs.getTimestamp(34) == null ? null : rs.getTimestamp(34).toInstant(),
+                    rs.getTimestamp(35) == null ? null : rs.getTimestamp(35).toInstant(),
+                    rs.getString(36),tree(rs.getString(37)),rs.getString(38)) : null);
         if (result == null) notFound("Policy version not found");
         return result;
     }); }
@@ -434,6 +481,6 @@ public class AiGridPolicyCatalogService {
     }
     public record PolicyVersion(String policyId, String version, String lifecycle, String packageDigest, String packageSourceRef) {}
     public record DistributionCommand(boolean available, String defaultSelection, String rolloutStage, List<String> canaryTenantIds, String pinnedVersion) {}
-    public record Distribution(String policyId, boolean available, String defaultSelection, String rolloutStage, String canaryTenantIdsJson, String pinnedVersion, String updatedBy, java.time.Instant updatedAt, String approvedPackageDigest, UUID releaseDecisionId, String version, String name, String severity, String lifecycle, String controlObjectiveId, String provider, String evaluationMode, String baseEvidenceTiersJson, String conditionalCapabilitiesJson, String frameworkMappingsJson, String releaseFamily, String releaseWave) {}
-    public record PolicyDetail(String policyId, String version, String name, String description, String severity, String lifecycle, String workflowClass, String defaultSelection, String controlObjectiveId, String objectiveName, String securityIntent, String remediationIntent, String provider, String evaluationMode, JsonNode evaluationDefinition, JsonNode baseEvidenceTiers, JsonNode conditionalCapabilities, JsonNode requiredCapabilities, JsonNode requiredRelationships, JsonNode requiredResourceFamilies, JsonNode nativeKinds, JsonNode requiredFacts, JsonNode frameworkMappings, JsonNode certificationParameterProfile, String packageDigest, String packageSourceRef, String releaseFamily, String releaseWave) {}
+    public record Distribution(String policyId, boolean available, String defaultSelection, String rolloutStage, String canaryTenantIdsJson, String pinnedVersion, String updatedBy, java.time.Instant updatedAt, String approvedPackageDigest, UUID releaseDecisionId, String version, String name, String severity, String lifecycle, String controlObjectiveId, String provider, String evaluationMode, String artifactTypesJson, String nativeKindsJson, String baseEvidenceTiersJson, String conditionalCapabilitiesJson, String frameworkMappingsJson, String releaseFamily, String releaseWave) {}
+    public record PolicyDetail(String policyId, String version, String name, String description, String severity, String lifecycle, String workflowClass, String defaultSelection, String controlObjectiveId, String objectiveName, String securityIntent, String remediationIntent, String provider, String evaluationMode, JsonNode evaluationDefinition, JsonNode baseEvidenceTiers, JsonNode conditionalCapabilities, JsonNode requiredCapabilities, JsonNode requiredRelationships, JsonNode requiredResourceFamilies, JsonNode nativeKinds, JsonNode requiredFacts, JsonNode frameworkMappings, JsonNode certificationParameterProfile, String packageDigest, String packageSourceRef, String releaseFamily, String releaseWave, String governanceOwner, String governanceStatus, boolean tenantConfigurable, String governanceNotes, String approvedBy, java.time.Instant approvedAt, java.time.Instant publishedAt, String evaluationSubject, JsonNode relationshipTypes, String applicabilityNotes) {}
 }

@@ -13,24 +13,24 @@
     "vercel": {
       "type": "http",
       "url": "https://mcp.vercel.com"
+    },
+    "render": {
+      "type": "http",
+      "url": "https://mcp.render.com/mcp"
+    },
+    "azure-mcp": {
+      "type": "local",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@azure/mcp@latest",
+        "server",
+        "start",
+        "--mode",
+        "consolidated"
+      ],
+      "enabled": true,
+      "tools": ["*"]
     }
-
- "mcp_servers": {
-      "azure-mcp": {
-        "type": "local",
-        "command": "npx",
-        "args": [
-          "-y",
-          "@azure/mcp@latest",
-          "server",
-          "start",
-          "--mode",
-          "consolidated"
-        ],
-        enabled=true,
-        "tools": ["*"]
-      }
-    }
-
   }
 }

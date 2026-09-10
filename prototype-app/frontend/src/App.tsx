@@ -63,6 +63,9 @@ const AiPoliciesPage = React.lazy(async () => ({
 const AiPolicyDetailPage = React.lazy(async () => ({
   default: (await import('./pages/AiPolicyDetailPage')).AiPolicyDetailPage
 }));
+const PlatformAiPolicyDetailPage = React.lazy(async () => ({
+  default: (await import('./pages/PlatformAiPolicyDetailPage')).PlatformAiPolicyDetailPage
+}));
 const AiInventoryPage = React.lazy(async () => ({
   default: (await import('./pages/AiInventoryPage')).AiInventoryPage
 }));
@@ -370,6 +373,13 @@ function AiPolicyDetailRoute() {
   const policyId = params.policyId ? decodeURIComponent(params.policyId) : null;
   if (!policyId) return <Navigate to="/policies" replace />;
   return <AiPolicyDetailPage policyId={policyId} />;
+}
+
+function PlatformAiPolicyDetailRoute() {
+  const params = useParams<{ policyId?: string }>();
+  const policyId = params.policyId ? decodeURIComponent(params.policyId) : null;
+  if (!policyId) return <Navigate to="/platform/ai-policies" replace />;
+  return <PlatformAiPolicyDetailPage policyId={policyId} />;
 }
 
 function OperationsRoute() {
@@ -1166,6 +1176,7 @@ function AppShell() {
               <Route path="/findings" element={<FindingsRoute />} />
               <Route path="/policies" element={<AiSecurityRoute><AiPoliciesPage /></AiSecurityRoute>} />
               <Route path="/policies/:policyId" element={<AiSecurityRoute><AiPolicyDetailRoute /></AiSecurityRoute>} />
+              <Route path="/platform/ai-policies/:policyId" element={<PlatformAiPolicyDetailRoute />} />
               <Route path="/operations/:operationsView?" element={<OperationsRoute />} />
               <Route path="/vulnerability-intelligence" element={<LegacyVulnerabilityIntelVulnerabilitiesRoute />} />
               <Route path="/vulnerability-intelligence/vulnerabilities" element={<LegacyVulnerabilityIntelVulnerabilitiesRoute />} />

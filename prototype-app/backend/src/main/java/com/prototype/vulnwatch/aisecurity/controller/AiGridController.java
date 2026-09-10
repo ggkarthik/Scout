@@ -188,6 +188,14 @@ public class AiGridController {
         Tenant tenant = tenant();
         return policyCompatibility.getObject().addPolicyException(tenant, id, request.artifactId(), request.override(), request.reason(), actors.currentActor().userId());
     }
+    @PostMapping("/ai-policies/{id}/exception-rules")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    public PolicyConfigurationResponse addExceptionRule(@PathVariable String id, @RequestBody ExceptionRuleRequest request) {
+        Tenant tenant = tenant();
+        return policyCompatibility.getObject().addPolicyExceptionRule(
+                tenant, id, request.conditionLogic(), request.conditions(), request.override(), request.reason(),
+                actors.currentActor().userId());
+    }
     @DeleteMapping("/ai-policies/{id}/exceptions/{artifactId}")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
     public PolicyConfigurationResponse removeException(@PathVariable String id, @PathVariable UUID artifactId) {
@@ -223,6 +231,7 @@ public class AiGridController {
     public record PolicyStateRequest(boolean enabled) {}
     public record ScopeUpdateRequest(String mode, String conditionLogic, List<PolicyScopeConditionResponse> conditions) {}
     public record ExceptionRequest(UUID artifactId, String override, String reason) {}
+    public record ExceptionRuleRequest(String conditionLogic, List<PolicyScopeConditionResponse> conditions, String override, String reason) {}
     public record ParametersUpdateRequest(Map<String, String> parameters) {}
     public record OwnerRequest(String ownerName, String reason) {}
     public record MembershipRequest(UUID artifactId, String decision, String reason,

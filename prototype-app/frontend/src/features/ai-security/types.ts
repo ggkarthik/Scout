@@ -1,4 +1,4 @@
-export type AiArtifactType = 'AI_AGENT' | 'AI_MODEL' | 'OTHER_AI_ARTIFACT';
+export type AiArtifactType = 'AI_AGENT' | 'AI_MODEL' | 'AI_GUARDRAIL' | 'MCP_GATEWAY' | 'MCP_TARGET' | 'MCP_SERVER' | 'KNOWLEDGE_BASE' | 'OTHER_AI_ARTIFACT';
 
 export type AiSecuritySummary = {
   artifactCounts: Record<string, number>;
@@ -92,6 +92,7 @@ export type AiGridPolicy = {
   provider: string;
   evaluationMode: string;
   artifactTypesJson: string;
+  nativeKindsJson?: string;
   requiredResourceFamiliesJson: string;
   baseEvidenceTiersJson: string;
   conditionalCapabilitiesJson: string;
@@ -118,6 +119,8 @@ export type AiGridPolicyDistribution = {
   controlObjectiveId?: string;
   provider?: 'AWS' | 'AZURE' | 'MULTI_CLOUD' | string;
   evaluationMode?: string;
+  artifactTypesJson?: string;
+  nativeKindsJson?: string;
   baseEvidenceTiersJson?: string;
   conditionalCapabilitiesJson?: string;
   frameworkMappingsJson?: string;
@@ -182,6 +185,16 @@ export type AiGridPlatformPolicyDetail = {
   packageSourceRef: string;
   releaseFamily: string;
   releaseWave: string;
+  governanceOwner: string | null;
+  governanceStatus: string;
+  tenantConfigurable: boolean;
+  governanceNotes: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  publishedAt: string | null;
+  evaluationSubject?: string;
+  relationshipTypes?: unknown;
+  applicabilityNotes?: string | null;
 };
 
 export type AiGridPolicyImpactPreview = {
@@ -515,6 +528,11 @@ export type AiSecurityPolicy = {
   noDecisionCount: number;
   lifecycle: 'DRAFT' | 'VALIDATED' | 'APPROVED' | 'CANARY' | 'PUBLISHED' | 'DEPRECATED' | 'RETIRED';
   inactiveReason?: 'PLATFORM_DEPRECATED' | 'TENANT_DISABLED' | null;
+  platformDefaultSelection?: AiGridPolicySelection;
+  configurationSource?: 'PLATFORM_DEFAULT' | 'TENANT_OVERRIDE' | string;
+  platformOwner?: string | null;
+  governanceStatus?: string;
+  tenantConfigurable?: boolean;
 };
 
 export type PolicyScopeMode = 'ALL' | 'MATCH_RULES' | 'CUSTOM_LIST';
@@ -559,6 +577,16 @@ export type PolicyParameterValue = {
 };
 
 export type PolicyConfiguration = {
+  governance: {
+    platformPolicyVersion: string | null;
+    platformLifecycle: string | null;
+    platformOwner: string | null;
+    governanceStatus: string | null;
+    tenantConfigurable: boolean;
+    platformDefaultSelection: AiGridPolicySelection | null;
+    configurationSource: 'PLATFORM_DEFAULT' | 'TENANT_OVERRIDE' | string;
+    tenantConfigurationUpdatedAt: string | null;
+  };
   scope: PolicyScope;
   exceptions: PolicyException[];
   parameters: PolicyParameterValue[];

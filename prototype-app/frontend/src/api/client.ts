@@ -1618,7 +1618,17 @@ export const api = {
     reason?: string,
   ) => request<PolicyConfiguration>(`/ai-policies/${encodeURIComponent(policyId)}/exceptions`, {
     method: 'POST',
-    body: JSON.stringify({ artifactId, override, reason }),
+      body: JSON.stringify({ artifactId, override, reason }),
+  }),
+  addAiGridPolicyExceptionRule: (
+    policyId: string,
+    conditionLogic: 'AND' | 'OR',
+    conditions: PolicyScopeCondition[],
+    override: PolicyExceptionOverride,
+    reason?: string,
+  ) => request<PolicyConfiguration>(`/ai-policies/${encodeURIComponent(policyId)}/exception-rules`, {
+    method: 'POST',
+    body: JSON.stringify({ conditionLogic, conditions, override, reason }),
   }),
   removeAiGridPolicyException: (policyId: string, artifactId: string) =>
     request<PolicyConfiguration>(

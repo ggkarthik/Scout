@@ -44,6 +44,7 @@ public class AiSecurityApiService {
     private final AiSecuritySyncRunFacade syncRunFacade;
     private final AuditEventService auditEventService;
     private final AiSecurityMetadataSanitizer metadataSanitizer;
+    private final AiGridTenantPolicyDefaultsService policyDefaults;
 
     public AiSecurityApiService(
             NamedParameterJdbcTemplate jdbc,
@@ -55,7 +56,8 @@ public class AiSecurityApiService {
             AiGridFindingService canonicalFindings,
             AiSecuritySyncRunFacade syncRunFacade,
             AuditEventService auditEventService,
-            AiSecurityMetadataSanitizer metadataSanitizer
+            AiSecurityMetadataSanitizer metadataSanitizer,
+            AiGridTenantPolicyDefaultsService policyDefaults
     ) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
@@ -67,6 +69,7 @@ public class AiSecurityApiService {
         this.syncRunFacade = syncRunFacade;
         this.auditEventService = auditEventService;
         this.metadataSanitizer = metadataSanitizer;
+        this.policyDefaults = policyDefaults;
     }
 
     public SummaryResponse summary(Tenant tenant) {
@@ -709,12 +712,14 @@ public class AiSecurityApiService {
     }
 
     public List<PolicyResponse> policies(Tenant tenant) {
+        policyDefaults.ensureDefaults(tenant);
         return tenantExecution.run(tenant, () -> catalogPolicies(tenant).stream()
                 .map(this::policy)
                 .toList());
     }
 
     public PolicyResponse policy(Tenant tenant, String policyId) {
+        policyDefaults.ensureDefaults(tenant);
         return tenantExecution.run(tenant, () -> catalogPolicies(tenant).stream()
                 .filter(definition -> definition.id().equals(policyId))
                 .map(this::policy)
@@ -755,6 +760,7 @@ public class AiSecurityApiService {
             AiSecurityPolicyScopeMatcher.OVERRIDE_INCLUDED, AiSecurityPolicyScopeMatcher.OVERRIDE_EXCLUDED);
     public PolicyConfigurationResponse policyConfiguration(Tenant tenant, String policyId) {
         PolicyDefinition definition = requirePolicy(tenant, policyId);
+        policyDefaults.ensureDefaults(tenant);
         return tenantExecution.run(tenant, () -> buildConfiguration(definition));
     }
 
@@ -762,6 +768,7 @@ public class AiSecurityApiService {
             Tenant tenant, String policyId, String rawMode, String rawConditionLogic,
             List<PolicyScopeConditionResponse> rawConditions, String actor) {
         PolicyDefinition definition = requirePolicy(tenant, policyId);
+        ensureTenantConfigurable(policyId);
         String mode = rawMode == null ? null : rawMode.toUpperCase(Locale.ROOT);
         if (!VALID_SCOPE_MODES.contains(mode)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported scope mode");
@@ -803,6 +810,7 @@ public class AiSecurityApiService {
     public PolicyConfigurationResponse addPolicyException(
             Tenant tenant, String policyId, UUID artifactId, String rawOverride, String reason, String actor) {
         PolicyDefinition definition = requirePolicy(tenant, policyId);
+        ensureTenantConfigurable(policyId);
         if (artifactId == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "An artifact is required");
         }
@@ -833,9 +841,65 @@ public class AiSecurityApiService {
         }));
     }
 
+    public PolicyConfigurationResponse addPolicyExceptionRule(
+            Tenant tenant, String policyId, String conditionLogic,
+            List<PolicyScopeConditionResponse> conditions, String rawOverride, String reason, String actor) {
+        PolicyDefinition definition = requirePolicy(tenant, policyId);
+        ensureTenantConfigurable(policyId);
+        String override = rawOverride == null ? null : rawOverride.toUpperCase(Locale.ROOT);
+        if (!VALID_OVERRIDES.contains(override)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported exception override");
+        }
+        List<ScopeCondition> ruleConditions = (conditions == null ? List.<PolicyScopeConditionResponse>of() : conditions).stream()
+                .filter(condition -> condition != null && condition.field() != null && condition.operator() != null)
+                .map(condition -> new ScopeCondition(condition.field(), condition.operator(), condition.value() == null ? "" : condition.value()))
+                .toList();
+        if (ruleConditions.isEmpty() || ruleConditions.stream().anyMatch(condition -> condition.value().isBlank())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "At least one complete exception condition is required");
+        }
+        String logic = "OR".equalsIgnoreCase(conditionLogic) ? "OR" : "AND";
+        ScopeConfig exceptionScope = new ScopeConfig(AiSecurityPolicyScopeMatcher.MODE_MATCH_RULES, logic, ruleConditions);
+        return tenantExecution.run(tenant, () -> transactionTemplate.execute(status -> {
+            List<ArtifactScopeRow> artifacts = jdbc.query("""
+                    select id, provider, region, account_id, artifact_type, native_kind, name
+                      from ai_security_artifacts where active = true
+                    """, Map.of(), (rs, rowNum) -> new ArtifactScopeRow(
+                    rs.getObject("id", UUID.class), rs.getString("provider"), rs.getString("region"),
+                    rs.getString("account_id"), rs.getString("artifact_type"), rs.getString("native_kind"), rs.getString("name")));
+            List<ArtifactScopeRow> matches = artifacts.stream()
+                    .filter(artifact -> definition.artifactTypes().isEmpty() || definition.artifactTypes().contains(artifact.artifactType()))
+                    .filter(artifact -> AiSecurityPolicyScopeMatcher.matchesRules(exceptionScope,
+                            new ArtifactScopeFacts(artifact.provider(), artifact.region(), artifact.accountId(),
+                                    artifact.artifactType(), artifact.nativeKind(), artifact.name())))
+                    .toList();
+            for (ArtifactScopeRow artifact : matches) {
+                jdbc.update("""
+                        insert into ai_grid_policy_artifact_overrides (
+                            id, tenant_id, policy_id, artifact_id, override, reason, created_by
+                        ) values (
+                            :id, :tenantId, :policyId, :artifactId, :override, :reason, :actor
+                        ) on conflict (tenant_id, policy_id, artifact_id) do update
+                            set override = excluded.override, reason = excluded.reason, updated_at = now()
+                        """, new MapSqlParameterSource()
+                        .addValue("id", UUID.randomUUID())
+                        .addValue("tenantId", tenant.getId())
+                        .addValue("policyId", policyId)
+                        .addValue("artifactId", artifact.id())
+                        .addValue("override", override)
+                        .addValue("reason", blankToNull(reason))
+                        .addValue("actor", actor));
+            }
+            auditEventService.record("ai_security.policy.exception_rule_added", "ai_security_policy", policyId,
+                    "{\"override\":\"" + override + "\",\"matchedArtifacts\":" + matches.size() + "}");
+            reevaluationService.reevaluatePolicy(tenant, policyId);
+            return buildConfiguration(definition);
+        }));
+    }
+
     public PolicyConfigurationResponse removePolicyException(
             Tenant tenant, String policyId, UUID artifactId, String actor) {
         PolicyDefinition definition = requirePolicy(tenant, policyId);
+        ensureTenantConfigurable(policyId);
         return tenantExecution.run(tenant, () -> transactionTemplate.execute(status -> {
             jdbc.update("""
                     delete from ai_grid_policy_artifact_overrides
@@ -932,6 +996,20 @@ public class AiSecurityApiService {
     private PolicyDefinition requirePolicy(Tenant tenant, String policyId) {
         return catalogDefinition(tenant, policyId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "AI Security policy not found"));
+    }
+
+    private void ensureTenantConfigurable(String policyId) {
+        Boolean configurable = jdbc.query("""
+                select p.tenant_configurable
+                  from platform.ai_grid_policy_versions p
+                  join platform.ai_grid_policy_distribution d on d.policy_id = p.policy_id
+                   and (d.pinned_version is null or d.pinned_version = p.version)
+                 where p.policy_id = :policyId
+                 order by p.published_at desc nulls last, p.version desc limit 1
+                """, Map.of("policyId", policyId), rs -> rs.next() ? rs.getBoolean(1) : null);
+        if (Boolean.FALSE.equals(configurable)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "This policy is governed by the platform and cannot be configured by a tenant");
+        }
     }
 
     /** Compatibility projection: tenant pages read governed catalog metadata while legacy configuration remains usable. */
@@ -1035,15 +1113,17 @@ public class AiSecurityApiService {
         Map<String, String> overridesByArtifact = new LinkedHashMap<>();
         exceptions.forEach(exception -> overridesByArtifact.put(exception.artifactId().toString(), exception.override()));
 
-        List<ArtifactScopeRow> artifacts = jdbc.query("""
-                select id, provider, region, account_id, artifact_type, native_kind, name
-                  from ai_security_artifacts
-                 where active = true and artifact_type in (:types)
-                """, Map.of("types", definition.artifactTypes()),
-                (rs, rowNum) -> new ArtifactScopeRow(
-                        rs.getObject("id", UUID.class), rs.getString("provider"), rs.getString("region"),
-                        rs.getString("account_id"), rs.getString("artifact_type"), rs.getString("native_kind"),
-                        rs.getString("name")));
+        List<ArtifactScopeRow> artifacts = definition.artifactTypes().isEmpty()
+                ? List.of()
+                : jdbc.query("""
+                    select id, provider, region, account_id, artifact_type, native_kind, name
+                      from ai_security_artifacts
+                     where active = true and artifact_type in (:types)
+                    """, Map.of("types", definition.artifactTypes()),
+                    (rs, rowNum) -> new ArtifactScopeRow(
+                            rs.getObject("id", UUID.class), rs.getString("provider"), rs.getString("region"),
+                            rs.getString("account_id"), rs.getString("artifact_type"), rs.getString("native_kind"),
+                            rs.getString("name")));
         ScopeConfig scopeConfig = new ScopeConfig(mode, conditionLogic, conditions.stream()
                 .map(condition -> new ScopeCondition(condition.field(), condition.operator(), condition.value()))
                 .toList());
@@ -1056,7 +1136,38 @@ public class AiSecurityApiService {
                 .count();
 
         List<PolicyParameterValueResponse> parameters = buildParameterValues(definition.id());
-        return new PolicyConfigurationResponse(scope, exceptions, parameters, matched, artifacts.size());
+        Map<String, Object> governance = jdbc.query("""
+                select p.version, p.lifecycle, p.governance_owner, p.governance_status,
+                       p.tenant_configurable, d.default_selection,
+                       coalesce(s.configuration_source, 'PLATFORM_DEFAULT') configuration_source,
+                       s.updated_at
+                  from platform.ai_grid_policy_versions p
+                  join platform.ai_grid_policy_distribution d on d.policy_id = p.policy_id
+                   and (d.pinned_version is null or d.pinned_version = p.version)
+                  left join ai_grid_policy_selections s on s.policy_id = p.policy_id
+                 where p.policy_id = :policyId
+                 order by p.published_at desc nulls last, p.version desc limit 1
+                """, Map.of("policyId", definition.id()), rs -> {
+                    if (!rs.next()) return Map.of();
+                    Map<String, Object> values = new LinkedHashMap<>();
+                    values.put("version", rs.getString("version"));
+                    values.put("lifecycle", rs.getString("lifecycle"));
+                    values.put("owner", rs.getString("governance_owner"));
+                    values.put("status", rs.getString("governance_status"));
+                    values.put("tenantConfigurable", rs.getBoolean("tenant_configurable"));
+                    values.put("platformDefaultSelection", rs.getString("default_selection"));
+                    values.put("configurationSource", rs.getString("configuration_source"));
+                    values.put("updatedAt", rs.getTimestamp("updated_at"));
+                    return values;
+                });
+        PolicyGovernanceResponse policyGovernance = new PolicyGovernanceResponse(
+                (String) governance.get("version"), (String) governance.get("lifecycle"),
+                (String) governance.get("owner"), (String) governance.get("status"),
+                Boolean.TRUE.equals(governance.get("tenantConfigurable")),
+                (String) governance.get("platformDefaultSelection"),
+                (String) governance.get("configurationSource"),
+                governance.get("updatedAt") instanceof java.sql.Timestamp timestamp ? timestamp.toInstant() : null);
+        return new PolicyConfigurationResponse(policyGovernance, scope, exceptions, parameters, matched, artifacts.size());
     }
 
     private List<PolicyParameterValueResponse> buildParameterValues(String policyId) {
@@ -1465,8 +1576,15 @@ public class AiSecurityApiService {
     }
 
     public record PolicyConfigurationResponse(
-            PolicyScopeResponse scope, List<PolicyExceptionResponse> exceptions,
+            PolicyGovernanceResponse governance, PolicyScopeResponse scope, List<PolicyExceptionResponse> exceptions,
             List<PolicyParameterValueResponse> parameters, long matchedArtifactCount, long totalArtifactCount
+    ) {
+    }
+
+    public record PolicyGovernanceResponse(
+            String platformPolicyVersion, String platformLifecycle, String platformOwner,
+            String governanceStatus, boolean tenantConfigurable, String platformDefaultSelection,
+            String configurationSource, Instant tenantConfigurationUpdatedAt
     ) {
     }
 

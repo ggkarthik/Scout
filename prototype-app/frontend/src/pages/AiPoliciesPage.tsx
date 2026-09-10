@@ -11,6 +11,25 @@ import type { AiGridPolicy, AiGridPolicySelection } from '../features/ai-securit
 
 const SEVERITY_RANK: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 const PROVIDER_ORDER = ['AWS', 'AZURE', 'MULTI_CLOUD'];
+const RESOURCE_FAMILY_ARTIFACT_TYPES: Record<string, string> = {
+  AWS_BEDROCK_AGENTS: 'AI_AGENT',
+  BEDROCK_AGENTS: 'AI_AGENT',
+  AWS_BEDROCK_GUARDRAILS: 'AI_GUARDRAIL',
+  BEDROCK_GUARDRAILS: 'AI_GUARDRAIL',
+  AZURE_FOUNDRY_AGENTS: 'AI_AGENT',
+  AZURE_BOT_SERVICES: 'AI_AGENT',
+  AZURE_RAI_POLICIES: 'AI_GUARDRAIL',
+  AZURE_AI_ACCOUNTS: 'OTHER_AI_ARTIFACT',
+  AZURE_DIAGNOSTIC_SETTINGS: 'OTHER_AI_ARTIFACT',
+  AZURE_ML_ENDPOINTS: 'AI_MODEL',
+  AWS_AGENTCORE_GATEWAYS: 'MCP_GATEWAY',
+  AWS_AGENTCORE_GATEWAY_TARGETS: 'MCP_TARGET',
+  AZURE_FOUNDRY_MCP_SERVERS: 'MCP_SERVER',
+  AZURE_SEARCH_MCP_SECURITY: 'MCP_SERVER',
+  AZURE_SEARCH_DATA_SOURCES: 'KNOWLEDGE_BASE',
+  AZURE_FOUNDRY_DEPLOYMENTS: 'AI_MODEL',
+  AZURE_ML_MODELS: 'AI_MODEL',
+};
 
 function parseStringArray(json: string): string[] {
   try { const value = JSON.parse(json || '[]'); return Array.isArray(value) ? value.map(String) : []; } catch { return []; }
@@ -20,13 +39,20 @@ function parseFrameworks(json: string): string[] {
   try {
     const value = JSON.parse(json || '[]');
     if (!Array.isArray(value)) return [];
-    return value.map((mapping) => {
+    return Array.from(new Set(value.map((mapping) => {
       if (typeof mapping === 'string') return mapping;
       if (!mapping || typeof mapping !== 'object') return '';
       const item = mapping as { framework?: unknown; frameworkVersion?: unknown };
       return [item.framework, item.frameworkVersion].filter(Boolean).join(' ');
-    }).filter(Boolean);
+    }).filter(Boolean)));
   } catch { return []; }
+}
+
+function applicableArtifactTypes(policy: AiGridPolicy): string[] {
+  const explicitTypes = parseStringArray(policy.artifactTypesJson);
+  if (explicitTypes.length > 0) return Array.from(new Set(explicitTypes));
+  const resourceFamilies = parseStringArray(policy.requiredResourceFamiliesJson);
+  return Array.from(new Set(resourceFamilies.map((family) => RESOURCE_FAMILY_ARTIFACT_TYPES[family]).filter(Boolean)));
 }
 
 function providerNames(provider: string): string[] {
@@ -76,6 +102,17 @@ export function AiPoliciesPage() {
     if (trimmedSearch && !policy.name.toLowerCase().includes(trimmedSearch) && !policy.policyId.toLowerCase().includes(trimmedSearch)) return false;
     return true;
   }), [policies, severityFilter, trimmedSearch]);
+  const allVisibleSelected = visiblePolicies.length > 0 && visiblePolicies.every((policy) => selectedPolicyIds.has(policy.policyId));
+  const someVisibleSelected = !allVisibleSelected && visiblePolicies.some((policy) => selectedPolicyIds.has(policy.policyId));
+  const toggleSelectAllVisible = (checked: boolean) => {
+    setSelectedPolicyIds((current) => {
+      const next = new Set(current);
+      visiblePolicies.forEach((policy) => {
+        if (checked) next.add(policy.policyId); else next.delete(policy.policyId);
+      });
+      return next;
+    });
+  };
   const policyInsights = React.useMemo(() => buildPolicyInsights(policies), [policies]);
   return (
     <div className="ai-security-page">
@@ -146,7 +183,16 @@ export function AiPoliciesPage() {
               <table className="data-table">
                     <thead>
                       <tr>
-                        <th>Select</th>
+                        <th>
+                          <input
+                            className="ai-policy-select-checkbox"
+                            type="checkbox"
+                            checked={allVisibleSelected}
+                            ref={(element) => { if (element) element.indeterminate = someVisibleSelected; }}
+                            onChange={(event) => toggleSelectAllVisible(event.target.checked)}
+                            aria-label="Select all visible policies"
+                          />
+                        </th>
                         <th>Policy</th>
                         <th>Severity</th>
                         <th>Framework</th>
@@ -277,8 +323,7 @@ function PolicyRows({ policy, canManage, saving, onOpen, onSelect, selected, onT
 }) {
   const conditionalCapabilities = parseStringArray(policy.conditionalCapabilitiesJson);
   const frameworks = parseFrameworks(policy.frameworkMappingsJson);
-  const artifactTypes = parseStringArray(policy.artifactTypesJson);
-  const resourceFamilies = parseStringArray(policy.requiredResourceFamiliesJson);
+  const artifactTypes = applicableArtifactTypes(policy);
   const providers = providerNames(policy.provider);
   return (
     <>
@@ -313,8 +358,7 @@ function PolicyRows({ policy, canManage, saving, onOpen, onSelect, selected, onT
         <td>
           <div className="ai-policy-artifact-list">
             {artifactTypes.map((type) => <span key={type}>{formatLabel(type)}</span>)}
-            {resourceFamilies.map((family) => <small key={family}>{formatLabel(family)}</small>)}
-            {artifactTypes.length === 0 && resourceFamilies.length === 0 ? <small>—</small> : null}
+            {artifactTypes.length === 0 ? <small>—</small> : null}
           </div>
         </td>
         <td>

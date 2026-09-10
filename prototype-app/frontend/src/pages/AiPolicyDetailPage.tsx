@@ -37,6 +37,20 @@ function parseFrameworkMappings(json: string | undefined): FrameworkMapping[] {
   }
 }
 
+function inferredNativeKinds(policy: AiGridPolicy | null): string[] {
+  if (!policy) return [];
+  const declared = parseJsonArray(policy.nativeKindsJson);
+  if (declared.length) return declared;
+  const material = `${policy.policyId} ${policy.name} ${policy.requiredResourceFamiliesJson}`.toUpperCase();
+  if (material.includes('BEDROCK') && material.includes('AGENT')) return ['AWS_BEDROCK_AGENT'];
+  if (material.includes('FOUNDRY') && material.includes('AGENT')) return ['AZURE_FOUNDRY_AGENT'];
+  if (material.includes('BOT')) return ['AZURE_BOT_SERVICE'];
+  if (material.includes('MCP') && material.includes('GATEWAY')) return ['MCP_GATEWAY'];
+  if (material.includes('MCP') && material.includes('TARGET')) return ['MCP_TARGET'];
+  if (material.includes('MCP')) return ['MCP_SERVER'];
+  return [];
+}
+
 const SCOPE_FIELD_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'ARTIFACT_TYPE', label: 'Artifact type' },
   { value: 'PROVIDER', label: 'Provider' },
@@ -58,6 +72,63 @@ const SCOPE_MODE_OPTIONS: Array<{ value: PolicyScopeMode; label: string }> = [
   { value: 'MATCH_RULES', label: 'Match rules' },
   { value: 'CUSTOM_LIST', label: 'Custom list' },
 ];
+
+const CONDITION_VALUE_OPTIONS: Record<string, Array<{ value: string; label: string }>> = {
+  ARTIFACT_TYPE: [
+    { value: 'AI_AGENT', label: 'AI agent' },
+    { value: 'AI_MODEL', label: 'AI model' },
+    { value: 'AI_GUARDRAIL', label: 'AI guardrail' },
+    { value: 'MCP_GATEWAY', label: 'MCP gateway' },
+    { value: 'MCP_TARGET', label: 'MCP target' },
+    { value: 'MCP_SERVER', label: 'MCP server' },
+    { value: 'KNOWLEDGE_BASE', label: 'Knowledge base' },
+    { value: 'OTHER_AI_ARTIFACT', label: 'Other AI artifact' },
+  ],
+  PROVIDER: [
+    { value: 'AWS', label: 'AWS' },
+    { value: 'AZURE', label: 'Azure' },
+    { value: 'MULTI_CLOUD', label: 'Multi-cloud' },
+  ],
+};
+
+const ARTIFACT_ATTRIBUTE_FIELDS = new Set(['NAME', 'PROVIDER', 'REGION', 'ACCOUNT_ID', 'NATIVE_KIND']);
+
+function selectedArtifactType(conditions: PolicyScopeCondition[]): string | null {
+  const condition = conditions.find((item) => item.field === 'ARTIFACT_TYPE' && item.value.trim());
+  return condition?.value ?? null;
+}
+
+function artifactTypeLabel(value: string | null): string {
+  if (!value) return 'selected artifact type';
+  return CONDITION_VALUE_OPTIONS.ARTIFACT_TYPE.find((option) => option.value === value)?.label ?? formatLabel(value);
+}
+
+function conditionFieldOptions(conditions: PolicyScopeCondition[]): Array<{ value: string; label: string }> {
+  const type = selectedArtifactType(conditions);
+  return SCOPE_FIELD_OPTIONS.map((option) => (
+    type && ARTIFACT_ATTRIBUTE_FIELDS.has(option.value)
+      ? { ...option, label: `${option.label} · ${artifactTypeLabel(type)}` }
+      : option
+  ));
+}
+
+function newConditionFor(conditions: PolicyScopeCondition[]): PolicyScopeCondition {
+  return {
+    field: selectedArtifactType(conditions) ? 'NAME' : 'ARTIFACT_TYPE',
+    operator: selectedArtifactType(conditions) ? 'CONTAINS' : 'EQUALS',
+    value: '',
+  };
+}
+
+function isArtifactAttributeChild(conditions: PolicyScopeCondition[], index: number): boolean {
+  return index > 0
+    && conditions[index]?.field !== 'ARTIFACT_TYPE'
+    && conditions.slice(0, index).some((condition) => condition.field === 'ARTIFACT_TYPE' && condition.value.trim());
+}
+
+function isFirstArtifactAttributeChild(conditions: PolicyScopeCondition[], index: number): boolean {
+  return isArtifactAttributeChild(conditions, index) && !isArtifactAttributeChild(conditions, index - 1);
+}
 
 type ImpactedArtifact = {
   artifactId: string;
@@ -95,6 +166,10 @@ function buildImpactedArtifacts(findings: AiSecurityFinding[]): ImpactedArtifact
   });
   return Array.from(byArtifact.values())
     .sort((left, right) => (SEVERITY_RANK[left.worstSeverity.toUpperCase()] ?? 99) - (SEVERITY_RANK[right.worstSeverity.toUpperCase()] ?? 99));
+}
+
+function conditionValueOptions(field: string): Array<{ value: string; label: string }> {
+  return CONDITION_VALUE_OPTIONS[field] ?? [];
 }
 
 function PolicyEvidenceMetadata({ policy }: { policy: AiGridPolicy }) {
@@ -185,6 +260,7 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
   });
 
   const policyMetadata: AiGridPolicy | null = policyMetadataQuery.data?.find((item) => item.policyId === policyId) ?? null;
+  const nativeKinds = inferredNativeKinds(policyMetadata);
   const legacyPolicy = policiesQuery.data?.find((item) => item.id === policyId) ?? null;
   const policy: AiSecurityPolicy | null = legacyPolicy ?? (policyMetadata ? {
     id: policyMetadata.policyId,
@@ -269,21 +345,20 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
     },
   });
 
-  const candidateArtifactType = policy?.artifactTypes[0];
-  const candidateArtifactsQuery = useQuery({
-    queryKey: ['ai-security-artifacts-for-exception', candidateArtifactType],
-    queryFn: () => api.listAiSecurityArtifacts(candidateArtifactType, 0, 200),
-    enabled: tab === 'configure' && !!candidateArtifactType,
-  });
-  const [exceptionArtifactId, setExceptionArtifactId] = React.useState('');
+  const [exceptionConditionLogic, setExceptionConditionLogic] = React.useState<'AND' | 'OR'>('AND');
+  const [exceptionConditions, setExceptionConditions] = React.useState<PolicyScopeCondition[]>([
+    { field: 'ARTIFACT_TYPE', operator: 'EQUALS', value: '' },
+  ]);
   const [exceptionOverride, setExceptionOverride] = React.useState<PolicyExceptionOverride>('EXCLUDED');
   const [exceptionReason, setExceptionReason] = React.useState('');
 
-  const addExceptionMutation = useMutation({
-    mutationFn: () => api.addAiGridPolicyException(policyId, exceptionArtifactId, exceptionOverride, exceptionReason || undefined),
+  const addExceptionRuleMutation = useMutation({
+    mutationFn: () => api.addAiGridPolicyExceptionRule(
+      policyId, exceptionConditionLogic, exceptionConditions, exceptionOverride, exceptionReason || undefined,
+    ),
     onSuccess: (data) => {
       queryClient.setQueryData(['ai-security-policy-configuration', policyId], data);
-      setExceptionArtifactId('');
+      setExceptionConditions([{ field: 'ARTIFACT_TYPE', operator: 'EQUALS', value: '' }]);
       setExceptionReason('');
       refreshAfterConfigChange();
     },
@@ -321,6 +396,26 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
       conditions: [...draftScope.conditions, { field: 'ARTIFACT_TYPE', operator: 'EQUALS', value: '' }],
     });
     setScopeDirty(true);
+  };
+  const addAttributeCondition = () => {
+    if (!draftScope) return;
+    setDraftScope({
+      ...draftScope,
+      conditions: [...draftScope.conditions, newConditionFor(draftScope.conditions)],
+    });
+    setScopeDirty(true);
+  };
+  const updateExceptionCondition = (index: number, next: PolicyScopeCondition) => {
+    setExceptionConditions((current) => current.map((condition, conditionIndex) => conditionIndex === index ? next : condition));
+  };
+  const addExceptionCondition = () => {
+    setExceptionConditions((current) => [...current, newConditionFor(current)]);
+  };
+  const addExceptionTopLevelCondition = () => {
+    setExceptionConditions((current) => [...current, { field: 'ARTIFACT_TYPE', operator: 'EQUALS', value: '' }]);
+  };
+  const removeExceptionCondition = (index: number) => {
+    setExceptionConditions((current) => current.filter((_, conditionIndex) => conditionIndex !== index));
   };
 
   if (policiesQuery.isLoading && policyMetadataQuery.isLoading) {
@@ -360,7 +455,7 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
           Overview
         </button>
         <button type="button" className={`cvd2-tab${tab === 'configure' ? ' active' : ''}`} onClick={() => setTab('configure')}>
-          Configure
+          Governance
         </button>
         <button type="button" className={`cvd2-tab${tab === 'findings' ? ' active' : ''}`} onClick={() => setTab('findings')}>
           Findings · {policy.openFindings}
@@ -403,7 +498,7 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
                 <div className="cvd-ov-divider" />
                 <div className="cvd-ov-links">
                   <button type="button" className="cvd-ov-link" onClick={() => setTab('configure')}>
-                    Configure scope and parameters →
+                    Open governance controls →
                   </button>
                   <button type="button" className="cvd-ov-link" onClick={() => setTab('findings')}>
                     {policy.openFindings} open finding{policy.openFindings === 1 ? '' : 's'} →
@@ -426,6 +521,10 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
                   <div className="cvd-tech-attr">
                     <span className="cvd-tech-attr-label">Artifact types</span>
                     <span className="cvd-tech-attr-value">{policy.artifactTypes.map((type) => formatLabel(type)).join(', ')}</span>
+                  </div>
+                  <div className="cvd-tech-attr">
+                    <span className="cvd-tech-attr-label">Native types</span>
+                    <span className="cvd-tech-attr-value">{nativeKinds.length ? nativeKinds.map((type) => formatLabel(type)).join(', ') : 'Not specified'}</span>
                   </div>
                   <div className="cvd-tech-attr">
                     <span className="cvd-tech-attr-label">Lifetime findings</span>
@@ -513,8 +612,16 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
           ) : configQuery.isError || !configuration ? (
             <div className="notice error">This policy's configuration could not be loaded.</div>
           ) : (
-            <div className="cvd2-overview-body">
+            <div className="cvd2-overview-body ai-policy-governance">
               <div className="cvd2-overview-main">
+                <div className="cvd2-panel">
+                  <div className="cvd2-panel-hdr">Governance boundary</div>
+                  <div className="cvd-tech-attrs">
+                    <div className="cvd-tech-attr"><span className="cvd-tech-attr-label">Platform baseline</span><span className="cvd-tech-attr-value">{configuration.governance.platformPolicyVersion ?? '—'} · {formatLabel(configuration.governance.platformLifecycle ?? '—')}</span></div>
+                    <div className="cvd-tech-attr"><span className="cvd-tech-attr-label">Tenant state</span><span className="cvd-tech-attr-value">{formatLabel(configuration.governance.configurationSource)}</span></div>
+                  </div>
+                  <p className="panel-caption">The platform owns the policy definition and release lifecycle. This tenant can configure scope, exceptions, and parameters only when the platform permits it.</p>
+                </div>
                 <div className="cvd2-panel">
                   <div className="cvd2-panel-hdr">Scope · which AI inventory this policy evaluates</div>
                   <div className="ai-policy-config-body">
@@ -538,7 +645,8 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
                     {draftScope.mode === 'MATCH_RULES' && (
                       <>
                         <div className="ai-policy-rule-logic">
-                          Match
+                          <strong>Conditions</strong>
+                          <span>Match</span>
                           <div className="ai-policy-scope-modes ai-policy-rule-logic-toggle">
                             {(['AND', 'OR'] as const).map((logic) => (
                               <button
@@ -554,14 +662,24 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
                           </div>
                           of the following conditions
                         </div>
+                        {selectedArtifactType(draftScope.conditions) && (
+                          <div className="ai-policy-attribute-hint">
+                            {artifactTypeLabel(selectedArtifactType(draftScope.conditions))} attributes: Name, Provider, Region, Account ID, and Native type
+                          </div>
+                        )}
                         {draftScope.conditions.map((condition, index) => (
-                          <div className="ai-policy-rule-row" key={index}>
+                          <React.Fragment key={`${condition.field}-${index}`}>
+                          {index > 0 && !isArtifactAttributeChild(draftScope.conditions, index) && <div className="ai-policy-condition-joiner">{draftScope.conditionLogic}</div>}
+                          {isFirstArtifactAttributeChild(draftScope.conditions, index) && (
+                            <div className="ai-policy-condition-child-label">Attributes for {artifactTypeLabel(selectedArtifactType(draftScope.conditions))}</div>
+                          )}
+                          <div className={`ai-policy-rule-row${isArtifactAttributeChild(draftScope.conditions, index) ? ' ai-policy-condition-child' : ''}`}>
                             <select
                               value={condition.field}
                               disabled={!canManage}
-                              onChange={(event) => updateCondition(index, { ...condition, field: event.target.value })}
+                              onChange={(event) => updateCondition(index, { ...condition, field: event.target.value, value: '' })}
                             >
-                              {SCOPE_FIELD_OPTIONS.map((option) => (
+                              {conditionFieldOptions(draftScope.conditions).map((option) => (
                                 <option key={option.value} value={option.value}>{option.label}</option>
                               ))}
                             </select>
@@ -574,13 +692,40 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
                                 <option key={option.value} value={option.value}>{option.label}</option>
                               ))}
                             </select>
-                            <input
-                              type="text"
-                              value={condition.value}
-                              disabled={!canManage}
-                              placeholder="Value"
-                              onChange={(event) => updateCondition(index, { ...condition, value: event.target.value })}
-                            />
+                            {conditionValueOptions(condition.field).length > 0 ? (
+                              <>
+                                <select
+                                  className="ai-policy-condition-value-select"
+                                  value={conditionValueOptions(condition.field).some((option) => option.value === condition.value) ? condition.value : '__OTHER__'}
+                                  disabled={!canManage}
+                                  aria-label="Condition value category"
+                                  onChange={(event) => updateCondition(index, { ...condition, value: event.target.value === '__OTHER__' ? '' : event.target.value })}
+                                >
+                                  <option value="__OTHER__">Other</option>
+                                  {conditionValueOptions(condition.field).map((option) => (
+                                    <option key={option.value} value={option.value}>{option.label}</option>
+                                  ))}
+                                </select>
+                                {!conditionValueOptions(condition.field).some((option) => option.value === condition.value) && (
+                                  <input
+                                    type="text"
+                                    value={condition.value}
+                                    disabled={!canManage}
+                                    placeholder="Enter value"
+                                    aria-label="Custom condition value"
+                                    onChange={(event) => updateCondition(index, { ...condition, value: event.target.value })}
+                                  />
+                                )}
+                              </>
+                            ) : (
+                              <input
+                                type="text"
+                                value={condition.value}
+                                disabled={!canManage}
+                                placeholder="Enter value"
+                                onChange={(event) => updateCondition(index, { ...condition, value: event.target.value })}
+                              />
+                            )}
                             <button
                               type="button"
                               className="ai-policy-rule-remove"
@@ -591,10 +736,18 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
                               ✕
                             </button>
                           </div>
+                          </React.Fragment>
                         ))}
-                        <button type="button" className="ai-policy-add-row" disabled={!canManage} onClick={addCondition}>
-                          + Add condition
-                        </button>
+                        <div className="ai-policy-condition-actions">
+                          <button type="button" className="ai-policy-add-row" disabled={!canManage} onClick={addCondition}>
+                            + Add condition
+                          </button>
+                          {selectedArtifactType(draftScope.conditions) && (
+                            <button type="button" className="ai-policy-add-row" disabled={!canManage} onClick={addAttributeCondition}>
+                              + Add artifact attribute
+                            </button>
+                          )}
+                        </div>
                       </>
                     )}
 
@@ -654,18 +807,107 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
 
                     {canManage && (
                       <div className="ai-policy-add-exception">
-                        <select
-                          aria-label="Artifact"
-                          value={exceptionArtifactId}
-                          onChange={(event) => setExceptionArtifactId(event.target.value)}
-                        >
-                          <option value="">Select an artifact…</option>
-                          {(candidateArtifactsQuery.data?.items ?? [])
-                            .filter((artifact) => !configuration.exceptions.some((exception) => exception.artifactId === artifact.id))
-                            .map((artifact) => (
-                              <option key={artifact.id} value={artifact.id}>{artifact.name}</option>
+                        <div className="ai-policy-exception-rule-heading">
+                          <strong>Exception rule</strong>
+                          <span>Apply this action to artifacts matching</span>
+                          <div className="ai-policy-scope-modes ai-policy-rule-logic-toggle">
+                            {(['AND', 'OR'] as const).map((logic) => (
+                              <button
+                                key={logic}
+                                type="button"
+                                className={`ai-policy-scope-mode-btn${exceptionConditionLogic === logic ? ' active' : ''}`}
+                                onClick={() => setExceptionConditionLogic(logic)}
+                              >
+                                {logic === 'AND' ? 'ALL' : 'ANY'}
+                              </button>
                             ))}
-                        </select>
+                          </div>
+                          <span>of these conditions:</span>
+                        </div>
+                        {selectedArtifactType(exceptionConditions) && (
+                          <div className="ai-policy-attribute-hint">
+                            {artifactTypeLabel(selectedArtifactType(exceptionConditions))} attributes: Name, Provider, Region, Account ID, and Native type
+                          </div>
+                        )}
+                        {exceptionConditions.map((condition, index) => (
+                          <React.Fragment key={`exception-condition-${index}`}>
+                            {index > 0 && !isArtifactAttributeChild(exceptionConditions, index) && <div className="ai-policy-condition-joiner">{exceptionConditionLogic}</div>}
+                            {isFirstArtifactAttributeChild(exceptionConditions, index) && (
+                              <div className="ai-policy-condition-child-label">Attributes for {artifactTypeLabel(selectedArtifactType(exceptionConditions))}</div>
+                            )}
+                            <div className={`ai-policy-rule-row ai-policy-exception-condition-row${isArtifactAttributeChild(exceptionConditions, index) ? ' ai-policy-condition-child' : ''}`}>
+                              <select
+                                aria-label="Exception field"
+                                value={condition.field}
+                                onChange={(event) => updateExceptionCondition(index, { ...condition, field: event.target.value, value: '' })}
+                              >
+                                {conditionFieldOptions(exceptionConditions).map((option) => (
+                                  <option key={option.value} value={option.value}>{option.label}</option>
+                                ))}
+                              </select>
+                              <select
+                                aria-label="Exception operator"
+                                value={condition.operator}
+                                onChange={(event) => updateExceptionCondition(index, { ...condition, operator: event.target.value })}
+                              >
+                                {SCOPE_OPERATOR_OPTIONS.map((option) => (
+                                  <option key={option.value} value={option.value}>{option.label}</option>
+                                ))}
+                              </select>
+                              {conditionValueOptions(condition.field).length > 0 ? (
+                                <>
+                                  <select
+                                    className="ai-policy-condition-value-select"
+                                    aria-label="Exception value category"
+                                    value={conditionValueOptions(condition.field).some((option) => option.value === condition.value) ? condition.value : '__OTHER__'}
+                                    onChange={(event) => updateExceptionCondition(index, { ...condition, value: event.target.value === '__OTHER__' ? '' : event.target.value })}
+                                  >
+                                    <option value="__OTHER__">Other</option>
+                                    {conditionValueOptions(condition.field).map((option) => (
+                                      <option key={option.value} value={option.value}>{option.label}</option>
+                                    ))}
+                                  </select>
+                                  {!conditionValueOptions(condition.field).some((option) => option.value === condition.value) && (
+                                    <input
+                                      type="text"
+                                      aria-label="Custom exception value"
+                                      placeholder="Enter value"
+                                      value={condition.value}
+                                      onChange={(event) => updateExceptionCondition(index, { ...condition, value: event.target.value })}
+                                    />
+                                  )}
+                                </>
+                              ) : (
+                                <input
+                                  type="text"
+                                  aria-label="Exception value"
+                                  placeholder="Enter value"
+                                  value={condition.value}
+                                  onChange={(event) => updateExceptionCondition(index, { ...condition, value: event.target.value })}
+                                />
+                              )}
+                              <button
+                                type="button"
+                                className="ai-policy-rule-remove"
+                                aria-label="Remove exception condition"
+                                disabled={exceptionConditions.length === 1}
+                                onClick={() => removeExceptionCondition(index)}
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          </React.Fragment>
+                        ))}
+                        <div className="ai-policy-condition-actions">
+                          <button type="button" className="ai-policy-add-row" onClick={addExceptionTopLevelCondition}>
+                            + Add condition
+                          </button>
+                          {selectedArtifactType(exceptionConditions) && (
+                            <button type="button" className="ai-policy-add-row" onClick={addExceptionCondition}>
+                              + Add artifact attribute
+                            </button>
+                          )}
+                        </div>
                         <select
                           aria-label="Override"
                           value={exceptionOverride}
@@ -683,10 +925,10 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
                         <button
                           type="button"
                           className="btn btn-secondary btn-sm"
-                          disabled={!exceptionArtifactId || addExceptionMutation.isPending}
-                          onClick={() => addExceptionMutation.mutate()}
+                          disabled={exceptionConditions.some((condition) => !condition.value.trim()) || addExceptionRuleMutation.isPending}
+                          onClick={() => addExceptionRuleMutation.mutate()}
                         >
-                          + Add exception
+                          {addExceptionRuleMutation.isPending ? 'Applying…' : '+ Apply exception rule'}
                         </button>
                       </div>
                     )}

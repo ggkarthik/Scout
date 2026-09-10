@@ -1,6 +1,8 @@
 import React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
+import { pathForPlatformPolicyDetail } from '../app/routes';
 import type { AiGridPolicyDistribution, AiGridPolicySelection } from '../features/ai-security/types';
 
 const DEFAULTS: AiGridPolicySelection[] = ['REQUIRED', 'ENABLED', 'DISABLED'];
@@ -14,6 +16,21 @@ function owaspMappings(value?: string): string {
   } catch { return '—'; }
 }
 
+function frameworkMappings(value?: string): string {
+  try {
+    const mappings = JSON.parse(value ?? '[]') as Array<{ framework?: string; frameworkVersion?: string; controlId?: string; mappingType?: string }>;
+    return mappings.map((mapping) => {
+      const framework = mapping.framework === 'OWASP_GENAI_LLM_TOP_10'
+        ? 'OWASP GenAI LLM Top 10'
+        : mapping.framework === 'CSA_AICM' ? 'CSA AI Controls Matrix' : (mapping.framework ?? 'Unknown framework').replace(/_/g, ' ');
+      const version = mapping.frameworkVersion ? ` ${mapping.frameworkVersion}` : '';
+      const control = mapping.controlId ? ` · ${mapping.controlId}` : '';
+      const kind = mapping.mappingType ? ` (${mapping.mappingType})` : '';
+      return `${framework}${version}${control}${kind}`;
+    }).filter(Boolean).join(', ') || '—';
+  } catch { return '—'; }
+}
+
 function rolloutLabel(stage: AiGridPolicyDistribution['rolloutStage']): string {
   return stage === 'GENERAL_AVAILABILITY' ? 'General availability' : stage === 'DEV' ? 'Dev / test' : stage.charAt(0) + stage.slice(1).toLowerCase();
 }
@@ -22,7 +39,15 @@ function statusClass(value: string): string {
   return `policy-status policy-status--${value.toLowerCase().replace(/_/g, '-')}`;
 }
 
+function jsonLabels(value?: string): string {
+  try {
+    const parsed = JSON.parse(value ?? '[]');
+    return Array.isArray(parsed) && parsed.length ? parsed.map(String).map((item) => item.replace(/_/g, ' ')).join(', ') : '—';
+  } catch { return '—'; }
+}
+
 export function PlatformAiPolicyStudio() {
+  const navigate = useNavigate();
   const client = useQueryClient();
   const [provider, setProvider] = React.useState('ALL');
   const [rollout, setRollout] = React.useState('ALL');
@@ -79,8 +104,6 @@ export function PlatformAiPolicyStudio() {
       && (owasp === 'ALL' || owaspMappings(item.frameworkMappingsJson).includes(owasp))
       && (query.trim() === '' || searchable.includes(query.trim().toLowerCase()));
   }), [catalog.data, owasp, provider, query, rollout, selection]);
-  const activePolicy = (catalog.data ?? []).find((policy) => policy.policyId === activePolicyId) ?? null;
-  const activeTenantIds = (tenants.data ?? []).filter((tenant) => tenant.status === 'ACTIVE').map((tenant) => tenant.id);
   const hasFilters = provider !== 'ALL' || rollout !== 'ALL' || selection !== 'ALL' || owasp !== 'ALL' || query.trim() !== '';
 
   return <section className="platform-ai-policy-studio">
@@ -111,19 +134,13 @@ export function PlatformAiPolicyStudio() {
       {catalog.isLoading ? <p role="status">Loading shipped policies…</p> : null}
       {catalog.isError ? <p className="notice error">The policy catalog could not be loaded.</p> : null}
       <div className="policy-management-layout">
-        <div className="table-scroll policy-catalog-table"><table className="data-table"><thead><tr><th>Policy</th><th>Framework mapping</th><th>Availability</th><th>Default selection</th><th>Rollout</th><th>Lifecycle</th><th aria-label="Actions" /></tr></thead>
-          <tbody>{policies.length === 0 ? <tr><td colSpan={7} className="policy-empty-cell">No policies match the selected filters.</td></tr> : policies.map((policy) => <tr key={policy.policyId} className={activePolicyId === policy.policyId ? 'policy-catalog-row active' : 'policy-catalog-row'}>
+        <div className="table-scroll policy-catalog-table"><table className="data-table"><thead><tr><th>Policy</th><th>Applicability</th><th>Native types</th><th>Framework mapping</th><th>Availability</th><th>Default selection</th><th>Rollout</th><th>Lifecycle</th><th aria-label="Actions" /></tr></thead>
+          <tbody>{policies.length === 0 ? <tr><td colSpan={9} className="policy-empty-cell">No policies match the selected filters.</td></tr> : policies.map((policy) => <tr key={policy.policyId} className={activePolicyId === policy.policyId ? 'policy-catalog-row active' : 'policy-catalog-row'}>
             <td><strong>{policy.name}</strong><br /><small>{policy.policyId} · {policy.provider} · {policy.severity}</small></td>
-            <td>{owaspMappings(policy.frameworkMappingsJson)}</td><td><span className={statusClass(policy.available ? 'available' : 'unavailable')}>{policy.available ? 'Available' : 'Unavailable'}</span></td>
+            <td>{jsonLabels(policy.artifactTypesJson)}</td><td>{jsonLabels(policy.nativeKindsJson)}</td><td>{frameworkMappings(policy.frameworkMappingsJson)}</td><td><span className={statusClass(policy.available ? 'available' : 'unavailable')}>{policy.available ? 'Available' : 'Unavailable'}</span></td>
             <td><span className={statusClass(policy.defaultSelection)}>{policy.defaultSelection}</span><br /><small>Tenant default</small></td><td><span className={statusClass(policy.rolloutStage)}>{rolloutLabel(policy.rolloutStage)}</span></td><td><span className={statusClass(policy.lifecycle)}>{policy.lifecycle}</span></td>
-            <td><button type="button" className="btn btn-secondary btn-sm" aria-label={`Manage ${policy.name}`} onClick={() => setActivePolicyId(policy.policyId)}>Manage</button></td>
+            <td><button type="button" className="btn btn-secondary btn-sm" aria-label={`Open ${policy.name}`} onClick={() => navigate(pathForPlatformPolicyDetail(policy.policyId))}>Open policy</button></td>
           </tr>)}</tbody></table></div>
-        <PolicyConfigurationPanel key={activePolicy?.policyId ?? 'empty'} policy={activePolicy} tenantIds={activeTenantIds}
-          saving={approve.isPending || devDeploy.isPending || publish.isPending || deprecate.isPending}
-          onClose={() => setActivePolicyId(null)} onApprove={(policy, note) => approve.mutate({ policyId: policy.policyId, note })}
-          onDevDeploy={(policy, targetTenantIds, note) => devDeploy.mutate({ policyId: policy.policyId, targetTenantIds, note })}
-          onPublish={(policy, targetTenantIds, publishAll) => publish.mutate({ policyId: policy.policyId, targetTenantIds, publishAll })}
-          onDeprecate={(policy, reason) => deprecate.mutate({ policyId: policy.policyId, reason })} />
       </div>
     </section>
 
@@ -148,7 +165,7 @@ function PolicyConfigurationPanel({ policy, tenantIds, saving, onClose, onApprov
   const detail = useQuery({ queryKey: ['platform-ai-grid-policy-detail', policy?.policyId, policy?.version], queryFn: () => api.getPlatformAiGridPolicyDetail(policy!.policyId, policy!.version), enabled: policy != null });
   if (!policy) return <aside className="policy-configuration-empty"><span className="ai-security-kicker">Lifecycle</span><h4>Select a policy</h4><p>Choose <strong>Manage</strong> beside a policy to approve, publish to a canary cohort, or deprecate it.</p></aside>;
   return <aside className="policy-configuration-panel" aria-label={`${policy.name} configuration`}><div className="policy-configuration-heading"><div><span className="ai-security-kicker">Configuration</span><h4>{policy.name}</h4><p>{policy.policyId}</p></div><button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>Close</button></div>
-    <div className="policy-detail-summary"><span className={statusClass(policy.severity)}>{policy.severity}</span><span>{detail.data?.description ?? 'Loading policy intent…'}</span><dl><dt>Lifecycle</dt><dd>{policy.lifecycle}</dd><dt>Rollout</dt><dd>{rolloutLabel(policy.rolloutStage)}</dd><dt>Tenant default</dt><dd>{policy.defaultSelection}</dd></dl></div>
+    <div className="policy-detail-summary"><span className={statusClass(policy.severity)}>{policy.severity}</span><span>{detail.data?.description ?? 'Loading policy intent…'}</span><dl><dt>Lifecycle</dt><dd>{policy.lifecycle}</dd><dt>Governance</dt><dd>{detail.data?.governanceStatus ?? 'Loading…'}</dd><dt>Platform owner</dt><dd>{detail.data?.governanceOwner ?? 'Loading…'}</dd><dt>Tenant configuration</dt><dd>{detail.data ? (detail.data.tenantConfigurable ? 'Allowed' : 'Platform controlled') : 'Loading…'}</dd><dt>Rollout</dt><dd>{rolloutLabel(policy.rolloutStage)}</dd><dt>Tenant default</dt><dd>{policy.defaultSelection}</dd></dl></div>
     <div className="policy-config-fields"><label>Dev/test tenants<select multiple value={cohort} aria-label={`${policy.policyId} dev test tenants`} onChange={(event) => setCohort(Array.from(event.target.selectedOptions, (option) => option.value))}>{tenantIds.map((id) => <option key={id} value={id}>{id}</option>)}</select><small>Select tenants for pre-approval testing.</small></label>
       <label>Tenant test result / approval note<textarea value={testNote} onChange={(event) => setTestNote(event.target.value)} placeholder="Describe the dev/test result before approval" /></label>
       <label>Deprecation reason<input value={deprecationReason} onChange={(event) => setDeprecationReason(event.target.value)} placeholder="Why this policy is being retired" /></label>
