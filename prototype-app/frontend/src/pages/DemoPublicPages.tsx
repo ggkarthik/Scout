@@ -685,87 +685,89 @@ export function MythosReadinessBlogPage() {
       <article className="blog-article">
         <header className="blog-article-header">
           <Link className="blog-back-link" to="/demo/blog">← All blogs</Link>
-          <span className="blog-article-kicker">ScoutGrid Blog · Mythos Readiness</span>
-          <h1>Mythos readiness: why discovery was never the hard part</h1>
-          <p className="blog-article-deck">From an AI inventory to an evidence-backed readiness program.</p>
-          <time dateTime="2026-09-12">September 12, 2026</time>
+          <span className="blog-article-kicker">SCOUT · MYTHOS READINESS BRIEF</span>
+          <h1>Mythos Readiness: Why Discovery Was Never the Hard Part</h1>
+          <p className="blog-article-deck">Claude Mythos Preview solved vulnerability discovery. Scout is built for what happens next.</p>
+          <time dateTime="2026">Scout Product Team · 2026</time>
         </header>
 
         <div className="blog-article-body">
           <p>
-            AI discovery is the visible beginning of a security program. The harder work starts after the
-            inventory exists: establishing ownership, defining what good looks like, and proving that every
-            important decision is supported by current evidence.
+            In April 2026, AWS, Apple, Google, Microsoft, and NVIDIA announced Project Glasswing — a defensive coalition
+            built around Claude Mythos Preview, a frontier model purpose-built for deep code reasoning. Mythos doesn&rsquo;t just flag
+            known CVEs faster than a scanner; it reads straight through opaque, complex codebases and surfaces high-severity
+            vulnerabilities other tools never see at all.
           </p>
           <p>
-            Mythos readiness is the discipline of turning that inventory into an operating model. It connects
-            each AI agent, model, guardrail, identity, MCP server, and data store to its provider, native type,
-            owner, environment, and governing policies.
+            That capability won&rsquo;t stay confined to a handful of frontier labs. Within the next 12–18 months, comparable models
+            will run against ordinary enterprise pipelines — and the organizations that come out ahead won&rsquo;t be the ones with the
+            best scanner. Discovery is already solved. Readiness is about what happens the moment a model like Mythos hands
+            you hundreds of new, real findings at once: can you coordinate a response, close the blind spots it finds, filter the noise
+            it repeats, and fix things at the speed it discovers them?
           </p>
 
-          <blockquote>
-            Discovery tells you what exists. Readiness tells you whether the organization can govern it.
-          </blockquote>
+          <h2>Four Scout capabilities carry that response end to end:</h2>
 
           <section>
-            <h2>What readiness adds to discovery</h2>
-            <ul>
-              <li><strong>Identity and ownership.</strong> Every artifact has a stable identity, accountable owner, provider, region, and environment.</li>
-              <li><strong>Policy applicability.</strong> Controls declare the artifact families and native types they evaluate, so coverage is measurable rather than assumed.</li>
-              <li><strong>Evidence lineage.</strong> Decisions point back to connector capabilities, observations, timestamps, and the exact policy version used.</li>
-              <li><strong>Governance boundaries.</strong> Platform owners manage the catalog and lifecycle while tenants configure only the scope, exceptions, and parameters permitted by the platform.</li>
-            </ul>
-          </section>
-
-          <section>
-            <h2>The readiness path</h2>
+            <h2>Campaigns</h2>
+            <p><em>Closes the gap: mass CVE disclosure with no coordinated response path.</em></p>
             <p>
-              Start with a complete inventory, normalize provider and native-type metadata, and then map each
-              policy to the artifacts it can actually evaluate. Next, define the required evidence and ownership
-              model before measuring pass, fail, and no-decision outcomes.
-            </p>
-            <p>
-              This sequence prevents a common failure mode: a dashboard that reports controls and findings while
-              quietly evaluating zero eligible artifacts. A control is useful only when its population, evidence
-              requirements, and decision state are explicit.
+              A 400-finding scan result shouldn&rsquo;t turn into a spreadsheet and a week of ownership disputes. Scout Campaigns
+              auto-groups Mythos-scale findings by CVE, software, or asset, alerts notify groups and watchlists within the hour,
+              and routes ownership through the same rules that already govern your findings — with velocity tracked live until the
+              campaign closes.
             </p>
           </section>
 
-          <aside className="blog-practice-callout">
-            <strong>In practice</strong>
-            <p>
-              A policy for an AI agent should identify the applicable artifact type, such as an agent, and the
-              provider-native type, such as an AWS Bedrock Agent. The platform owns the policy definition; the
-              tenant can then choose permitted scope and documented exceptions without changing the control itself.
-            </p>
-          </aside>
-
           <section>
-            <h2>What good looks like</h2>
-            <ul>
-              <li>Artifacts are discovered continuously and retain stable identifiers across refreshes.</li>
-              <li>Policies show human-readable framework names, applicability, native types, and required evidence.</li>
-              <li>Tenants inherit enabled defaults and can see exactly which controls are configurable.</li>
-              <li>Coverage metrics distinguish evaluated, failed, passed, and no-decision artifacts.</li>
-              <li>Platform governance records approvals, canary rollouts, publication, deprecation, and decision notes.</li>
-            </ul>
+            <h2>BOM Grid</h2>
+            <p><em>Closes the gap: fragmented bill-of-materials visibility across four BOM types.</em></p>
+            <p>
+              Frontier models trace what your code depends on — including AI/ML models, cryptographic primitives, and vendor
+              components most tooling never looks at. BOM Grid unifies SBOM, AI BOM, CBOM, and Vendor BOM into one exposure grid,
+              so nothing Mythos flags lands in a blind spot.
+            </p>
           </section>
 
-          <aside className="blog-takeaways">
-            <strong>Key takeaways</strong>
-            <ul>
-              <li>Inventory is the foundation, not the finish line.</li>
-              <li>Policy applicability must be explicit at both artifact-family and native-type levels.</li>
-              <li>Evidence and ownership are what make AI governance operationally trustworthy.</li>
-              <li>Platform and tenant boundaries let a shared catalog scale without losing local accountability.</li>
-            </ul>
-          </aside>
+          <section>
+            <h2>Suppression Rules</h2>
+            <p><em>Closes the gap: alert fatigue from repeat, previously-accepted findings.</em></p>
+            <p>
+              A model that re-scans nightly will re-surface the same accepted-risk findings every run unless something filters
+              them with a record of why. Scout keeps that filter governed instead of quiet: every suppressed finding carries a reason,
+              an approver, and an expiry date, so yesterday&rsquo;s accepted risk doesn&rsquo;t quietly become tomorrow&rsquo;s blind spot.
+            </p>
+          </section>
+
+          <section>
+            <h2>Fix Intelligence</h2>
+            <p><em>Closes the gap: remediation research lag behind AI-speed discovery.</em></p>
+            <p>
+              Mythos can surface a critical vulnerability far faster than a human can research the fix. Fix Intelligence generates
+              the concrete remediation — an upgrade, a patch, a config change — per CVE or software identity, prioritizes the queue
+              by exploitability and SLA proximity, and returns structured fallback guidance instead of a dead end when AI confidence is low.
+            </p>
+          </section>
+
+          <section>
+            <h2>Under the Hood: CVE Investigation</h2>
+            <p>
+              All four capabilities lean on the same engine. The moment a CVE shows up against your inventory, Scout automatically runs
+              false-positive checks, end-of-life analysis, and exploit-status lookups — before a human opens the finding.
+            </p>
+            <p>
+              That single step is what lets suppression decisions get made with confidence, feeds the recommendations behind Fix
+              Intelligence, and turns a raw Mythos-flagged CVE into something a Campaign can assign as real work instead of noise.
+              CVE Investigation is the foundation; the other four are what you build on top of it.
+            </p>
+          </section>
 
           <div className="blog-closing-callout">
-            <strong>Readiness is the bridge between knowing and governing.</strong>
-            <span>Download the original Mythos readiness one-pager for the concise version of this framework.</span>
+            <strong>Mythos readiness isn&rsquo;t measured by how fast you can find what&rsquo;s wrong — that part is already solved.</strong>
+            <span>It&rsquo;s measured by how fast you can coordinate, close a blind spot, filter the repeat noise, and ship the fix. Scout is built to make that measurement come out in your favor.</span>
+            <p>Curious where your environment stands today? Talk to the Scout team about a readiness walkthrough.</p>
             <a className="blog-read-more" href={MYTHOS_READINESS_PDF_PATH} download>
-              Download the one-pager <span aria-hidden="true">↓</span>
+              Download the source brief <span aria-hidden="true">↓</span>
             </a>
           </div>
         </div>
