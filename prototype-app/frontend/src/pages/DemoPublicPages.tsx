@@ -630,6 +630,7 @@ export function DemoLandingPage() {
 
 const ZERO_DAY_BLOG_PATH = '/demo/blog/zero-day-response-hours-not-weeks';
 const MYTHOS_READINESS_BLOG_PATH = '/demo/blog/mythos-readiness';
+const SBOM_EXPLOITABILITY_BLOG_PATH = '/demo/blog/why-your-sbom-tool-doesnt-know-whats-exploitable';
 
 export function BlogIndexPage() {
   return (
@@ -660,6 +661,18 @@ export function BlogIndexPage() {
             </Link>
           </article>
           <article className="blog-card">
+            <time dateTime="2026-08-14">August 14, 2026</time>
+            <h2>
+              <Link to={SBOM_EXPLOITABILITY_BLOG_PATH}>Why your SBOM tool doesn&apos;t know what&apos;s actually exploitable</Link>
+            </h2>
+            <p>
+              An SBOM tells you what is in your software. Scout keeps your exposure picture current so you know what is exploitable right now.
+            </p>
+            <Link className="blog-read-more" to={SBOM_EXPLOITABILITY_BLOG_PATH}>
+              Read more <span aria-hidden="true">→</span>
+            </Link>
+          </article>
+          <article className="blog-card">
             <time dateTime="2026-09-12">September 12, 2026</time>
             <h2>
               <Link to={MYTHOS_READINESS_BLOG_PATH}>Mythos readiness: why discovery was never the hard part</Link>
@@ -674,6 +687,70 @@ export function BlogIndexPage() {
           </article>
         </section>
       </div>
+    </PublicDemoShell>
+  );
+}
+
+export function SbomExploitabilityBlogPage() {
+  return (
+    <PublicDemoShell>
+      <article className="blog-article">
+        <header className="blog-article-header">
+          <Link className="blog-back-link" to="/demo/blog">← All blogs</Link>
+          <span className="blog-article-kicker">SCOUT BLOG · VULNERABILITY INTELLIGENCE</span>
+          <h1>Why your SBOM tool doesn&apos;t know what&apos;s actually exploitable</h1>
+          <p className="blog-article-deck">SBOM ingestion + continuous re-correlation — no re-scan needed when a new CVE drops.</p>
+          <time dateTime="2026-08-14">August 14, 2026</time>
+        </header>
+
+        <div className="blog-article-body">
+          <p>
+            Most SBOM tools do one thing well: they tell you what&apos;s in your software. You get a component list, a compliance artifact, a box checked. But a component list is not a risk list — and that gap is exactly where real exposure hides.
+          </p>
+          <p>
+            An SBOM is a snapshot. The day it&apos;s generated, it starts going out of date. New vulnerabilities are disclosed constantly, and some start being actively exploited within days. Your SBOM tool has no way of knowing that happened — it already did its job the moment it produced the document. Finding out whether today&apos;s risk still matches yesterday&apos;s snapshot means someone has to remember to re-scan, re-upload, or manually check. Most teams don&apos;t do that often enough for it to matter.
+          </p>
+          <p>
+            A clean SBOM from last quarter isn&apos;t reassurance. It&apos;s a question nobody&apos;s asked recently.
+          </p>
+
+          <h2>What that gap actually costs your team</h2>
+          <ul>
+            <li><strong>Blind spots between scans.</strong> A newly disclosed, actively exploited vulnerability can sit unnoticed in your environment for days or weeks, simply because nobody triggered a fresh scan.</li>
+            <li><strong>Wasted analyst time.</strong> Instead of fixing real issues, your team spends hours re-running scans and manually cross-checking whether anything changed.</li>
+            <li><strong>False confidence.</strong> A clean report from last month feels reassuring — but it says nothing about your risk today.</li>
+            <li><strong>Slow response to real threats.</strong> The vulnerabilities that matter most are the ones being exploited right now. A stale inventory means you find out late, after the exposure has already cost you.</li>
+          </ul>
+
+          <h2>How Scout closes the gap</h2>
+          <p>Scout keeps your risk picture current automatically, so your team never has to chase it.</p>
+          <ul>
+            <li><strong>No re-scans, no re-uploads.</strong> Once your software inventory is in Scout, it stays protected — you don&apos;t need to re-run anything to stay current as new vulnerabilities emerge.</li>
+            <li><strong>Always current, with zero extra effort.</strong> Your exposure picture reflects the latest known risks automatically,</li>
+            <li><strong>Time back for your team.</strong> Analysts spend their time fixing what matters instead of re-verifying whether their data is still accurate.</li>
+            <li><strong>Faster action on real threats.</strong> When a vulnerability starts being actively exploited in the wild, it&apos;s reflected in your priorities immediately — not at your next scheduled scan.</li>
+            <li><strong>Confidence, not guesswork.</strong> You always know your current exposure is current — not a snapshot from whenever someone last remembered to check.</li>
+          </ul>
+
+          <h2>IN PRACTICE</h2>
+          <p>
+            A vulnerability becomes a headline because it&apos;s being actively exploited. With most tools, you&apos;d need to kick off a new scan to find out if it affects you. With Scout, your team already knows — and already knows exactly where to focus — before anyone has to ask.
+          </p>
+
+          <h2>The bigger picture</h2>
+          <p>
+            An SBOM answers a compliance question: what&apos;s in your software. Scout answers the question that actually matters day to day: what&apos;s exploitable right now, and what should your team fix first. That answer stays current on its own — so your team&apos;s time goes toward reducing risk, not maintaining an inventory.
+          </p>
+
+          <h2>KEY TAKEAWAYS</h2>
+          <ul>
+            <li>An SBOM is a snapshot — it goes stale the moment it&apos;s generated.</li>
+            <li>Manual re-scanning doesn&apos;t scale, and the gap it leaves is exactly where exploited vulnerabilities hide.</li>
+            <li>Scout keeps your exposure picture current automatically, so your team&apos;s time goes toward fixing risk, not chasing whether the data is still accurate.</li>
+            <li>Your SBOM tool tells you what&apos;s in your software. Scout tells you what&apos;s exploitable — and keeps telling you, automatically, for as long as it matters.</li>
+          </ul>
+        </div>
+      </article>
     </PublicDemoShell>
   );
 }

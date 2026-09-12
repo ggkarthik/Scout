@@ -166,6 +166,9 @@ const ZeroDayBlogPage = React.lazy(async () => ({
 const MythosReadinessBlogPage = React.lazy(async () => ({
   default: (await import('./pages/DemoPublicPages')).MythosReadinessBlogPage
 }));
+const SbomExploitabilityBlogPage = React.lazy(async () => ({
+  default: (await import('./pages/DemoPublicPages')).SbomExploitabilityBlogPage
+}));
 const DemoRequestPage = React.lazy(async () => ({
   default: (await import('./pages/DemoPublicPages')).DemoRequestPage
 }));
@@ -1306,6 +1309,7 @@ export default function App() {
         <Route path="/demo/blog" element={<BlogIndexPage />} />
         <Route path="/demo/blog/zero-day-response-hours-not-weeks" element={<ZeroDayBlogPage />} />
         <Route path="/demo/blog/mythos-readiness" element={<MythosReadinessBlogPage />} />
+        <Route path="/demo/blog/why-your-sbom-tool-doesnt-know-whats-exploitable" element={<SbomExploitabilityBlogPage />} />
         <Route path="/demo/request" element={<DemoRequestPage />} />
         <Route path="/demo/request/success" element={<DemoRequestSuccessPage />} />
         <Route path="/demo/expired" element={<DemoExpiredPage />} />
