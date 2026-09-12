@@ -629,6 +629,7 @@ export function DemoLandingPage() {
 }
 
 const ZERO_DAY_BLOG_PATH = '/demo/blog/zero-day-response-hours-not-weeks';
+const MYTHOS_READINESS_PDF_PATH = '/blog/scout-mythos-readiness-onepager.pdf';
 
 export function BlogIndexPage() {
   return (
@@ -657,6 +658,22 @@ export function BlogIndexPage() {
             <Link className="blog-read-more" to={ZERO_DAY_BLOG_PATH}>
               Read more <span aria-hidden="true">→</span>
             </Link>
+          </article>
+          <article className="blog-card">
+            <time dateTime="2026-09-12">September 12, 2026</time>
+            <h2>Scout Mythos readiness: a practical one-pager</h2>
+            <p>
+              A concise readiness guide for understanding the Scout Mythos security posture and the steps that
+              move an organization toward stronger AI governance.
+            </p>
+            <a
+              className="blog-read-more"
+              href={MYTHOS_READINESS_PDF_PATH}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Read the one-pager <span aria-hidden="true">→</span>
+            </a>
           </article>
         </section>
       </div>
