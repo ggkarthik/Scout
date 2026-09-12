@@ -163,6 +163,9 @@ const BlogIndexPage = React.lazy(async () => ({
 const ZeroDayBlogPage = React.lazy(async () => ({
   default: (await import('./pages/DemoPublicPages')).ZeroDayBlogPage
 }));
+const MythosReadinessBlogPage = React.lazy(async () => ({
+  default: (await import('./pages/DemoPublicPages')).MythosReadinessBlogPage
+}));
 const DemoRequestPage = React.lazy(async () => ({
   default: (await import('./pages/DemoPublicPages')).DemoRequestPage
 }));
@@ -1302,6 +1305,7 @@ export default function App() {
         <Route path="/demo" element={<DemoLandingPage />} />
         <Route path="/demo/blog" element={<BlogIndexPage />} />
         <Route path="/demo/blog/zero-day-response-hours-not-weeks" element={<ZeroDayBlogPage />} />
+        <Route path="/demo/blog/mythos-readiness" element={<MythosReadinessBlogPage />} />
         <Route path="/demo/request" element={<DemoRequestPage />} />
         <Route path="/demo/request/success" element={<DemoRequestSuccessPage />} />
         <Route path="/demo/expired" element={<DemoExpiredPage />} />

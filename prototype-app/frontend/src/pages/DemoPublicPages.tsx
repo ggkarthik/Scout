@@ -629,6 +629,7 @@ export function DemoLandingPage() {
 }
 
 const ZERO_DAY_BLOG_PATH = '/demo/blog/zero-day-response-hours-not-weeks';
+const MYTHOS_READINESS_BLOG_PATH = '/demo/blog/mythos-readiness';
 const MYTHOS_READINESS_PDF_PATH = '/blog/scout-mythos-readiness-onepager.pdf';
 
 export function BlogIndexPage() {
@@ -661,22 +662,114 @@ export function BlogIndexPage() {
           </article>
           <article className="blog-card">
             <time dateTime="2026-09-12">September 12, 2026</time>
-            <h2>Scout Mythos readiness: a practical one-pager</h2>
+            <h2>
+              <Link to={MYTHOS_READINESS_BLOG_PATH}>Mythos readiness: why discovery was never the hard part</Link>
+            </h2>
             <p>
               A concise readiness guide for understanding the Scout Mythos security posture and the steps that
               move an organization toward stronger AI governance.
             </p>
-            <a
-              className="blog-read-more"
-              href={MYTHOS_READINESS_PDF_PATH}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Read the one-pager <span aria-hidden="true">→</span>
-            </a>
+            <Link className="blog-read-more" to={MYTHOS_READINESS_BLOG_PATH}>
+              Read more <span aria-hidden="true">→</span>
+            </Link>
           </article>
         </section>
       </div>
+    </PublicDemoShell>
+  );
+}
+
+export function MythosReadinessBlogPage() {
+  return (
+    <PublicDemoShell>
+      <article className="blog-article">
+        <header className="blog-article-header">
+          <Link className="blog-back-link" to="/demo/blog">← All blogs</Link>
+          <span className="blog-article-kicker">ScoutGrid Blog · Mythos Readiness</span>
+          <h1>Mythos readiness: why discovery was never the hard part</h1>
+          <p className="blog-article-deck">From an AI inventory to an evidence-backed readiness program.</p>
+          <time dateTime="2026-09-12">September 12, 2026</time>
+        </header>
+
+        <div className="blog-article-body">
+          <p>
+            AI discovery is the visible beginning of a security program. The harder work starts after the
+            inventory exists: establishing ownership, defining what good looks like, and proving that every
+            important decision is supported by current evidence.
+          </p>
+          <p>
+            Mythos readiness is the discipline of turning that inventory into an operating model. It connects
+            each AI agent, model, guardrail, identity, MCP server, and data store to its provider, native type,
+            owner, environment, and governing policies.
+          </p>
+
+          <blockquote>
+            Discovery tells you what exists. Readiness tells you whether the organization can govern it.
+          </blockquote>
+
+          <section>
+            <h2>What readiness adds to discovery</h2>
+            <ul>
+              <li><strong>Identity and ownership.</strong> Every artifact has a stable identity, accountable owner, provider, region, and environment.</li>
+              <li><strong>Policy applicability.</strong> Controls declare the artifact families and native types they evaluate, so coverage is measurable rather than assumed.</li>
+              <li><strong>Evidence lineage.</strong> Decisions point back to connector capabilities, observations, timestamps, and the exact policy version used.</li>
+              <li><strong>Governance boundaries.</strong> Platform owners manage the catalog and lifecycle while tenants configure only the scope, exceptions, and parameters permitted by the platform.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2>The readiness path</h2>
+            <p>
+              Start with a complete inventory, normalize provider and native-type metadata, and then map each
+              policy to the artifacts it can actually evaluate. Next, define the required evidence and ownership
+              model before measuring pass, fail, and no-decision outcomes.
+            </p>
+            <p>
+              This sequence prevents a common failure mode: a dashboard that reports controls and findings while
+              quietly evaluating zero eligible artifacts. A control is useful only when its population, evidence
+              requirements, and decision state are explicit.
+            </p>
+          </section>
+
+          <aside className="blog-practice-callout">
+            <strong>In practice</strong>
+            <p>
+              A policy for an AI agent should identify the applicable artifact type, such as an agent, and the
+              provider-native type, such as an AWS Bedrock Agent. The platform owns the policy definition; the
+              tenant can then choose permitted scope and documented exceptions without changing the control itself.
+            </p>
+          </aside>
+
+          <section>
+            <h2>What good looks like</h2>
+            <ul>
+              <li>Artifacts are discovered continuously and retain stable identifiers across refreshes.</li>
+              <li>Policies show human-readable framework names, applicability, native types, and required evidence.</li>
+              <li>Tenants inherit enabled defaults and can see exactly which controls are configurable.</li>
+              <li>Coverage metrics distinguish evaluated, failed, passed, and no-decision artifacts.</li>
+              <li>Platform governance records approvals, canary rollouts, publication, deprecation, and decision notes.</li>
+            </ul>
+          </section>
+
+          <aside className="blog-takeaways">
+            <strong>Key takeaways</strong>
+            <ul>
+              <li>Inventory is the foundation, not the finish line.</li>
+              <li>Policy applicability must be explicit at both artifact-family and native-type levels.</li>
+              <li>Evidence and ownership are what make AI governance operationally trustworthy.</li>
+              <li>Platform and tenant boundaries let a shared catalog scale without losing local accountability.</li>
+            </ul>
+          </aside>
+
+          <div className="blog-closing-callout">
+            <strong>Readiness is the bridge between knowing and governing.</strong>
+            <span>Download the original Mythos readiness one-pager for the concise version of this framework.</span>
+            <a className="blog-read-more" href={MYTHOS_READINESS_PDF_PATH} download>
+              Download the one-pager <span aria-hidden="true">↓</span>
+            </a>
+          </div>
+        </div>
+      </article>
     </PublicDemoShell>
   );
 }
