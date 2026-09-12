@@ -630,7 +630,6 @@ export function DemoLandingPage() {
 
 const ZERO_DAY_BLOG_PATH = '/demo/blog/zero-day-response-hours-not-weeks';
 const MYTHOS_READINESS_BLOG_PATH = '/demo/blog/mythos-readiness';
-const MYTHOS_READINESS_PDF_PATH = '/blog/scout-mythos-readiness-onepager.pdf';
 
 export function BlogIndexPage() {
   return (
@@ -766,9 +765,6 @@ export function MythosReadinessBlogPage() {
             <strong>Mythos readiness isn&rsquo;t measured by how fast you can find what&rsquo;s wrong — that part is already solved.</strong>
             <span>It&rsquo;s measured by how fast you can coordinate, close a blind spot, filter the repeat noise, and ship the fix. Scout is built to make that measurement come out in your favor.</span>
             <p>Curious where your environment stands today? Talk to the Scout team about a readiness walkthrough.</p>
-            <a className="blog-read-more" href={MYTHOS_READINESS_PDF_PATH} download>
-              Download the source brief <span aria-hidden="true">↓</span>
-            </a>
           </div>
         </div>
       </article>
