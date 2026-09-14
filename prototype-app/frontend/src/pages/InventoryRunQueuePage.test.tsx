@@ -8,6 +8,9 @@ describe('InventoryRunQueuePage', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('shows AWS and Azure AI discovery progress with provider details and errors', async () => {
+    vi.spyOn(api, 'listIngestionJobs').mockResolvedValue({
+      items: [], page: 0, size: 100, totalItems: 0, totalPages: 0
+    });
     vi.spyOn(api, 'listSyncRuns').mockResolvedValue([
       {
         id: 'aws-run',
@@ -132,6 +135,43 @@ describe('InventoryRunQueuePage', () => {
     )).toBeInTheDocument();
     expect(within(awsCloudRow as HTMLTableRowElement).getByText(
       /Resource types: EC2, SSM/
+    )).toBeInTheDocument();
+  });
+
+  it('shows queued Azure AI discovery jobs before a worker creates the sync run', async () => {
+    vi.spyOn(api, 'listSyncRuns').mockResolvedValue([]);
+    vi.spyOn(api, 'listIngestionJobs').mockResolvedValue({
+      items: [{
+        jobId: 'azure-job',
+        jobType: 'AI_SECURITY_AZURE_DISCOVERY',
+        sourceType: 'ai-security-azure',
+        assetIdentifier: 'ai-security-azure:azure-connector',
+        status: 'QUEUED',
+        requestedBy: 'analyst',
+        requestedAt: '2026-09-13T10:00:00Z',
+        startedAt: null,
+        completedAt: null,
+        attemptCount: 0,
+        failureCode: null,
+        failureMessage: null,
+        sbomUploadId: null,
+        resultJson: null,
+      }],
+      page: 0,
+      size: 100,
+      totalItems: 1,
+      totalPages: 1,
+    });
+
+    renderWithProviders(<InventoryRunQueuePage />);
+
+    const type = await screen.findByText('Azure AI Discovery');
+    const row = type.closest('tr');
+    expect(row).not.toBeNull();
+    expect(within(row as HTMLTableRowElement).getByText('Queued')).toBeInTheDocument();
+    within(row as HTMLTableRowElement).getByText('Details').click();
+    expect(within(row as HTMLTableRowElement).getByText(
+      /Waiting for the AI Security discovery worker to claim this job/
     )).toBeInTheDocument();
   });
 });

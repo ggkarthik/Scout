@@ -26,6 +26,20 @@ export function useSyncRunsQuery(params: SyncRunsQueryParams, enabled = true, re
   });
 }
 
+export function useIngestionJobsQuery(enabled = true) {
+  return useQuery({
+    queryKey: ['ingestion-jobs', { page: 0, size: 100 }],
+    queryFn: () => api.listIngestionJobs(0, 100),
+    enabled,
+    refetchInterval: (query) => (
+      (query.state.data?.items ?? []).some((job) => job.status.trim().toUpperCase() === 'QUEUED')
+        ? RUN_QUEUE_REFRESH_INTERVAL_MS
+        : false
+    ),
+    refetchIntervalInBackground: false
+  });
+}
+
 export function useVexAssertionRepairSummaryQuery(enabled = true, refetchInterval?: QueryPollingOption) {
   return useQuery({
     queryKey: ['vex-assertion-repair-summary'],

@@ -5,8 +5,9 @@ import {
   type DataTableColumn,
   type DataTableRow
 } from '../components/DataTable';
-import { useSyncRunsQuery } from '../features/connect/queries';
+import { useIngestionJobsQuery, useSyncRunsQuery } from '../features/connect/queries';
 import type { SyncRun } from '../features/connect/types';
+import type { IngestionJob } from '../api/client';
 
 type InventoryRunMetadata = {
   sourceSystem?: string;
@@ -96,6 +97,30 @@ function isInventoryRun(run: SyncRun): boolean {
 
 function isAiInventoryRun(run: SyncRun): boolean {
   return run.syncType.trim().toUpperCase().startsWith('AI_SECURITY_');
+}
+
+function queuedAiJobAsRun(job: IngestionJob): SyncRun {
+  const normalizedType = job.jobType.trim().toUpperCase();
+  const provider = normalizedType === 'AI_SECURITY_AZURE_DISCOVERY' ? 'AZURE' : 'AWS';
+  const connectorId = job.assetIdentifier.split(':', 2)[1];
+  return {
+    id: `ingestion-job-${job.jobId}`,
+    syncType: normalizedType,
+    runDomain: 'INVENTORY',
+    runClass: 'INGESTION',
+    status: job.status,
+    recordsFetched: 0,
+    recordsInserted: 0,
+    recordsUpdated: 0,
+    recordsFailed: 0,
+    startedAt: job.requestedAt,
+    metadataJson: JSON.stringify({
+      provider,
+      connectorId,
+      triggerMode: 'Queued',
+      message: 'Waiting for the AI Security discovery worker to claim this job.'
+    })
+  };
 }
 
 function queueLabel(run: SyncRun): string {
@@ -286,13 +311,23 @@ function buildRunRows(runs: SyncRun[]): DataTableRow[] {
 
 export function InventoryRunQueuePage() {
   const inventoryRunsQuery = useSyncRunsQuery({ category: 'inventory', limit: 100 });
+  const ingestionJobsQuery = useIngestionJobsQuery();
   const inventoryRuns = React.useMemo(
-    () => (inventoryRunsQuery.data ?? []).filter((run) => isInventoryRun(run)),
-    [inventoryRunsQuery.data]
+    () => {
+      const syncRuns = (inventoryRunsQuery.data ?? []).filter((run) => isInventoryRun(run));
+      const queuedAiJobs = (ingestionJobsQuery.data?.items ?? [])
+        .filter((job) => job.status.trim().toUpperCase() === 'QUEUED')
+        .filter((job) => job.jobType.trim().toUpperCase().startsWith('AI_SECURITY_'))
+        .map(queuedAiJobAsRun);
+      return [...queuedAiJobs, ...syncRuns];
+    },
+    [ingestionJobsQuery.data, inventoryRunsQuery.data]
   );
-  const loading = inventoryRunsQuery.isPending && !inventoryRunsQuery.data;
-  const refreshing = inventoryRunsQuery.isFetching;
-  const error = inventoryRunsQuery.error instanceof Error ? inventoryRunsQuery.error.message : '';
+  const loading = (inventoryRunsQuery.isPending && !inventoryRunsQuery.data)
+    || (ingestionJobsQuery.isPending && !ingestionJobsQuery.data);
+  const refreshing = inventoryRunsQuery.isFetching || ingestionJobsQuery.isFetching;
+  const queryError = inventoryRunsQuery.error ?? ingestionJobsQuery.error;
+  const error = queryError instanceof Error ? queryError.message : '';
   const queueRows = React.useMemo(() => buildRunRows(inventoryRuns), [inventoryRuns]);
 
   return (
@@ -309,7 +344,10 @@ export function InventoryRunQueuePage() {
             type="button"
             className="btn btn-secondary"
             disabled={refreshing}
-            onClick={() => void inventoryRunsQuery.refetch()}
+            onClick={() => {
+              void inventoryRunsQuery.refetch();
+              void ingestionJobsQuery.refetch();
+            }}
           >
             {refreshing ? 'Refreshing...' : 'Refresh Queue'}
           </button>

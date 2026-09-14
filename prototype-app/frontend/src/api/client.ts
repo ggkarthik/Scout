@@ -231,6 +231,14 @@ export type IngestionJob = {
   resultJson: string | null;
 };
 
+export type IngestionJobPage = {
+  items: IngestionJob[];
+  page: number;
+  size: number;
+  totalItems: number;
+  totalPages: number;
+};
+
 export type BomComponentSummaryItem = {
   componentId: string;
   packageName: string;
@@ -2048,6 +2056,8 @@ export const api = {
     }),
   getIngestionJob: (jobId: string) =>
     request<IngestionJob>(`/ingestion-jobs/${encodeURIComponent(jobId)}`),
+  listIngestionJobs: (page = 0, size = 25) =>
+    request<IngestionJobPage>(`/ingestion-jobs?page=${page}&size=${size}`),
   bomUpload: async (formData: FormData): Promise<BomIngestionResult> => {
     const headers = buildApiHeaders(undefined, false);
     const response = await fetch(`${API_BASE}/bom/upload`, { method: 'POST', body: formData, headers });
