@@ -1,5 +1,6 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { api } from '../../api/client';
+import { DASHBOARD_REFRESH_INTERVAL_MS } from '../../lib/polling';
 
 export type EolComponentStatusesQueryParams = Parameters<typeof api.getEolComponentStatuses>[0];
 
@@ -7,7 +8,8 @@ export function useEolSummaryQuery(enabled = true) {
   return useQuery({
     queryKey: ['eol-summary'],
     queryFn: api.getEolSummary,
-    enabled
+    enabled,
+    refetchInterval: DASHBOARD_REFRESH_INTERVAL_MS
   });
 }
 

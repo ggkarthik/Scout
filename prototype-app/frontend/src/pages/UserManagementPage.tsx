@@ -13,6 +13,7 @@ import {
   useAuthContextQuery,
   useCreateServiceAccountMutation,
   useDeactivateServiceAccountMutation,
+  useReactivateServiceAccountMutation,
   useDeleteServiceAccountMutation,
   useDeleteTenantMemberMutation,
   useResendTenantInviteMutation,
@@ -259,6 +260,7 @@ export function UserManagementPage() {
   const deleteMember = useDeleteTenantMemberMutation(tenantId);
   const createServiceAccount = useCreateServiceAccountMutation();
   const deactivateServiceAccount = useDeactivateServiceAccountMutation();
+  const reactivateServiceAccount = useReactivateServiceAccountMutation();
   const deleteServiceAccount = useDeleteServiceAccountMutation();
 
   const members = React.useMemo(() => membersQuery.data ?? [], [membersQuery.data]);
@@ -977,6 +979,16 @@ export function UserManagementPage() {
                               onClick={() => deactivateServiceAccount.mutate(account.id)}
                             >
                               Deactivate
+                            </button>
+                          )}
+                          {account.status.toUpperCase() !== 'ACTIVE' && (
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              disabled={!mayManageServiceAccounts || reactivateServiceAccount.isPending}
+                              onClick={() => reactivateServiceAccount.mutate(account.id)}
+                            >
+                              Reactivate
                             </button>
                           )}
                           <button

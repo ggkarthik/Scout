@@ -90,6 +90,18 @@ public class ServiceAccountController {
         return toResponse(account);
     }
 
+    @PostMapping("/{accountId}/reactivate")
+    @PreAuthorize("hasRole('TENANT_ADMIN')")
+    @SensitiveTenantAction("service_account.reactivated")
+    public ServiceAccountResponse reactivate(@PathVariable UUID accountId) {
+        var actor = requestActorService.currentActor();
+        tenantAccessControlService.assertTenantAccess(actor, actor.tenantId());
+        ServiceAccount account = identityAdministrationService.reactivateServiceAccount(actor.tenantId(), accountId);
+        auditEventService.record("service_account.reactivated", "service_account", accountId.toString(),
+                "{\"tenantId\":\"" + actor.tenantId() + "\",\"status\":\"" + account.getStatus() + "\"}");
+        return toResponse(account);
+    }
+
     private ServiceAccountResponse toResponse(ServiceAccount account) {
         return new ServiceAccountResponse(
                 account.getId(),

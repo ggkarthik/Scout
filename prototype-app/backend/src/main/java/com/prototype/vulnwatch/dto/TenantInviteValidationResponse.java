@@ -1,6 +1,5 @@
 package com.prototype.vulnwatch.dto;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.time.Instant;
 
 public record TenantInviteValidationResponse(
@@ -13,6 +12,6 @@ public record TenantInviteValidationResponse(
         String role,
         Instant inviteExpiresAt,
         String message,
-        @JsonIgnore String setupToken
+        String setupToken
 ) {
 }

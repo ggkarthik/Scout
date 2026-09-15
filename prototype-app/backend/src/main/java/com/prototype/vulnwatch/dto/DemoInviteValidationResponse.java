@@ -1,6 +1,5 @@
 package com.prototype.vulnwatch.dto;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -14,6 +13,6 @@ public record DemoInviteValidationResponse(
         Instant inviteExpiresAt,
         String loginUrl,
         String message,
-        @JsonIgnore String setupToken
+        String setupToken
 ) {
 }

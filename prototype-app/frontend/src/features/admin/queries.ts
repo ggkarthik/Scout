@@ -163,6 +163,17 @@ export function useDeactivateServiceAccountMutation() {
   });
 }
 
+export function useReactivateServiceAccountMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (accountId: string) => api.reactivateServiceAccount(accountId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: SERVICE_ACCOUNTS_KEY });
+      queryClient.invalidateQueries({ queryKey: AUDIT_EVENTS_KEY });
+    }
+  });
+}
+
 export function useAuditEventsQuery() {
   return useQuery({
     queryKey: AUDIT_EVENTS_KEY,

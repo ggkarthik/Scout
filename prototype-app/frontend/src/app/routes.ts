@@ -431,7 +431,7 @@ export function titleForTab(tab: AppTab): string {
     case 'findings':
       return 'Findings';
     case 'policies':
-      return 'Policies';
+      return 'AI Policies';
     case 'platform-policies':
       return 'Policy Distribution';
     case 'operations':

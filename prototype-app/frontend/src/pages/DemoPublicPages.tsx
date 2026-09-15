@@ -1054,6 +1054,10 @@ export function DemoInvitePage() {
     mutationFn: () => api.acceptDemoInvite(token),
     onSuccess: (response) => {
       if (response.status === 'ACCEPTED') {
+        if (response.setupToken) {
+          navigate(`/setup/${encodeURIComponent(response.setupToken)}?email=${encodeURIComponent(response.email)}`);
+          return;
+        }
         const nextParams = new URLSearchParams({
           setup: '1',
           email: response.email
@@ -1119,6 +1123,10 @@ export function TenantInvitePage() {
     mutationFn: () => api.acceptTenantInvite(token),
     onSuccess: (response) => {
       if (response.status === 'ACCEPTED') {
+        if (response.setupToken) {
+          navigate(`/setup/${encodeURIComponent(response.setupToken)}?email=${encodeURIComponent(response.email)}`);
+          return;
+        }
         const nextParams = new URLSearchParams({
           setup: '1',
           email: response.email

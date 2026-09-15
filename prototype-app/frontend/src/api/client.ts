@@ -2032,6 +2032,10 @@ export const api = {
     request<ServiceAccount>(`/service-accounts/${encodeURIComponent(accountId)}/deactivate`, {
       method: 'POST'
     }),
+  reactivateServiceAccount: (accountId: string) =>
+    request<ServiceAccount>(`/service-accounts/${encodeURIComponent(accountId)}/reactivate`, {
+      method: 'POST'
+    }),
   deleteServiceAccount: (accountId: string) =>
     request<void>(`/service-accounts/${encodeURIComponent(accountId)}`, {
       method: 'DELETE'

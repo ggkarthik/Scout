@@ -843,7 +843,6 @@ function AppShell() {
   const displayRole = actor?.roles?.[0]?.replace(/^ROLE_/, '').replace(/_/g, ' ') ?? 'No role';
   const tenantLabel = actor?.tenantName ?? (canAccessPlatformConsole(actor) ? 'Platform' : 'No tenant');
   const actorLabel = actor?.principal ?? actor?.userId ?? 'Unknown user';
-  const isDemoTenant = actor?.demo === true;
   const activePersonaLabel = testPersonas.activePersona
     ? `Impersonating: ${testPersonas.activePersona.persona.label}`
     : null;
@@ -975,7 +974,9 @@ function AppShell() {
           </div>
 
           <div className="nav-main-section">
-            {visiblePrimaryNavTabs.filter((tab) => tab !== 'admin' && tab !== 'configurations').map((tab) => {
+            {visiblePrimaryNavTabs
+              .filter((tab) => tab !== 'policies' && tab !== 'connect' && tab !== 'admin' && tab !== 'configurations')
+              .map((tab) => {
               if (tab === 'findings' && aiSecurityEnabled) {
                 return renderExpandableNavButton(
                   tab,
@@ -1001,6 +1002,8 @@ function AppShell() {
               }
               return renderNavButton(tab);
             })}
+            {visiblePrimaryNavTabs.includes('policies') && renderNavButton('policies')}
+
             {aiSecurityEnabled && renderExpandableNavButton(
               'ai',
               aiInventoryNavExpanded,
@@ -1024,6 +1027,7 @@ function AppShell() {
                 return navigate(`/inventory/ai/assets?nativeKind=${encodeURIComponent(item?.nativeKind ?? '')}`);
               }
             )}
+
           </div>
 
           {platformScopeOwner && (
@@ -1039,14 +1043,7 @@ function AppShell() {
 
           <div className="nav-bottom-section">
             {BOTTOM_NAV_TABS.map((tab) => renderNavButton(tab))}
-            {visiblePrimaryNavTabs.includes('admin') && renderExpandableNavButton(
-              'admin',
-              adminNavExpanded,
-              () => setAdminNavExpanded((current) => !current),
-              ADMIN_PILL_ORDER,
-              (key) => activeTab === 'admin' && activeAdminView === key,
-              (key) => navigate(pathForAdminView(key as AdminRouteView))
-            )}
+            {visiblePrimaryNavTabs.includes('connect') && renderNavButton('connect')}
             {visiblePrimaryNavTabs.includes('configurations') && renderExpandableNavButton(
               'configurations',
               configurationsNavExpanded,
@@ -1054,6 +1051,14 @@ function AppShell() {
               CONFIGURATIONS_PILL_ORDER,
               (key) => activeTab === 'configurations' && activeConfigurationsView === key,
               (key) => navigate(pathForConfigurationsView(key as ConfigurationsRouteView))
+            )}
+            {visiblePrimaryNavTabs.includes('admin') && renderExpandableNavButton(
+              'admin',
+              adminNavExpanded,
+              () => setAdminNavExpanded((current) => !current),
+              ADMIN_PILL_ORDER,
+              (key) => activeTab === 'admin' && activeAdminView === key,
+              (key) => navigate(pathForAdminView(key as AdminRouteView))
             )}
           </div>
         </aside>
@@ -1069,12 +1074,6 @@ function AppShell() {
                 <span>{tenantLabel}</span>
                 <small>{displayRole}</small>
               </div>
-              {isDemoTenant && (
-                <div className="tenant-context-pill demo-status-pill" title={actor.demoExpiresAt ? `Expires ${actor.demoExpiresAt}` : 'Demo workspace'}>
-                  <span>Demo</span>
-                  <small>{actor.demoDaysRemaining == null ? 'Limited access' : `${actor.demoDaysRemaining} days left`}</small>
-                </div>
-              )}
               {activePersonaLabel && (
                 <div className={`tenant-context-pill test-persona-pill ${testPersonas.activePersona?.mode === 'preview' ? 'preview' : ''}`}>
                   <span>{activePersonaLabel}</span>

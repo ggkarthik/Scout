@@ -343,6 +343,21 @@ public class IdentityAdministrationService {
         }));
     }
 
+    public ServiceAccount reactivateServiceAccount(UUID tenantId, UUID accountId) {
+        Tenant tenant = tenantRepository.findById(tenantId)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown tenant: " + tenantId));
+        return tenantSchemaExecutionService.run(tenant, () -> executeWrite(() -> {
+            ServiceAccount account = serviceAccountRepository.findById(accountId)
+                    .orElseThrow(() -> new IllegalArgumentException("Unknown service account: " + accountId));
+            if (account.getTenant() == null || !tenantId.equals(account.getTenant().getId())) {
+                throw new IllegalArgumentException("Service account does not belong to tenant: " + tenantId);
+            }
+            account.setStatus("ACTIVE");
+            account.setUpdatedAt(Instant.now());
+            return serviceAccountRepository.save(account);
+        }));
+    }
+
     @Transactional
     public TenantUserInvite saveInvite(TenantUserInvite invite) {
         invite.setUpdatedAt(Instant.now());
