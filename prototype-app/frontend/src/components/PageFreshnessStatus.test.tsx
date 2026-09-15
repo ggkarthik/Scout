@@ -4,7 +4,6 @@ import { renderWithProviders } from '../test/test-utils';
 import { PageFreshnessStatus } from './PageFreshnessStatus';
 
 describe('PageFreshnessStatus', () => {
-  const RETURN_PULSE_MS = 4000;
   const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, 'visibilityState')
     ?? Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState');
 
@@ -23,7 +22,7 @@ describe('PageFreshnessStatus', () => {
     }
   });
 
-  it('shows a return-to-tab pulse when data updates while the tab is hidden', () => {
+  it('keeps the last-updated timestamp without a return-to-tab pulse', () => {
     const view = renderWithProviders(
       <PageFreshnessStatus updatedAt="2026-07-09T10:00:00Z" />
     );
@@ -48,12 +47,7 @@ describe('PageFreshnessStatus', () => {
       document.dispatchEvent(new Event('visibilitychange'));
     });
 
-    expect(screen.getByText(/Updated just now while you were away/i)).toBeInTheDocument();
-
-    act(() => {
-      vi.advanceTimersByTime(RETURN_PULSE_MS);
-    });
-
     expect(screen.queryByText(/Updated just now while you were away/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Last updated/i)).toBeInTheDocument();
   });
 });
