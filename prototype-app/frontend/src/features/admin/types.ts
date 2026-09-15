@@ -67,7 +67,6 @@ export type TenantInviteValidationResponse = {
   role: string;
   inviteExpiresAt: string;
   message: string;
-  setupToken?: string;
 };
 
 export type PlatformUser = {
@@ -310,7 +309,6 @@ export type DemoInviteValidationResponse = {
   inviteExpiresAt: string;
   loginUrl: string;
   message: string;
-  setupToken?: string;
 };
 
 export type AuthTokenResponse = {

@@ -41,7 +41,6 @@ export function PageFreshnessStatus({
   delayedMessage?: string | null;
   refreshLabel?: string;
 }) {
-  const resolvedUpdatedAt = React.useMemo(() => resolveTimestamp(updatedAt), [updatedAt]);
   const formatted = formatTimestamp(updatedAt);
   const statusText = isRefreshing
     ? formatted
