@@ -1,3 +1,4 @@
+-- migration-guard: platform-only
 INSERT INTO platform.ai_grid_relationship_definitions
     (relationship_type, source, directional, lifecycle, description)
 VALUES
