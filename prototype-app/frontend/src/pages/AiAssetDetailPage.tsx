@@ -18,6 +18,10 @@ type AssetDetailTab = 'overview' | 'policies' | 'findings' | 'relationships';
 
 const ARTIFACT_TYPE_ICON: Record<string, string> = {
   AI_AGENT: '🤖',
+  AI_AGENT_VERSION: '🧬',
+  AI_PROMPT: '📝',
+  AI_TOOL: '🛠️',
+  AI_COMPONENT: '🧩',
   AI_MODEL: '🧠',
   OTHER_AI_ARTIFACT: '📦',
 };

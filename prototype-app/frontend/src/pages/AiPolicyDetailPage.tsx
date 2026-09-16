@@ -76,6 +76,10 @@ const SCOPE_MODE_OPTIONS: Array<{ value: PolicyScopeMode; label: string }> = [
 const CONDITION_VALUE_OPTIONS: Record<string, Array<{ value: string; label: string }>> = {
   ARTIFACT_TYPE: [
     { value: 'AI_AGENT', label: 'AI agent' },
+    { value: 'AI_AGENT_VERSION', label: 'AI agent version' },
+    { value: 'AI_PROMPT', label: 'AI prompt' },
+    { value: 'AI_TOOL', label: 'AI tool' },
+    { value: 'AI_COMPONENT', label: 'AI component' },
     { value: 'AI_MODEL', label: 'AI model' },
     { value: 'AI_GUARDRAIL', label: 'AI guardrail' },
     { value: 'MCP_GATEWAY', label: 'MCP gateway' },

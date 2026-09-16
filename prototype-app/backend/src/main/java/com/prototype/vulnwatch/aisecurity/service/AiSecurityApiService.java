@@ -239,6 +239,7 @@ public class AiSecurityApiService {
     }
 
     public PageResponse<ArtifactResponse> artifacts(Tenant tenant, String artifactType, int page, int size) {
+        validateArtifactTypeFilter(artifactType);
         return artifacts(tenant, artifactType, null, null, null, null, page, size);
     }
 
@@ -305,6 +306,7 @@ public class AiSecurityApiService {
             int page,
             int size
     ) {
+        validateArtifactTypeFilter(artifactType);
         int safePage = Math.max(0, page);
         int safeSize = Math.max(1, Math.min(100, size));
         return tenantExecution.run(tenant, () -> {
@@ -337,7 +339,7 @@ public class AiSecurityApiService {
                            pii_scan_status, pii_source, pii_info_types::text, pii_finding_count, pii_last_scanned_at
                       from ai_security_artifacts
                      where (:artifactType is null
-                        or (:otherArtifacts = true and artifact_type not in ('AI_AGENT', 'AI_MODEL'))
+                        or (:otherArtifacts = true and artifact_type = 'OTHER_AI_ARTIFACT')
                         or (:otherArtifacts = false and artifact_type = :artifactType))
                        and (:nativeKind is null or native_kind = any(string_to_array(:nativeKind, ',')))
                        and (:provider is null or provider = :provider)
@@ -349,7 +351,7 @@ public class AiSecurityApiService {
             long total = count("""
                     select count(*) from ai_security_artifacts
                      where (:artifactType is null
-                        or (:otherArtifacts = true and artifact_type not in ('AI_AGENT', 'AI_MODEL'))
+                        or (:otherArtifacts = true and artifact_type = 'OTHER_AI_ARTIFACT')
                         or (:otherArtifacts = false and artifact_type = :artifactType))
                        and (:nativeKind is null or native_kind = any(string_to_array(:nativeKind, ',')))
                        and (:provider is null or provider = :provider)
@@ -376,6 +378,7 @@ public class AiSecurityApiService {
             int page,
             int size
     ) {
+        validateArtifactTypeFilter(artifactType);
         int safePage = Math.max(0, page);
         int safeSize = Math.max(1, Math.min(100, size));
         return tenantExecution.run(tenant, () -> {
@@ -403,7 +406,7 @@ public class AiSecurityApiService {
                     """;
             String baseFilter = """
                      where (:artifactType is null
-                        or (:otherArtifacts = true and a.artifact_type not in ('AI_AGENT', 'AI_MODEL'))
+                        or (:otherArtifacts = true and a.artifact_type = 'OTHER_AI_ARTIFACT')
                         or (:otherArtifacts = false and a.artifact_type = :artifactType))
                        and (:nativeKind is null or a.native_kind = any(string_to_array(:nativeKind, ',')))
                        and (:excludeNativeKinds is null or not (a.native_kind = any(string_to_array(:excludeNativeKinds, ','))))
@@ -511,7 +514,7 @@ public class AiSecurityApiService {
                 rs.getString("source_name"),
                 rs.getObject("target_artifact_id", UUID.class),
                 rs.getString("target_name"),
-                readMap(rs.getString("attributes_json")))));
+                AiSecurityFieldContract.responseSafe(readMap(rs.getString("attributes_json"))))));
     }
 
     /** Bounded above the exposure-correlation engine's HARD_MAX_DEPTH (6) — this is a live,
@@ -584,7 +587,7 @@ public class AiSecurityApiService {
                             rs.getString("source_name"),
                             rs.getObject("target_artifact_id", UUID.class),
                             rs.getString("target_name"),
-                            readMap(rs.getString("attributes_json"))));
+                            AiSecurityFieldContract.responseSafe(readMap(rs.getString("attributes_json")))));
             Set<UUID> nextFrontier = new java.util.LinkedHashSet<>();
             for (RelationshipResponse edge : hopEdges) {
                 collected.putIfAbsent(edge.id(), edge);
@@ -1365,7 +1368,7 @@ public class AiSecurityApiService {
                 rs.getString("source_name"),
                 rs.getObject("target_artifact_id", UUID.class),
                 rs.getString("target_name"),
-                readMap(rs.getString("attributes_json"))));
+                AiSecurityFieldContract.responseSafe(readMap(rs.getString("attributes_json")))));
     }
 
     private ArtifactResponse artifact(ResultSet rs, int rowNum) throws SQLException {
@@ -1381,7 +1384,8 @@ public class AiSecurityApiService {
                 rs.getString("account_id"),
                 rs.getString("region"),
                 rs.getBoolean("active"),
-                metadataSanitizer.sanitize(provider, nativeKind, readMap(rs.getString("attributes_json"))).attributes(),
+                AiSecurityFieldContract.responseSafe(
+                        metadataSanitizer.sanitize(provider, nativeKind, readMap(rs.getString("attributes_json"))).attributes()),
                 rs.getString("owner_name"),
                 rs.getString("owner_state"),
                 rs.getString("owner_source"),
@@ -1397,6 +1401,13 @@ public class AiSecurityApiService {
                 readStringList(rs.getString("pii_info_types")),
                 rs.getInt("pii_finding_count"),
                 instant(rs, "pii_last_scanned_at"));
+    }
+
+    private void validateArtifactTypeFilter(String artifactType) {
+        if (artifactType != null && !artifactType.isBlank()
+                && !AiSecurityTaxonomy.isExplicitArtifactType(artifactType)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported AI artifact category");
+        }
     }
 
     private FindingResponse finding(ResultSet rs, int rowNum) throws SQLException {

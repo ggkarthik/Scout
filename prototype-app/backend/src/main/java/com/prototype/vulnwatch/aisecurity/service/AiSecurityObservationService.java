@@ -35,6 +35,7 @@ public class AiSecurityObservationService {
             "BACKED_BY_DATA_STORE", "USES_SEARCH_INDEX", "EXPOSES_MCP", "CONNECTS_TO_MCP",
             "CONTAINS_MCP_TARGET", "ROUTES_TO", "INVOKES_LAMBDA", "ASSUMES_ROLE", "READS_FROM_S3", "LOGS_TO", "SUPERVISES_AGENT",
             "CONTAINS_PROJECT", "DEPLOYS_MODEL", "USES_TOOL",
+            "VERSION_OF", "ACTIVE_VERSION", "USES_PROMPT", "HAS_COMPONENT", "EXECUTED_AS", "PARTICIPATED_IN",
             "USES_MANAGED_IDENTITY", "HAS_PRIVATE_ENDPOINT", "USES_KEY_VAULT_KEY",
             "CONTAINS_RESOURCE", "HAS_DEPLOYMENT", "RUNS_PIPELINE", "HAS_CHANNEL",
             "HAS_ROLE_ASSIGNMENT", "CONTAINS", "USES_EXECUTION_ROLE", "USES_NETWORK",
@@ -390,7 +391,9 @@ public class AiSecurityObservationService {
     private Map<String, Object> safeRelationshipAttributes(
             RelationshipObservation relationship, ObservationEnvelopeV1 envelope) {
         Map<String, Object> attributes = new LinkedHashMap<>();
-        if (relationship.attributes() != null) attributes.putAll(relationship.attributes());
+        if (relationship.attributes() != null) {
+            attributes.putAll(AiSecurityFieldContract.storageSafe(relationship.attributes()));
+        }
         attributes.putIfAbsent("confidence", "DIRECT");
         attributes.putIfAbsent("evidence", Map.of("scopeKey", envelope.scopeKey()));
         return attributes;

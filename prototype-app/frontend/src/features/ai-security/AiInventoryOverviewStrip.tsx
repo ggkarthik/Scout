@@ -21,9 +21,7 @@ export function AiInventoryOverviewStrip() {
   if (!entitled) return null;
 
   const summary = summaryQuery.data;
-  const other = Object.entries(summary?.artifactCounts ?? {})
-    .filter(([key]) => key !== 'AI_AGENT' && key !== 'AI_MODEL')
-    .reduce((total, [, count]) => total + count, 0);
+  const other = summary?.artifactCounts.OTHER_AI_ARTIFACT ?? 0;
   return (
     <section className="ai-overview-strip">
       <div>

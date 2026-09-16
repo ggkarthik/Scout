@@ -1,4 +1,4 @@
-export type AiArtifactType = 'AI_AGENT' | 'AI_MODEL' | 'AI_GUARDRAIL' | 'MCP_GATEWAY' | 'MCP_TARGET' | 'MCP_SERVER' | 'KNOWLEDGE_BASE' | 'OTHER_AI_ARTIFACT';
+export type AiArtifactType = 'AI_AGENT' | 'AI_AGENT_VERSION' | 'AI_PROMPT' | 'AI_TOOL' | 'AI_COMPONENT' | 'AI_MODEL' | 'AI_GUARDRAIL' | 'MCP_GATEWAY' | 'MCP_TARGET' | 'MCP_SERVER' | 'KNOWLEDGE_BASE' | 'DATA_SOURCE' | 'DATA_STORE' | 'SEARCH_INDEX' | 'OTHER_AI_ARTIFACT';
 
 export type AiSecuritySummary = {
   artifactCounts: Record<string, number>;
