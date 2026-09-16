@@ -54,7 +54,7 @@ class SchemaUpgradePathPostgresIntegrationTest {
                 .outOfOrder(false)
                 .load();
         tenant.migrate();
-        assertEquals("3", tenant.info().current().getVersion().getVersion());
+        assertEquals("4", tenant.info().current().getVersion().getVersion());
     }
 
     private Flyway configuredFlyway() {

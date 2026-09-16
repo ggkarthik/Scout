@@ -82,3 +82,19 @@ ALTER TABLE ${tenantSchema}.ai_agent_execution_events FORCE ROW LEVEL SECURITY;
 ALTER TABLE ${tenantSchema}.ai_agent_execution_cursors FORCE ROW LEVEL SECURITY;
 ALTER TABLE ${tenantSchema}.ai_agent_execution_receipts FORCE ROW LEVEL SECURITY;
 ALTER TABLE ${tenantSchema}.ai_security_connector_feature_flags FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_agent_executions
+    USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)))
+    WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_agent_execution_events
+    USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)))
+    WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_agent_execution_cursors
+    USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)))
+    WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_agent_execution_receipts
+    USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)))
+    WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_security_connector_feature_flags
+    USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)))
+    WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)));
