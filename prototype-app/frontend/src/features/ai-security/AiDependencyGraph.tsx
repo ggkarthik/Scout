@@ -5,7 +5,7 @@ import React from 'react';
 import { api } from '../../api/client';
 import { formatLabel } from '../cve-workbench/formatting';
 import { layoutDependencyGraph, type DependencyGraphNodeData } from './graph-layout';
-import type { AiSecurityArtifact, AiSecurityGraph, AiSecurityPolicy } from './types';
+import type { AiRuntimeGraphEdge, AiRuntimeGraphGroup, AiSecurityArtifact, AiSecurityGraph, AiSecurityPolicy } from './types';
 
 const ARTIFACT_TYPE_ICON: Record<string, string> = {
   AI_AGENT: '🤖',
@@ -109,10 +109,11 @@ function AiArtifactNode({ data }: { data: DependencyGraphNodeData }) {
   const classes = ['ai-dependency-graph-node'];
   if (data.isRoot) classes.push('ai-dependency-graph-node--root');
   if (!data.active) classes.push('ai-dependency-graph-node--inactive');
+  if (data.nodeKind === 'RUNTIME_AGGREGATE') classes.push('ai-dependency-graph-node--runtime');
   return (
     <div className={classes.join(' ')}>
       <Handle type="target" position={Position.Left} />
-      <span aria-hidden="true">{ARTIFACT_TYPE_ICON[data.artifactType] ?? '📦'}</span>
+      <span aria-hidden="true">{data.nodeKind === 'RUNTIME_AGGREGATE' ? '⚡' : ARTIFACT_TYPE_ICON[data.artifactType] ?? '📦'}</span>
       <div className="ai-dependency-graph-node-text">
         <strong>{data.label}</strong>
         <small>{data.nativeKind}</small>
@@ -130,7 +131,34 @@ type AiDependencyGraphProps = {
   onNodeClick?: (artifactId: string) => void;
   findingsCountByArtifactId?: Record<string, number>;
   policies?: AiSecurityPolicy[];
+  onViewExecutions?: (group: AiRuntimeGraphGroup) => void;
 };
+
+function RuntimeGroupPopup({ group, onViewExecutions }: { group: AiRuntimeGraphGroup; onViewExecutions?: (group: AiRuntimeGraphGroup) => void }) {
+  return <div className="ai-dependency-graph-popup" role="dialog" aria-label="Runtime activity details">
+    <div className="ai-dependency-graph-popup-header"><span aria-hidden="true">⚡</span><div className="ai-dependency-graph-popup-title"><strong>Runtime activity</strong><small>{group.source}</small></div></div>
+    <dl className="ai-dependency-graph-popup-facts">
+      <dt>Provider</dt><dd>{group.provider}</dd><dt>Executions</dt><dd>{group.executionCount}</dd>
+      <dt>Successful</dt><dd>{group.successCount}</dd><dt>Failed</dt><dd>{group.failureCount}</dd>
+      <dt>Other status</dt><dd>{group.unknownCount}</dd><dt>Resolved</dt><dd>{group.resolvedCount}</dd>
+      <dt>Unresolved</dt><dd>{group.unresolvedCount}</dd><dt>Not applicable</dt><dd>{group.notApplicableCount}</dd>
+      <dt>First observed</dt><dd>{formatTimestamp(group.firstEvidenceTime)}</dd>
+      <dt>Last observed</dt><dd>{formatTimestamp(group.lastEvidenceTime)}</dd>
+    </dl>
+    <button type="button" className="btn btn-primary btn-sm ai-dependency-graph-popup-cta" onClick={() => onViewExecutions?.(group)}>View executions</button>
+  </div>;
+}
+
+function RuntimeEdgePopup({ edge }: { edge: AiRuntimeGraphEdge }) {
+  return <div className="ai-dependency-graph-popup" role="dialog" aria-label="Runtime relationship details">
+    <div className="ai-dependency-graph-popup-header"><span aria-hidden="true">↝</span><div className="ai-dependency-graph-popup-title"><strong>{edge.relationshipType.replace(/_/g, ' ')}</strong><small>{edge.participantRole ?? 'Agent association'}</small></div></div>
+    <dl className="ai-dependency-graph-popup-facts">
+      <dt>Executions</dt><dd>{edge.executionCount}</dd>
+      <dt>First observed</dt><dd>{formatTimestamp(edge.firstEvidenceTime)}</dd>
+      <dt>Last observed</dt><dd>{formatTimestamp(edge.lastEvidenceTime)}</dd>
+    </dl>
+  </div>;
+}
 
 export function AiDependencyGraph({
   graph,
@@ -138,12 +166,15 @@ export function AiDependencyGraph({
   onNodeClick,
   findingsCountByArtifactId = {},
   policies = [],
+  onViewExecutions,
 }: AiDependencyGraphProps) {
   const { nodes, edges } = React.useMemo(
     () => layoutDependencyGraph(graph, rootArtifactId),
     [graph, rootArtifactId],
   );
   const [selectedArtifactId, setSelectedArtifactId] = React.useState<string | null>(null);
+  const [selectedRuntimeGroup, setSelectedRuntimeGroup] = React.useState<AiRuntimeGraphGroup | null>(null);
+  const [selectedRuntimeEdge, setSelectedRuntimeEdge] = React.useState<AiRuntimeGraphEdge | null>(null);
   const selectedArtifact = React.useMemo(
     () => graph.nodes.find((node) => node.id === selectedArtifactId) ?? null,
     [graph.nodes, selectedArtifactId],
@@ -159,8 +190,17 @@ export function AiDependencyGraph({
           fitView
           nodesDraggable={false}
           nodesConnectable={false}
-          onNodeClick={(_event, node) => setSelectedArtifactId(node.id)}
-          onPaneClick={() => setSelectedArtifactId(null)}
+          onNodeClick={(_event, node) => {
+            const data = node.data as DependencyGraphNodeData;
+            setSelectedRuntimeEdge(null);
+            if (data.nodeKind === 'RUNTIME_AGGREGATE') { setSelectedArtifactId(null); setSelectedRuntimeGroup(data.runtimeGroup ?? null); }
+            else { setSelectedRuntimeGroup(null); setSelectedArtifactId(node.id); }
+          }}
+          onEdgeClick={(_event, edge) => {
+            setSelectedArtifactId(null); setSelectedRuntimeGroup(null);
+            setSelectedRuntimeEdge((edge.data?.runtimeEdge as AiRuntimeGraphEdge | undefined) ?? null);
+          }}
+          onPaneClick={() => { setSelectedArtifactId(null); setSelectedRuntimeGroup(null); setSelectedRuntimeEdge(null); }}
           proOptions={{ hideAttribution: true }}
         >
           <Background />
@@ -179,7 +219,11 @@ export function AiDependencyGraph({
           }}
         />
       )}
+      {selectedRuntimeGroup && <RuntimeGroupPopup group={selectedRuntimeGroup} onViewExecutions={onViewExecutions} />}
+      {selectedRuntimeEdge && <RuntimeEdgePopup edge={selectedRuntimeEdge} />}
+      {graph.runtimeOverlay && <div className="ai-dependency-graph-legend"><span>━ Definition</span><span>┄ Runtime activity</span></div>}
       {graph.truncated && <p className="panel-caption">Graph capped for safe rendering.</p>}
+      {graph.runtimeOverlay?.truncated && <p className="panel-caption">Runtime activity capped for safe rendering.</p>}
     </div>
   );
 }

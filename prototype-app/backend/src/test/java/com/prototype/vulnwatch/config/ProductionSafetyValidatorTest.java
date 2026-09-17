@@ -11,8 +11,22 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.util.ReflectionTestUtils;
 
 class ProductionSafetyValidatorTest {
+
+    @Test
+    void validateRequiresDedicatedRuntimeIdentityKeyWhenRuntimeCollectionIsEnabled() {
+        ProductionSafetyValidator validator = validator(
+                "", false, "https://issuer.example.com", "",
+                "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=", false, true,
+                "https://app.example.com", disabledBootstrap());
+        ReflectionTestUtils.setField(validator, "aiRuntimeEnabled", true);
+        ReflectionTestUtils.setField(validator, "aiIdentityHmacKey", "0123456789abcdef0123456789abcdef");
+        ReflectionTestUtils.setField(validator, "aiRuntimeIdentityHmacKey", "");
+
+        assertThrows(IllegalStateException.class, validator::validate);
+    }
 
     @Test
     void sharedDemoLifecycleTablesAreExemptOnlyInDefaultSchema() {

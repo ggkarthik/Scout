@@ -15,40 +15,46 @@ import org.springframework.stereotype.Service;
 public class AiAgentExecutionApiService {
     private final NamedParameterJdbcTemplate jdbc;
     private final TenantSchemaExecutionService tenantExecution;
+    private final AiAgentExecutionRelationshipProjectionService relationships;
 
-    public AiAgentExecutionApiService(NamedParameterJdbcTemplate jdbc, TenantSchemaExecutionService tenantExecution) {
+    public AiAgentExecutionApiService(NamedParameterJdbcTemplate jdbc, TenantSchemaExecutionService tenantExecution,
+                                      AiAgentExecutionRelationshipProjectionService relationships) {
         this.jdbc = jdbc;
         this.tenantExecution = tenantExecution;
+        this.relationships = relationships;
     }
 
-    public PageResponse<ExecutionResponse> list(Tenant tenant, UUID agentId, String status, String source,
+    public PageResponse<ExecutionResponse> list(Tenant tenant, UUID agentId, UUID agentVersionId, String status, String source,
                                                 Instant from, Instant to, int page, int size) {
         int safePage = Math.max(0, page);
         int safeSize = Math.max(1, Math.min(100, size));
         return tenantExecution.run(tenant, () -> {
             MapSqlParameterSource params = new MapSqlParameterSource()
                     .addValue("tenantId", tenant.getId())
-                    .addValue("agentId", agentId).addValue("status", blank(status)).addValue("source", blank(source))
+                    .addValue("agentId", agentId).addValue("agentVersionId", agentVersionId)
+                    .addValue("status", blank(status)).addValue("source", blank(source))
                     .addValue("from", from == null ? null : Timestamp.from(from))
                     .addValue("to", to == null ? null : Timestamp.from(to))
                     .addValue("limit", safeSize).addValue("offset", safePage * safeSize);
             String where = """
                     where tenant_id = :tenantId
                       and (:agentId is null or agent_artifact_id = :agentId)
+                      and (:agentVersionId is null or agent_version_artifact_id = :agentVersionId)
                       and (:status is null or status = :status)
                       and (:source is null or source = :source)
                       and (:from is null or evidence_time >= :from)
                       and (:to is null or evidence_time < :to)
                     """;
             var items = jdbc.query("""
-                    select id, provider, provider_execution_id, agent_artifact_id, source, started_at,
+                    select id, provider, agent_artifact_id, agent_version_artifact_id,correlation_status,correlation_diagnostic,source, started_at,
                            completed_at, status, outcome_category, approval_state, policy_state,
                            classification, api_version, token_count, latency_ms, retry_count,
                            spend_micros, evidence_time
                       from ai_agent_executions
                     """ + where + " order by evidence_time desc, id limit :limit offset :offset", params,
                     (rs, n) -> new ExecutionResponse(rs.getObject("id", UUID.class), rs.getString("provider"),
-                            rs.getString("provider_execution_id"), rs.getObject("agent_artifact_id", UUID.class),
+                            rs.getObject("agent_artifact_id", UUID.class),rs.getObject("agent_version_artifact_id", UUID.class),
+                            rs.getString("correlation_status"),rs.getString("correlation_diagnostic"),
                             rs.getString("source"), instant(rs.getTimestamp("started_at")), instant(rs.getTimestamp("completed_at")),
                             rs.getString("status"), rs.getString("outcome_category"), rs.getString("approval_state"),
                             rs.getString("policy_state"), rs.getString("classification"), rs.getString("api_version"),
@@ -75,15 +81,24 @@ public class AiAgentExecutionApiService {
                 rs.getString("classification"), instant(rs.getTimestamp("evidence_time")))));
     }
 
+    public java.util.List<ExecutionRelationshipResponse> relationships(Tenant tenant, UUID executionId) {
+        return tenantExecution.run(tenant, () -> relationships.relationships(tenant.getId(), executionId).stream()
+                .map(edge -> new ExecutionRelationshipResponse(edge.executionId(), edge.relationshipType(),
+                        edge.artifactId(), edge.artifactName(), edge.participantRole())).toList());
+    }
+
     private static String blank(String value) { return value == null || value.isBlank() ? null : value; }
     private static Instant instant(Timestamp value) { return value == null ? null : value.toInstant(); }
 
     public record PageResponse<T>(java.util.List<T> items, int page, int size, long total) { }
-    public record ExecutionResponse(UUID id, String provider, String providerExecutionId, UUID agentArtifactId,
+    public record ExecutionResponse(UUID id, String provider, UUID agentArtifactId, UUID agentVersionArtifactId,
+                                    String correlationStatus, String correlationDiagnostic,
                                     String source, Instant startedAt, Instant completedAt, String status,
                                     String outcomeCategory, String approvalState, String policyState,
                                     String classification, String apiVersion, Long tokenCount, Long latencyMs,
                                     Integer retryCount, Long spendMicros, Instant evidenceTime) { }
     public record ExecutionEventResponse(UUID id, UUID executionId, long sequence, Instant eventTime,
                                          String eventType, String status, String classification, Instant evidenceTime) { }
+    public record ExecutionRelationshipResponse(UUID executionId, String relationshipType, UUID artifactId,
+                                                String artifactName, String participantRole) { }
 }

@@ -35,6 +35,18 @@ public class ProductionSafetyValidator {
 
     @Value("${app.security.production-forbidden-identity-subjects:}")
     private String forbiddenIdentitySubjects = "";
+    @Value("${app.ai-security.identity-hmac-key:}")
+    private String aiIdentityHmacKey = "";
+    @Value("${app.ai-security.runtime-identity-hmac-key:}")
+    private String aiRuntimeIdentityHmacKey = "";
+    @Value("${app.ai-security.runtime.enabled:false}")
+    private boolean aiRuntimeEnabled;
+    @Value("${app.ai-security.copilot.enabled:false}")
+    private boolean copilotEnabled;
+    @Value("${app.ai-security.azure.foundry-agents.enabled:false}")
+    private boolean foundryAgentsEnabled;
+    @Value("${app.ai-security.azure.classic-foundry-agents.enabled:false}")
+    private boolean classicFoundryAgentsEnabled;
 
     public ProductionSafetyValidator(
             @Value("${app.security.require-production-secrets:false}") boolean requireProductionSecrets,
@@ -115,6 +127,16 @@ public class ProductionSafetyValidator {
         if (!hasStrongValue(credentialEncryptionKey) || isPlaceholder(credentialEncryptionKey)
                 || "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".equals(credentialEncryptionKey)) {
             throw new IllegalStateException("APP_CREDENTIAL_ENCRYPTION_KEY must be set to a non-default 256-bit base64 key for production startup.");
+        }
+        if ((aiRuntimeEnabled || copilotEnabled || foundryAgentsEnabled || classicFoundryAgentsEnabled)
+                && (!hasStrongValue(aiIdentityHmacKey) || isPlaceholder(aiIdentityHmacKey))) {
+            throw new IllegalStateException(
+                    "APP_AI_SECURITY_IDENTITY_HMAC_KEY must be a non-placeholder value of at least 32 characters when Microsoft agent collection is enabled.");
+        }
+        if (aiRuntimeEnabled
+                && (!hasStrongValue(aiRuntimeIdentityHmacKey) || isPlaceholder(aiRuntimeIdentityHmacKey))) {
+            throw new IllegalStateException(
+                    "APP_AI_SECURITY_RUNTIME_IDENTITY_HMAC_KEY must be a non-placeholder value of at least 32 characters when runtime collection is enabled.");
         }
         if (corsAllowedOrigins == null || corsAllowedOrigins.isBlank() || corsAllowedOrigins.contains("*")) {
             throw new IllegalStateException("APP_CORS_ALLOWED_ORIGINS must be set to explicit production origins.");

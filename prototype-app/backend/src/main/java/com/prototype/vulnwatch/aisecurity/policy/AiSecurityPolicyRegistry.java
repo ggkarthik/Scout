@@ -101,7 +101,13 @@ public class AiSecurityPolicyRegistry {
                     List.of("AZURE_BOT_SERVICES", "AZURE_BOT_IDENTITIES"),
                     "An Azure Bot uses password authentication without an assigned managed identity.",
                     "Use a user-assigned managed identity and remove password-based application credentials.",
-                    Map.of("AZURE", "BOT-MANAGED-IDENTITY"))
+                    Map.of("AZURE", "BOT-MANAGED-IDENTITY")),
+            new PolicyDefinition(
+                    "AI_ARTIFACT_DIGEST_CHANGED_AFTER_APPROVAL", "1.0.0",
+                    "Approved AI definition changed", "HIGH", List.of("AI_PROMPT", "AI_TOOL"), List.of(),
+                    "A prompt or tool definition changed while using the same digest key generation.",
+                    "Review the definition change and explicitly reapprove the digest baseline.",
+                    Map.of("NIST-AI-RMF", "GOVERN-1.7"))
     );
 
     private static final Map<String, List<PolicyParameterSpec>> PARAMETER_SPECS = Map.of(

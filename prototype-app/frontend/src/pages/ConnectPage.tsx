@@ -23,6 +23,7 @@ import { timeAgo } from '../lib/time';
 import { BomManagementPage } from './BomManagementPage';
 import { AiSecurityConnectorPage } from './AiSecurityConnectorPage';
 import { AiSecurityAzureConnectorPage } from './AiSecurityAzureConnectorPage';
+import { CopilotStudioConnectorPage } from './CopilotStudioConnectorPage';
 import { canUseEntitlement } from '../features/auth/entitlements';
 
 type ConnectorId =
@@ -35,6 +36,7 @@ type ConnectorId =
   | 'azure-discovery'
   | 'ai-security-aws'
   | 'ai-security-azure'
+  | 'ai-security-copilot'
   | 'nvd-api'
   | 'cisa-kev'
   | 'ghsa-feed'
@@ -239,6 +241,12 @@ const CONNECTORS: ConnectorDefinition[] = [
     icon: IconBrain
   },
   {
+    id: 'ai-security-copilot',
+    name: 'AI Security — Copilot Studio',
+    summary: 'Discover published Copilot agents and components plus metadata-only conversation executions from Dataverse.',
+    icon: IconBrain
+  },
+  {
     id: 'nvd-api',
     name: 'NVD Vulnerability Feed',
     summary: '',
@@ -315,7 +323,7 @@ const CLOUD_CONNECTOR_IDS: ConnectorId[] = [
   'azure-discovery'
 ];
 
-const AI_CONNECTOR_IDS: ConnectorId[] = ['ai-security-aws', 'ai-security-azure'];
+const AI_CONNECTOR_IDS: ConnectorId[] = ['ai-security-aws', 'ai-security-azure', 'ai-security-copilot'];
 
 function formatInstantConnect(iso?: string): string {
   if (!iso) return 'Never';
@@ -647,6 +655,9 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
   }
   if (connectorId === 'ai-security-azure') {
     return <AiSecurityAzureConnectorPage />;
+  }
+  if (connectorId === 'ai-security-copilot') {
+    return <CopilotStudioConnectorPage />;
   }
 
   return (

@@ -145,7 +145,8 @@ public class AiGridPolicyCatalogService {
     }
 
     private void validateArtifactTypes(JsonNode artifactTypes) {
-        Set<String> allowed = Set.of("AI_AGENT", "AI_MODEL", "AI_GUARDRAIL", "KNOWLEDGE_BASE",
+        Set<String> allowed = Set.of("AI_AGENT", "AI_AGENT_VERSION", "AI_PROMPT", "AI_TOOL", "AI_COMPONENT",
+                "AI_MODEL", "AI_GUARDRAIL", "KNOWLEDGE_BASE",
                 "MCP_GATEWAY", "MCP_TARGET", "MCP_SERVER", "OTHER_AI_ARTIFACT", "SYSTEM",
                 "SUPPORTING_RESOURCE", "ACCOUNT_CONFIGURATION");
         if (artifactTypes.isEmpty()) bad("artifactTypesJson must identify at least one canonical artifact type");

@@ -46,7 +46,9 @@ public class AiGridSystemService {
                   from ai_security_artifacts a
                   join ai_security_artifact_sources s on s.artifact_id = a.id
                  where s.run_id = :runId and a.active = true
-                   and a.artifact_type in ('AI_AGENT','AI_MODEL','KNOWLEDGE_BASE','OTHER_AI_ARTIFACT')
+                   and (a.artifact_type in ('AI_AGENT','AI_MODEL','KNOWLEDGE_BASE','OTHER_AI_ARTIFACT')
+                        or (a.artifact_type='AI_TOOL' and exists (
+                            select 1 from ai_grid_systems legacy where legacy.root_artifact_id=a.id)))
                    and (a.artifact_type='AI_AGENT' or not exists (
                        select 1 from ai_grid_relationship_snapshots incoming
                         where incoming.run_id=:runId and incoming.target_artifact_id=a.id
@@ -85,7 +87,9 @@ public class AiGridSystemService {
                 select a.id,a.provider,a.provider_resource_id,a.name
                   from ai_grid_current_coverage_artifacts c join ai_security_artifacts a on a.id=c.artifact_id
                  where c.epoch_id=:epochId and a.active=true
-                   and a.artifact_type in ('AI_AGENT','AI_MODEL','KNOWLEDGE_BASE','OTHER_AI_ARTIFACT')
+                   and (a.artifact_type in ('AI_AGENT','AI_MODEL','KNOWLEDGE_BASE','OTHER_AI_ARTIFACT')
+                        or (a.artifact_type='AI_TOOL' and exists (
+                            select 1 from ai_grid_systems legacy where legacy.root_artifact_id=a.id)))
                    and (a.artifact_type='AI_AGENT' or not exists (
                        select 1 from ai_grid_relationship_snapshots rel
                        join ai_grid_current_coverage_artifacts src on src.artifact_id=rel.source_artifact_id

@@ -43,4 +43,18 @@ class AiSecurityMetadataSanitizerTest {
         assertTrue(result.rejectedFieldNames().contains("connectionString"));
         assertTrue(result.rejectedFieldNames().contains("headers"));
     }
+
+    @Test
+    void retainsInternalDigestsButRejectsUncontractedNestedContent() {
+        var result = sanitizer.sanitize("AZURE", "AZURE_FOUNDRY_PROMPT", Map.of(
+                "promptDigest", "hmac-value",
+                "digestAlgorithm", "HMAC-SHA-256",
+                "digestKeyVersion", "v7",
+                "evidence", Map.of("sourceApi", "Foundry", "promptBody", "never retain")));
+
+        assertEquals("hmac-value", result.attributes().get("promptDigest"));
+        assertEquals("HMAC-SHA-256", result.attributes().get("digestAlgorithm"));
+        assertEquals(Map.of("sourceApi", "Foundry"), result.attributes().get("evidence"));
+        assertTrue(result.rejectedFieldNames().contains("evidence.promptBody"));
+    }
 }

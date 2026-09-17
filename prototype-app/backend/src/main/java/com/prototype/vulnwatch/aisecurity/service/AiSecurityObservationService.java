@@ -35,7 +35,7 @@ public class AiSecurityObservationService {
             "BACKED_BY_DATA_STORE", "USES_SEARCH_INDEX", "EXPOSES_MCP", "CONNECTS_TO_MCP",
             "CONTAINS_MCP_TARGET", "ROUTES_TO", "INVOKES_LAMBDA", "ASSUMES_ROLE", "READS_FROM_S3", "LOGS_TO", "SUPERVISES_AGENT",
             "CONTAINS_PROJECT", "DEPLOYS_MODEL", "USES_TOOL",
-            "VERSION_OF", "ACTIVE_VERSION", "USES_PROMPT", "HAS_COMPONENT", "EXECUTED_AS", "PARTICIPATED_IN",
+            "VERSION_OF", "ACTIVE_VERSION", "USES_PROMPT", "HAS_COMPONENT",
             "USES_MANAGED_IDENTITY", "HAS_PRIVATE_ENDPOINT", "USES_KEY_VAULT_KEY",
             "CONTAINS_RESOURCE", "HAS_DEPLOYMENT", "RUNS_PIPELINE", "HAS_CHANNEL",
             "HAS_ROLE_ASSIGNMENT", "CONTAINS", "USES_EXECUTION_ROLE", "USES_NETWORK",
@@ -50,6 +50,7 @@ public class AiSecurityObservationService {
     private final AiSecurityMetadataSanitizer metadataSanitizer;
     private AiGridPipelineService aiGridPipelineService;
     private AiGridCapabilityService aiGridCapabilityService;
+    private AiSecurityDigestBaselineService digestBaselines;
 
     public AiSecurityObservationService(
             NamedParameterJdbcTemplate jdbc,
@@ -75,6 +76,11 @@ public class AiSecurityObservationService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setAiGridCapabilityService(AiGridCapabilityService aiGridCapabilityService) {
         this.aiGridCapabilityService = aiGridCapabilityService;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setDigestBaselines(AiSecurityDigestBaselineService digestBaselines) {
+        this.digestBaselines = digestBaselines;
     }
 
     public IngestionResult ingest(Tenant tenant, ObservationEnvelopeV1 envelope) {
@@ -132,9 +138,13 @@ public class AiSecurityObservationService {
             if (!sanitized.rejectedFieldNames().isEmpty()) {
                 metadataDiagnostics.add(metadataDiagnostic(envelope, sanitized.rejectedFieldNames()));
             }
+            if (sanitized.rejectedFieldNames().contains("nativeKind")) {
+                continue;
+            }
             UUID artifactId = upsertArtifact(tenant, envelope, artifact, sanitized.attributes());
             artifactIds.put(artifact.providerResourceId(), artifactId);
             upsertSource(tenant, envelope, artifact, artifactId);
+            compareApprovedDigests(tenant, envelope, artifactId, sanitized.attributes());
         }
 
         List<Diagnostic> combinedDiagnostics = new ArrayList<>(diagnostics(envelope));
@@ -178,6 +188,24 @@ public class AiSecurityObservationService {
         return new IngestionResult(false, finalStatus, accepted, envelope.expectedChunks(), combinedDiagnostics);
     }
 
+    private void compareApprovedDigests(Tenant tenant, ObservationEnvelopeV1 envelope, UUID artifactId,
+                                        Map<String, Object> attributes) {
+        if (digestBaselines == null) return;
+        String algorithm = string(attributes.get("digestAlgorithm"));
+        String keyVersion = string(attributes.get("digestKeyVersion"));
+        if (algorithm == null || keyVersion == null) return;
+        String prompt = string(attributes.get("promptDigest"));
+        if (prompt != null) digestBaselines.observeCurrentTenant(tenant, artifactId, "PROMPT", algorithm,
+                keyVersion, prompt, envelope.runId(), envelope.observedAt());
+        String tool = string(attributes.get("toolDefinitionDigest"));
+        if (tool != null) digestBaselines.observeCurrentTenant(tenant, artifactId, "TOOL_DEFINITION", algorithm,
+                keyVersion, tool, envelope.runId(), envelope.observedAt());
+    }
+
+    private static String string(Object value) {
+        return value instanceof String text && !text.isBlank() ? text : null;
+    }
+
     private void validate(Tenant tenant, ObservationEnvelopeV1 envelope) {
         if (envelope == null || !CONTRACT_VERSION.equals(envelope.contractVersion())) {
             throw new IllegalArgumentException("Unsupported AI Security observation contract version");
@@ -199,6 +227,17 @@ public class AiSecurityObservationService {
 
     void validateCurrentTenantOwnership(Tenant tenant, ObservationEnvelopeV1 envelope) {
         syncRunFacade.loadForTenant(tenant.getId(), envelope.runId());
+        if ("MICROSOFT_COPILOT".equalsIgnoreCase(envelope.provider())) {
+            Integer matches = jdbc.queryForObject("""
+                    select count(*) from ai_security_copilot_studio_configs
+                     where id=:connectorId and tenant_id=:tenantId and organization_url=:organizationUrl
+                    """, new MapSqlParameterSource().addValue("connectorId", envelope.connectorId())
+                    .addValue("tenantId", tenant.getId()).addValue("organizationUrl", envelope.accountId()), Integer.class);
+            if (matches == null || matches != 1) {
+                throw new IllegalArgumentException("Copilot observation connector does not belong to the claimed tenant and organization");
+            }
+            return;
+        }
         List<String> connectors = jdbc.query("""
                 select provider_tenant_id
                   from ai_security_connector_configs

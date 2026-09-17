@@ -98,4 +98,28 @@ describe('layoutDependencyGraph', () => {
     const graph: AiSecurityGraph = { nodes: [], edges: [], truncated: false };
     expect(layoutDependencyGraph(graph)).toEqual({ nodes: [], edges: [] });
   });
+
+  it('adds namespaced aggregate nodes and directed runtime edges', () => {
+    const graph: AiSecurityGraph = {
+      nodes: [buildNode(), buildNode({ id: 'artifact-2', name: 'runtime-tool', artifactType: 'AI_TOOL' })],
+      edges: [], truncated: false,
+      runtimeOverlay: {
+        status: 'AVAILABLE', diagnostic: null, windowStart: '2026-09-10T00:00:00Z', windowEnd: '2026-09-17T00:00:00Z',
+        executionCount: 3, resolvedCount: 3, unresolvedCount: 0, notApplicableCount: 0, truncated: false,
+        groups: [{ id: 'runtime-aggregate:abc', provider: 'AZURE', source: 'AZURE_FOUNDRY_RUNTIME', agentArtifactId: 'artifact-1', agentVersionArtifactId: null,
+          executionCount: 3, successCount: 2, failureCount: 1, unknownCount: 0, resolvedCount: 3, unresolvedCount: 0, notApplicableCount: 0,
+          firstEvidenceTime: '2026-09-16T00:00:00Z', lastEvidenceTime: '2026-09-17T00:00:00Z' }],
+        edges: [
+          { id: 'runtime-edge:executed', relationshipType: 'EXECUTED_AS', runtimeGroupId: 'runtime-aggregate:abc', artifactId: 'artifact-1', participantRole: null, executionCount: 3, firstEvidenceTime: '2026-09-16T00:00:00Z', lastEvidenceTime: '2026-09-17T00:00:00Z' },
+          { id: 'runtime-edge:tool', relationshipType: 'PARTICIPATED_IN', runtimeGroupId: 'runtime-aggregate:abc', artifactId: 'artifact-2', participantRole: 'TOOL', executionCount: 2, firstEvidenceTime: '2026-09-16T00:00:00Z', lastEvidenceTime: '2026-09-17T00:00:00Z' },
+        ],
+      },
+    };
+    const layout = layoutDependencyGraph(graph, 'artifact-1');
+    expect(layout.nodes.find(node => node.id === 'runtime-aggregate:abc')?.data.nodeKind).toBe('RUNTIME_AGGREGATE');
+    expect(layout.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: 'runtime-aggregate:abc', target: 'artifact-1' }),
+      expect.objectContaining({ source: 'artifact-2', target: 'runtime-aggregate:abc' }),
+    ]));
+  });
 });

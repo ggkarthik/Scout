@@ -17,6 +17,7 @@ import com.prototype.vulnwatch.service.WorkspaceService;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.time.Instant;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -26,6 +27,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 
 @RestController
 @RequestMapping("/api/ai-security")
@@ -120,6 +124,14 @@ public class AiSecurityController {
         return apiService.artifact(tenant, artifactId);
     }
 
+    @GetMapping(value = "/artifacts-export", produces = "text/csv")
+    public ResponseEntity<String> exportArtifacts() {
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=ai-security-artifacts.csv")
+                .contentType(MediaType.parseMediaType("text/csv"))
+                .body(apiService.exportArtifacts(tenant()));
+    }
+
     @GetMapping("/artifacts/{artifactId}/relationships")
     public List<RelationshipResponse> relationships(@PathVariable UUID artifactId) {
         Tenant tenant = tenant();
@@ -129,10 +141,13 @@ public class AiSecurityController {
     @GetMapping("/graph")
     public GraphResponse graph(
             @RequestParam(required = false) UUID rootArtifactId,
-            @RequestParam(defaultValue = "1") int depth
+            @RequestParam(defaultValue = "1") int depth,
+            @RequestParam(defaultValue = "false") boolean includeRuntime,
+            @RequestParam(required = false) Instant runtimeFrom,
+            @RequestParam(required = false) Instant runtimeTo
     ) {
         Tenant tenant = tenant();
-        return apiService.graph(tenant, rootArtifactId, depth);
+        return apiService.graph(tenant, rootArtifactId, depth, includeRuntime, runtimeFrom, runtimeTo);
     }
 
     @GetMapping("/severity-grid")

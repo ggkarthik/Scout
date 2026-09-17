@@ -30,18 +30,24 @@ public class AiAgentExecutionController {
     @GetMapping
     public AiAgentExecutionApiService.PageResponse<AiAgentExecutionApiService.ExecutionResponse> list(
             @RequestParam(required = false) UUID agentId,
+            @RequestParam(required = false) UUID agentVersionId,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String source,
             @RequestParam(required = false) Instant from,
             @RequestParam(required = false) Instant to,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
-        return executions.list(tenant(), agentId, status, source, from, to, page, size);
+        return executions.list(tenant(), agentId, agentVersionId, status, source, from, to, page, size);
     }
 
     @GetMapping("/{executionId}/timeline")
     public List<AiAgentExecutionApiService.ExecutionEventResponse> timeline(@PathVariable UUID executionId) {
         return executions.timeline(tenant(), executionId);
+    }
+
+    @GetMapping("/{executionId}/relationships")
+    public List<AiAgentExecutionApiService.ExecutionRelationshipResponse> relationships(@PathVariable UUID executionId) {
+        return executions.relationships(tenant(), executionId);
     }
 
     private Tenant tenant() {
