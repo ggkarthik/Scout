@@ -7,6 +7,7 @@ import com.prototype.vulnwatch.aisecurity.service.AiAgentExecutionRelationshipPr
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.time.Instant;
 import java.util.Map;
@@ -40,7 +41,11 @@ class RuntimeOverlayV7PostgresIntegrationTest {
         try (Connection connection = DriverManager.getConnection(DATABASE.url(), DATABASE.username(), DATABASE.password())) {
             try (Statement statement = connection.createStatement()) {
                 statement.execute("set search_path to tenant_default,platform,public");
-                statement.execute("select set_config('app.current_tenant_id','" + TENANT_ID + "',false)");
+            }
+            try (PreparedStatement preparedStatement =
+                         connection.prepareStatement("select set_config('app.current_tenant_id', ?, false)")) {
+                preparedStatement.setString(1, TENANT_ID.toString());
+                preparedStatement.execute();
             }
             var service = new AiAgentExecutionRelationshipProjectionService(
                     new NamedParameterJdbcTemplate(new SingleConnectionDataSource(connection, true)));
