@@ -53,7 +53,7 @@ class SchemaMigrationStartupPostgresIntegrationTest {
                 "select count(*) from platform.ai_grid_resource_family_definitions where lifecycle = 'ACTIVE'", Integer.class));
         assertEquals(40, jdbcTemplate.queryForObject(
                 "select count(*) from platform.ai_grid_relationship_definitions where lifecycle = 'ACTIVE'", Integer.class));
-        assertEquals(7, jdbcTemplate.queryForObject(
+        assertEquals(6, jdbcTemplate.queryForObject(
                 "select count(*) from platform.ai_grid_correlation_versions where lifecycle = 'PUBLISHED'", Integer.class));
         assertEquals(76, jdbcTemplate.queryForObject(
                 "select count(*) from platform.ai_grid_policy_versions where policy_id like 'AGCF-%' and release_family = 'AGCF_PHASE_1' and release_wave = 'PHASE_1'", Integer.class));

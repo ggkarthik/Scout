@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /** Independent storage/response/filter policy for metadata fields. */
 public final class AiSecurityFieldContract {
@@ -19,13 +20,24 @@ public final class AiSecurityFieldContract {
             "sourceType", "sensitivity", "publicContentAccess", "configuredAuthType", "inboundAuthType",
             "outboundAuthType", "endpointExposure", "status", "environment", "provider", "artifactType",
             "nativeKind", "accountId", "region");
+    private static final Map<String, Set<String>> NESTED_PUBLIC_METADATA = Map.of(
+            "contentFilters", Set.of("type", "inputStrength", "outputStrength", "inputEnabled", "outputEnabled"),
+            "deniedTopics", Set.of("name", "inputAction", "outputAction"),
+            "piiEntities", Set.of("type", "inputAction", "outputAction"),
+            "contextualGroundingFilters", Set.of("type", "threshold", "action"),
+            "evidence", Set.of("sourceApi", "field"));
+    private static final Set<String> DYNAMIC_PUBLIC_METADATA = Set.of("tags");
+    private static final Pattern SENSITIVE_DYNAMIC_FIELD = Pattern.compile(
+            "(?i)(secret|password|credential|authorization|token|api[_-]?key|private[_-]?key|"
+                    + "prompt|completion|input[_-]?text|output[_-]?text|document[_-]?body|raw[_-]?trace|"
+                    + "tool[_-]?arguments?|request[_-]?body|response[_-]?body|connection[_-]?string|headers?)");
     /**
      * Closed, response-safe metadata contract.  Adding a collector field requires an explicit
      * review here as well as in {@link AiSecurityMetadataSanitizer}; attributes_json is never a
      * public extension point.
      */
     private static final Set<String> PUBLIC_METADATA = Set.of(
-            "agentId", "architecture", "assignmentScope", "authMode", "azureResourceType", "baseModelArn",
+            "agentId", "architecture", "assignmentScope", "authMode", "azureResourceType", "backingStore", "baseModelArn",
             "botPasswordAuthWithoutManagedIdentity", "capacity", "codeInterpreterEnabled", "classification", "componentType",
             "commitmentDuration", "commitmentExpirationTime", "conditionVersion", "configurationSubtype",
             "configuredAuthType", "confidence", "contentFilterCount", "contentFilters",
@@ -33,7 +45,7 @@ public final class AiSecurityFieldContract {
             "customerManagedKey", "customizationType", "customizationsSupported", "dataSourceAccessCount",
             "dataSourceCount", "datastoreId", "deletionPolicy", "deniedTopicCount", "deniedTopics",
             "diagnosticLoggingEnabled", "disableLocalAuth", "domainId", "endpointComputeType", "endpointExposure",
-            "endpointHost", "environment", "evidence", "executionRoleArn", "experimentName", "field", "foundationModel",
+            "endpointHost", "environment", "evidence", "executionRoleArn", "experimentName", "foundationModel",
             "functionUrlAuthType", "guardrailAttached", "guardrailId", "guardrailMinimumStrength", "hasDestination",
             "iamEvidenceAvailable", "iamWildcardActions", "identityType", "inboundAuthType", "inferenceTypesSupported",
             "ingestionConfigurationPresent", "inputModalities", "instanceType", "instructSupported",
@@ -48,8 +60,8 @@ public final class AiSecurityFieldContract {
             "publicEndpoint", "raiBasePolicyName", "raiCustomBlocklistCount", "raiFilterCount", "raiFilterEvidenceComplete",
             "raiNonBlockingFilterCount", "raiNonBlockingFilterObserved", "raiPolicyMode", "raiPolicyName", "referenceOnly",
             "referencedBy", "region", "resourceGroup", "retrievalMode", "roleDefinitionId", "s3Buckets", "s3Public",
-            "scaleType", "scopeKey", "searchLocalAuthEnabled", "sensitivity", "sensitiveRegexCount", "source",
-            "sourceApi", "sourceType", "status", "storeType", "tags", "toolType", "traffic", "updatedAt", "version",
+            "scaleType", "scopeKey", "searchLocalAuthEnabled", "sensitivity", "sensitiveRegexCount", "source", "type",
+            "sourceType", "status", "storeType", "tags", "toolType", "traffic", "updatedAt", "version",
             "versionUpgradeOption", "vpcId", "aclSupport");
 
     private AiSecurityFieldContract() { }
@@ -72,28 +84,42 @@ public final class AiSecurityFieldContract {
         return filter(attributes, Tier.STORAGE_ALLOWED);
     }
 
+    static boolean allowsNested(String parentPath, String field, Tier tier) {
+        if (parentPath == null || field == null || tier == Tier.FILTER_ALLOWED) return false;
+        int bracket = parentPath.indexOf('[');
+        int dot = parentPath.indexOf('.');
+        int separator = bracket < 0 ? dot : dot < 0 ? bracket : Math.min(bracket, dot);
+        String root = separator < 0 ? parentPath : parentPath.substring(0, separator);
+        if (DYNAMIC_PUBLIC_METADATA.contains(root)) {
+            return !field.isBlank() && field.length() <= 128 && !SENSITIVE_DYNAMIC_FIELD.matcher(field).find();
+        }
+        return NESTED_PUBLIC_METADATA.getOrDefault(root, Set.of()).contains(field);
+    }
+
     private static Map<String, Object> filter(Map<String, Object> attributes, Tier tier) {
         Map<String, Object> clean = new LinkedHashMap<>();
         if (attributes == null) return clean;
         attributes.forEach((key, value) -> {
             if (!allows(key, tier)) return;
-            clean.put(key, filterValue(value, tier));
+            clean.put(key, filterValue(value, tier, key));
         });
         return clean;
     }
 
-    private static Object filterValue(Object value, Tier tier) {
+    private static Object filterValue(Object value, Tier tier, String path) {
         if (value instanceof Map<?, ?> nested) {
             Map<String, Object> child = new LinkedHashMap<>();
             nested.forEach((nestedKey, nestedValue) -> {
                 String key = String.valueOf(nestedKey);
-                if (allows(key, tier)) child.put(key, filterValue(nestedValue, tier));
+                if (allowsNested(path, key, tier)) {
+                    child.put(key, filterValue(nestedValue, tier, path + "." + key));
+                }
             });
             return child;
         }
         if (value instanceof List<?> list) {
             List<Object> child = new ArrayList<>();
-            list.forEach(item -> child.add(filterValue(item, tier)));
+            list.forEach(item -> child.add(filterValue(item, tier, path)));
             return child;
         }
         return value;

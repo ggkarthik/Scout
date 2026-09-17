@@ -57,4 +57,51 @@ class AiSecurityMetadataSanitizerTest {
         assertEquals(Map.of("sourceApi", "Foundry"), result.attributes().get("evidence"));
         assertTrue(result.rejectedFieldNames().contains("evidence.promptBody"));
     }
+
+    @Test
+    void retainsReviewedNestedGuardrailPostureMetadata() {
+        var result = sanitizer.sanitize("AWS", "AWS_BEDROCK_GUARDRAIL", Map.of(
+                "contentFilters", List.of(Map.of(
+                        "type", "HATE", "inputStrength", "HIGH", "outputStrength", "MEDIUM")),
+                "contextualGroundingFilters", List.of(Map.of(
+                        "type", "GROUNDING", "threshold", 0.85, "action", "BLOCK"))));
+
+        @SuppressWarnings("unchecked")
+        var filters = (List<Map<String, Object>>) result.attributes().get("contentFilters");
+        assertEquals("HATE", filters.get(0).get("type"));
+        assertEquals("HIGH", filters.get(0).get("inputStrength"));
+        @SuppressWarnings("unchecked")
+        var grounding = (List<Map<String, Object>>) result.attributes().get("contextualGroundingFilters");
+        assertEquals(0.85, grounding.get(0).get("threshold"));
+        assertEquals("BLOCK", grounding.get(0).get("action"));
+    }
+
+    @Test
+    void rejectsReviewedNestedNamesWhenTheyAppearAtTheWrongSchemaPath() {
+        var result = sanitizer.sanitize("AWS", "AWS_BEDROCK_GUARDRAIL", Map.of(
+                "name", "unexpected top-level value",
+                "contentFilters", List.of(Map.of(
+                        "type", "HATE", "name", "unexpected nested value", "source", "unexpected"))));
+
+        assertFalse(result.attributes().containsKey("name"));
+        @SuppressWarnings("unchecked")
+        var filters = (List<Map<String, Object>>) result.attributes().get("contentFilters");
+        assertEquals(Map.of("type", "HATE"), filters.get(0));
+        assertTrue(result.rejectedFieldNames().contains("name"));
+        assertTrue(result.rejectedFieldNames().contains("contentFilters[0].name"));
+        assertTrue(result.rejectedFieldNames().contains("contentFilters[0].source"));
+    }
+
+    @Test
+    void retainsPostureTagsAndRejectsSensitiveTagNames() {
+        var result = sanitizer.sanitize("AWS", "AWS_BEDROCK_AGENT", Map.of(
+                "tags", Map.of(
+                        "team", "AI Platform Team",
+                        "environment", "production",
+                        "credential", "must-not-be-retained")));
+
+        assertEquals(Map.of("team", "AI Platform Team", "environment", "production"),
+                result.attributes().get("tags"));
+        assertTrue(result.rejectedFieldNames().contains("tags.credential"));
+    }
 }

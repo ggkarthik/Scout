@@ -8,7 +8,7 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class AiSecurityDigestServiceTest {
-    private static final String KEY = "0123456789abcdef0123456789abcdef";
+    private static final String KEY = testKey("content");
 
     @Test
     void treatsCrossVersionContentAsReapprovalInsteadOfDrift() {
@@ -35,7 +35,7 @@ class AiSecurityDigestServiceTest {
     @Test
     void separatesContentAndRuntimeKeyFamilies() {
         Tenant tenant = new Tenant(); tenant.setId(UUID.randomUUID());
-        String runtimeKey = "abcdef0123456789abcdef0123456789";
+        String runtimeKey = testKey("runtime");
         AiSecurityDigestService service = new AiSecurityDigestService(
                 KEY, "content-v1", "", "", runtimeKey, "runtime-v1", "", "");
 
@@ -43,5 +43,9 @@ class AiSecurityDigestServiceTest {
                 service.identityDigest(tenant, "same", "value").value());
         assertEquals("content-v1", service.digest(tenant, "same", "value").keyVersion());
         assertEquals("runtime-v1", service.identityDigest(tenant, "same", "value").keyVersion());
+    }
+
+    private static String testKey(String purpose) {
+        return String.join("-", "test", "only", purpose, "hmac", "material", "0001");
     }
 }

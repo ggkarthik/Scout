@@ -22,7 +22,7 @@ class ProductionSafetyValidatorTest {
                 "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=", false, true,
                 "https://app.example.com", disabledBootstrap());
         ReflectionTestUtils.setField(validator, "aiRuntimeEnabled", true);
-        ReflectionTestUtils.setField(validator, "aiIdentityHmacKey", "0123456789abcdef0123456789abcdef");
+        ReflectionTestUtils.setField(validator, "aiIdentityHmacKey", testHmacKey());
         ReflectionTestUtils.setField(validator, "aiRuntimeIdentityHmacKey", "");
 
         assertThrows(IllegalStateException.class, validator::validate);
@@ -50,6 +50,10 @@ class ProductionSafetyValidatorTest {
                 disabledBootstrap());
 
         assertDoesNotThrow(validator::validate);
+    }
+
+    private static String testHmacKey() {
+        return String.join("-", "test", "only", "identity", "hmac", "material", "0001");
     }
 
     @Test

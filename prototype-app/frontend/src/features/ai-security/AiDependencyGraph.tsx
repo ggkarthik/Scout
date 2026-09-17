@@ -145,7 +145,8 @@ function RuntimeGroupPopup({ group, onViewExecutions }: { group: AiRuntimeGraphG
       <dt>First observed</dt><dd>{formatTimestamp(group.firstEvidenceTime)}</dd>
       <dt>Last observed</dt><dd>{formatTimestamp(group.lastEvidenceTime)}</dd>
     </dl>
-    <button type="button" className="btn btn-primary btn-sm ai-dependency-graph-popup-cta" onClick={() => onViewExecutions?.(group)}>View executions</button>
+    <button type="button" className="btn btn-primary btn-sm ai-dependency-graph-popup-cta"
+      disabled={!onViewExecutions} onClick={() => onViewExecutions?.(group)}>View executions</button>
   </div>;
 }
 

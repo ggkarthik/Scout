@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import React from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
@@ -107,6 +107,7 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
   });
   const graphQuery = useQuery({
     queryKey: ['ai-security-graph', artifactId, showRuntime, runtimeDays],
+    placeholderData: keepPreviousData,
     queryFn: () => {
       if (!showRuntime) return api.getAiSecurityGraph(artifactId, 2);
       const to = new Date();
@@ -480,7 +481,7 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
                 onNodeClick={handleGraphNodeClick}
                 findingsCountByArtifactId={findingsCountByArtifactId}
                 policies={policiesQuery.data ?? []}
-                onViewExecutions={handleViewExecutions}
+                onViewExecutions={graphQuery.isPlaceholderData ? undefined : handleViewExecutions}
               />
             )}
             </>

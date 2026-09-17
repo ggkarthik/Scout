@@ -88,8 +88,9 @@ public class AiSecurityMetadataSanitizer {
         for (Map.Entry<?, ?> entry : source.entrySet()) {
             String key = String.valueOf(entry.getKey());
             String path = prefix.isEmpty() ? key : prefix + "." + key;
-            boolean storageAllowed = AiSecurityFieldContract.allows(
-                    key, AiSecurityFieldContract.Tier.STORAGE_ALLOWED);
+            boolean storageAllowed = topLevel
+                    ? AiSecurityFieldContract.allows(key, AiSecurityFieldContract.Tier.STORAGE_ALLOWED)
+                    : AiSecurityFieldContract.allowsNested(prefix, key, AiSecurityFieldContract.Tier.STORAGE_ALLOWED);
             boolean internalDigest = Set.of(
                     "promptDigest", "toolDefinitionDigest", "digestAlgorithm", "digestKeyVersion")
                     .contains(key);
