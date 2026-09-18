@@ -4,7 +4,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { pathForInventoryAiAsset } from '../app/routes';
 import { PageFreshnessStatus } from '../components/PageFreshnessStatus';
-import type { AiSecurityArtifact } from '../features/ai-security/types';
+import type { AiProvider, AiSecurityArtifact } from '../features/ai-security/types';
 import { InventoryShell } from '../features/inventory/InventoryShell';
 
 type InventoryKind = 'knowledge-data' | 'mcp';
@@ -26,7 +26,7 @@ export function AiKnowledgeMcpInventoryPage({ kind }: { kind: InventoryKind }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
-  const [provider, setProvider] = React.useState<'' | 'AWS' | 'AZURE'>('');
+  const [provider, setProvider] = React.useState<'' | AiProvider>('');
   const [active, setActive] = React.useState<'ALL' | 'true' | 'false'>('ALL');
   const [artifactRole, setArtifactRole] = React.useState(searchParams.get('artifactRole') ?? '');
   const [postureFilter, setPostureFilter] = React.useState('');
@@ -64,8 +64,8 @@ export function AiKnowledgeMcpInventoryPage({ kind }: { kind: InventoryKind }) {
       <PageFreshnessStatus updatedAt={summaryQuery.data?.lastCompleteSnapshotAt} />
       <div className="inventory-fpl-toolbar">
         <label className="findings-filter-chip"><span className="panel-caption">Provider</span>
-          <select value={provider} onChange={(event) => setProvider(event.target.value as '' | 'AWS' | 'AZURE')}>
-            <option value="">All providers</option><option value="AWS">AWS</option><option value="AZURE">Azure</option>
+          <select value={provider} onChange={(event) => setProvider(event.target.value as '' | AiProvider)}>
+            <option value="">All providers</option><option value="AWS">AWS</option><option value="AZURE">Azure</option><option value="MICROSOFT_COPILOT">Microsoft Copilot</option>
           </select>
         </label>
         <label className="findings-filter-chip"><span className="panel-caption">{isKnowledge ? 'Artifact kind' : 'MCP role'}</span>

@@ -263,6 +263,10 @@ export function AiInventoryPage() {
               </div>
             </div>
           </button>
+          <button type="button" className="fpl-widget" onClick={() => navigate('/inventory/ai/executions')}>
+            <div className="fpl-widget-title">Runtime metadata</div>
+            <p>Review execution status, policy state, and timing without exposing prompts or transcripts.</p>
+          </button>
         </div>
       </div>
 

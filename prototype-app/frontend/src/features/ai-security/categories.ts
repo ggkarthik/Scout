@@ -1,4 +1,4 @@
-export type AiArtifactCategoryKey = 'AGENTS' | 'MODELS' | 'GUARDRAILS' | 'IDENTITY';
+export type AiArtifactCategoryKey = 'AGENTS' | 'AGENT_VERSIONS' | 'PROMPTS' | 'TOOLS' | 'COMPONENTS' | 'MODELS' | 'GUARDRAILS' | 'IDENTITY';
 
 export type AiArtifactCategory = {
   key: AiArtifactCategoryKey;
@@ -10,7 +10,11 @@ export type AiArtifactCategory = {
  * Azure. Deliberately small and explicit — only kinds with a genuine functional equivalent
  * on the other provider are combined here. Everything else stays as its own native-kind row. */
 export const AI_ARTIFACT_CATEGORIES: AiArtifactCategory[] = [
-  { key: 'AGENTS', label: 'Agents', nativeKinds: ['AWS_BEDROCK_AGENT', 'AZURE_BOT_SERVICES', 'AZURE_FOUNDRY_AGENTS'] },
+  { key: 'AGENTS', label: 'Agents', nativeKinds: ['AWS_BEDROCK_AGENT', 'AZURE_BOT_SERVICES', 'AZURE_FOUNDRY_AGENTS', 'AZURE_CLASSIC_FOUNDRY_AGENTS', 'MICROSOFT_COPILOT'] },
+  { key: 'AGENT_VERSIONS', label: 'Agent versions', nativeKinds: ['AZURE_FOUNDRY_AGENT_VERSION', 'AZURE_FOUNDRY_AGENT_VERSIONS', 'AZURE_CLASSIC_FOUNDRY_AGENT_VERSIONS', 'MICROSOFT_COPILOT_VERSION'] },
+  { key: 'PROMPTS', label: 'Prompts', nativeKinds: ['AWS_BEDROCK_PROMPT', 'AZURE_FOUNDRY_PROMPT', 'AZURE_CLASSIC_FOUNDRY_PROMPT', 'MICROSOFT_COPILOT_PROMPT'] },
+  { key: 'TOOLS', label: 'Tools', nativeKinds: ['AZURE_FOUNDRY_AGENT_TOOLS', 'AZURE_CLASSIC_FOUNDRY_AGENT_TOOLS', 'MICROSOFT_COPILOT_TOOL'] },
+  { key: 'COMPONENTS', label: 'Components', nativeKinds: ['MICROSOFT_COPILOT_COMPONENT'] },
   { key: 'MODELS', label: 'Models', nativeKinds: ['AWS_BEDROCK_MODEL', 'AZURE_FOUNDRY_DEPLOYMENTS', 'AZURE_ML_MODELS'] },
   { key: 'GUARDRAILS', label: 'Guardrails', nativeKinds: ['AWS_BEDROCK_GUARDRAIL', 'AZURE_RAI_POLICIES'] },
   { key: 'IDENTITY', label: 'Identities', nativeKinds: ['AZURE_RBAC_GLOBAL', 'AZURE_IDENTITY'] },

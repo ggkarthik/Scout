@@ -195,8 +195,8 @@ class AiSecurityObservationPostgresIntegrationTest {
                         List.of(new ArtifactObservation(
                                 providerResourceId,
                                 "AI_MODEL",
-                                "AZURE_OPENAI_DEPLOYMENT",
-                                "Long Azure resource",
+                                "AWS_BEDROCK_MODEL",
+                                "Long provider resource",
                                 Map.of()))));
 
         Integer hashLength = tenantExecution.run(tenant, () -> jdbc.queryForObject(

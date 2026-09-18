@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import React from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
@@ -78,6 +78,8 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
     || hasRole(actor, 'SECURITY_ANALYST');
   const [tab, setTab] = React.useState<AssetDetailTab>('overview');
   const [ownerDraft, setOwnerDraft] = React.useState('');
+  const [showRuntime, setShowRuntime] = React.useState(false);
+  const [runtimeDays, setRuntimeDays] = React.useState<1 | 7 | 30>(7);
 
   const artifactQuery = useQuery({
     queryKey: ['ai-security-artifact', artifactId],
@@ -104,13 +106,31 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
     queryFn: () => api.listAiSecurityFindings(undefined, undefined, 0, 200),
   });
   const graphQuery = useQuery({
-    queryKey: ['ai-security-graph', artifactId],
-    queryFn: () => api.getAiSecurityGraph(artifactId, 2),
+    queryKey: ['ai-security-graph', artifactId, showRuntime, runtimeDays],
+    placeholderData: keepPreviousData,
+    queryFn: () => {
+      if (!showRuntime) return api.getAiSecurityGraph(artifactId, 2);
+      const to = new Date();
+      const from = new Date(to.getTime() - runtimeDays * 24 * 60 * 60 * 1000);
+      return api.getAiSecurityGraph(artifactId, 2, { from: from.toISOString(), to: to.toISOString() });
+    },
   });
   const handleGraphNodeClick = React.useCallback((clickedArtifactId: string) => {
     if (clickedArtifactId === artifactId) return;
     navigate(pathForInventoryAiAsset(clickedArtifactId, `${location.pathname}${location.search}`));
   }, [artifactId, navigate, location.pathname, location.search]);
+  const handleViewExecutions = React.useCallback((group: import('../features/ai-security/types').AiRuntimeGraphGroup) => {
+    const params = new URLSearchParams();
+    if (group.agentArtifactId) params.set('agentId', group.agentArtifactId);
+    if (group.agentVersionArtifactId) params.set('agentVersionId', group.agentVersionArtifactId);
+    params.set('source', group.source);
+    const overlay = graphQuery.data?.runtimeOverlay;
+    if (overlay) {
+      params.set('from', overlay.windowStart);
+      params.set('to', overlay.windowEnd);
+    }
+    navigate(`/inventory/ai/executions?${params.toString()}`);
+  }, [graphQuery.data?.runtimeOverlay, navigate]);
   const postureQuery = useQuery({
     queryKey: ['ai-asset-posture', artifactId],
     queryFn: () => api.getAiAssetPosture(artifactId),
@@ -122,6 +142,20 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
   });
 
   const artifact = artifactQuery.data ?? null;
+  const agentDefinitionBindings = React.useMemo(() => {
+    if (!artifact || artifact.artifactType !== 'AI_AGENT' || !graphQuery.data) return null;
+    const nodes = new Map(graphQuery.data.nodes.map(node => [node.id, node]));
+    const activeVersionId = graphQuery.data.edges.find(edge => edge.sourceArtifactId === artifact.id && edge.relationshipType === 'ACTIVE_VERSION')?.targetArtifactId;
+    const versions = graphQuery.data.edges
+      .filter(edge => edge.targetArtifactId === artifact.id && edge.relationshipType === 'VERSION_OF')
+      .map(edge => nodes.get(edge.sourceArtifactId)?.name ?? edge.sourceName);
+    const activeEdges = graphQuery.data.edges.filter(edge => edge.sourceArtifactId === artifact.id || edge.sourceArtifactId === activeVersionId);
+    const names = (type: string) => activeEdges.filter(edge => edge.relationshipType === type)
+      .map(edge => nodes.get(edge.targetArtifactId)?.name ?? edge.targetName)
+      .filter((value, index, all) => all.indexOf(value) === index);
+    return { versions, activeVersion: activeVersionId ? nodes.get(activeVersionId)?.name : undefined,
+      models: names('USES_MODEL'), prompts: names('USES_PROMPT'), tools: names('USES_TOOL') };
+  }, [artifact, graphQuery.data]);
   const policiesById = React.useMemo(
     () => new Map((policiesQuery.data ?? []).map((policy) => [policy.id, policy])),
     [policiesQuery.data],
@@ -313,6 +347,13 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
               secondaryFields={overviewSecondaryFields}
             />
             {typeSpecificFields.length > 0 && <section className="fd3-panel"><div className="fd3-panel-title">{artifact.artifactType.startsWith('MCP_') ? 'MCP configuration' : 'Knowledge and data configuration'}</div><InventoryOverviewPanel primaryFields={typeSpecificFields} /></section>}
+            {agentDefinitionBindings && <section className="fd3-panel"><div className="fd3-panel-title">Agent definition</div><InventoryOverviewPanel primaryTitle="Definition lineage" primaryFields={[
+              { label: 'Versions', value: agentDefinitionBindings.versions.length ? agentDefinitionBindings.versions.join(', ') : 'Not observed' },
+              { label: 'Active version', value: agentDefinitionBindings.activeVersion ?? 'Not observed' },
+              { label: 'Active models', value: agentDefinitionBindings.models.length ? agentDefinitionBindings.models.join(', ') : 'Not observed' },
+              { label: 'Active prompts', value: agentDefinitionBindings.prompts.length ? agentDefinitionBindings.prompts.join(', ') : 'Not observed' },
+              { label: 'Active tools', value: agentDefinitionBindings.tools.length ? agentDefinitionBindings.tools.join(', ') : 'Not observed' },
+            ]} /></section>}
             <section className="fd3-panel">
               <div className="fd3-panel-title">Control posture</div>
               {postureQuery.isLoading ? <p className="panel-caption">Loading evaluated controls…</p> : postureQuery.isError ? <p className="notice error">Control posture could not be loaded.</p> : (postureQuery.data?.controls.length ?? 0) === 0 ? <p className="panel-caption">No current policy evidence covers this asset.</p> : <table className="data-table"><thead><tr><th>Control</th><th>Evidence</th><th>Decision</th></tr></thead><tbody>
@@ -421,9 +462,17 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
           )}
 
           {tab === 'relationships' && (
-            graphQuery.isLoading ? (
+            <>
+            <div className="inventory-fpl-toolbar ai-runtime-graph-controls">
+              <label><input type="checkbox" checked={showRuntime} onChange={(event) => setShowRuntime(event.target.checked)} /> Show runtime activity</label>
+              {showRuntime && <label>Time range<select value={runtimeDays} onChange={(event) => setRuntimeDays(Number(event.target.value) as 1 | 7 | 30)}>
+                <option value={1}>Last 24 hours</option><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option>
+              </select></label>}
+            </div>
+            {graphQuery.data?.runtimeOverlay?.status === 'UNAVAILABLE' && <p className="notice warning">Runtime activity is temporarily unavailable. The definition graph remains available.</p>}
+            {graphQuery.isLoading ? (
               <div className="empty-state"><p>Loading connected resources…</p></div>
-            ) : (graphQuery.data?.edges.length ?? 0) === 0 ? (
+            ) : (graphQuery.data?.edges.length ?? 0) === 0 && (graphQuery.data?.runtimeOverlay?.groups.length ?? 0) === 0 ? (
               <div className="empty-state"><p>No active relationships observed for this asset.</p></div>
             ) : (
               <AiDependencyGraph
@@ -432,8 +481,10 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
                 onNodeClick={handleGraphNodeClick}
                 findingsCountByArtifactId={findingsCountByArtifactId}
                 policies={policiesQuery.data ?? []}
+                onViewExecutions={graphQuery.isPlaceholderData ? undefined : handleViewExecutions}
               />
-            )
+            )}
+            </>
           )}
         </div>
       </div>

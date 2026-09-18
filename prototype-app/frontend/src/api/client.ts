@@ -509,6 +509,7 @@ export type CampaignAiResponse = {
 import { resolveApiBase } from './base';
 import type {
   AiArtifactSummary,
+  AiProvider,
   AiSecurityArtifact,
   AiSecurityConnectionTest,
   AiSecurityConnectorConfig,
@@ -517,6 +518,10 @@ import type {
   AiSecurityAzureCredentialProfile,
   AiSecurityAzureFoundryConfig,
   AiSecurityAzureRequirements,
+  AiAgentExecutionEvent,
+  AiAgentExecutionPage,
+  CopilotStudioConnector,
+  AiSecurityConnectorFeatureFlag,
   AiSecurityFinding,
   AiSecurityGraph,
   AiSecurityPage,
@@ -1491,7 +1496,7 @@ export const api = {
     artifactType?: string,
     page = 0,
     size = 50,
-    provider?: 'AWS' | 'AZURE',
+    provider?: AiProvider,
     subscription?: string,
     nativeKind?: string,
     severity?: string,
@@ -1508,7 +1513,7 @@ export const api = {
     artifactType?: string,
     page = 0,
     size = 50,
-    provider?: 'AWS' | 'AZURE',
+    provider?: AiProvider,
     subscription?: string,
     nativeKind?: string,
     severity?: string,
@@ -1526,7 +1531,7 @@ export const api = {
     return request<AiSecurityPage<AiArtifactSummary>>(`/ai-security/artifact-summaries?${params.toString()}`);
   },
   listAiKnowledgeDataInventory: (
-    page = 0, size = 50, provider?: 'AWS' | 'AZURE', kind?: string,
+    page = 0, size = 50, provider?: AiProvider, kind?: string,
     sourceType?: string, sensitivity?: string, publicContentAccess?: string, active?: boolean,
   ) => {
     const params = new URLSearchParams({ page: String(page), size: String(size) });
@@ -1539,7 +1544,7 @@ export const api = {
     return request<AiSecurityPage<AiSecurityArtifact>>(`/ai-security/inventory/knowledge-data?${params.toString()}`);
   },
   listAiMcpInventory: (
-    page = 0, size = 50, provider?: 'AWS' | 'AZURE', role?: string,
+    page = 0, size = 50, provider?: AiProvider, role?: string,
     authenticationType?: string, endpointExposure?: string, synchronizationStatus?: string, active?: boolean,
   ) => {
     const params = new URLSearchParams({ page: String(page), size: String(size) });
@@ -1553,10 +1558,15 @@ export const api = {
   },
   getAiSecurityArtifact: (artifactId: string) =>
     request<AiSecurityArtifact>(`/ai-security/artifacts/${encodeURIComponent(artifactId)}`),
-  getAiSecurityGraph: (rootArtifactId?: string, depth?: number) => {
+  getAiSecurityGraph: (rootArtifactId?: string, depth?: number, runtime?: { from?: string; to?: string }) => {
     const params = new URLSearchParams();
     if (rootArtifactId) params.set('rootArtifactId', rootArtifactId);
     if (depth) params.set('depth', String(depth));
+    if (runtime) {
+      params.set('includeRuntime', 'true');
+      if (runtime.from) params.set('runtimeFrom', runtime.from);
+      if (runtime.to) params.set('runtimeTo', runtime.to);
+    }
     const suffix = params.toString() ? `?${params.toString()}` : '';
     return request<AiSecurityGraph>(`/ai-security/graph${suffix}`);
   },
@@ -1565,7 +1575,7 @@ export const api = {
     status?: string,
     page = 0,
     size = 50,
-    provider?: 'AWS' | 'AZURE',
+    provider?: AiProvider,
     subscription?: string,
     severity?: string,
     nativeKind?: string,
@@ -1650,8 +1660,24 @@ export const api = {
     }),
   explainAiGridPolicy: (policyId: string) =>
     request<PolicyAssistExplanation>(`/ai-policies/${encodeURIComponent(policyId)}/assist/explain`),
-  listAiSecurityRuns: (provider?: 'AWS' | 'AZURE') =>
+  listAiSecurityRuns: (provider?: AiProvider) =>
     request<AiSecurityRun[]>(`/ai-security/runs${provider ? `?provider=${provider}` : ''}`),
+  listAiAgentExecutions: (filters: { agentId?: string; agentVersionId?: string; status?: string; source?: string; from?: string; to?: string; page?: number; size?: number } = {}) => {
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => { if (value !== undefined && value !== '') params.set(key, String(value)); });
+    return request<AiAgentExecutionPage>(`/ai-security/executions?${params.toString()}`);
+  },
+  getAiAgentExecutionTimeline: (executionId: string) =>
+    request<AiAgentExecutionEvent[]>(`/ai-security/executions/${encodeURIComponent(executionId)}/timeline`),
+  listCopilotStudioConnectors: () => request<CopilotStudioConnector[]>('/connectors/ai-security/copilot-studio'),
+  saveCopilotStudioConnector: (payload: { organizationUrl: string; credentialProfileId: string; discoveryEnabled: boolean; executionEnabled: boolean; killSwitch: boolean; scheduleCron?: string; allowedDataverseHosts?: string[] }) =>
+    request<CopilotStudioConnector>('/connectors/ai-security/copilot-studio', { method: 'PUT', body: JSON.stringify(payload) }),
+  testCopilotStudioConnector: (connectorId: string) => request<{ bots: { ready: boolean; status: number; state: string }; components: { ready: boolean; status: number; state: string }; executions: { ready: boolean; status: number; state: string } }>(`/connectors/ai-security/copilot-studio/${encodeURIComponent(connectorId)}/test`, { method: 'POST' }),
+  runCopilotStudioDiscovery: (connectorId: string) => request<{ runId: string; artifacts: number; incompleteScopes: number; status: string }>(`/connectors/ai-security/copilot-studio/${encodeURIComponent(connectorId)}/run`, { method: 'POST' }),
+  runCopilotStudioRuntime: (connectorId: string) => request<{ accepted: number; duplicates: number; windowStart: string }>(`/connectors/ai-security/copilot-studio/${encodeURIComponent(connectorId)}/runtime-run`, { method: 'POST' }),
+  listAiSecurityConnectorFeatureFlags: () => request<AiSecurityConnectorFeatureFlag[]>('/connectors/ai-security/feature-flags'),
+  updateAiSecurityConnectorFeatureFlag: (featureKey: string, payload: { enabled: boolean; killSwitch: boolean }) =>
+    request<AiSecurityConnectorFeatureFlag>(`/connectors/ai-security/feature-flags/${encodeURIComponent(featureKey)}`, { method: 'PUT', body: JSON.stringify(payload) }),
   listAiSecurityRunScopes: (runId: string) =>
     request<AiSecurityScope[]>(`/ai-security/runs/${encodeURIComponent(runId)}/scopes`),
   getAiSecurityConnector: () => request<AiSecurityConnectorConfig | null>('/connectors/ai-security/aws'),

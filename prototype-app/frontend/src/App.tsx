@@ -78,6 +78,12 @@ const AiKnowledgeMcpInventoryPage = React.lazy(async () => ({
 const AiAssetDetailPage = React.lazy(async () => ({
   default: (await import('./pages/AiAssetDetailPage')).AiAssetDetailPage
 }));
+const AiAgentExecutionsPage = React.lazy(async () => ({
+  default: (await import('./pages/AiAgentExecutionsPage')).AiAgentExecutionsPage
+}));
+const CopilotStudioConnectorPage = React.lazy(async () => ({
+  default: (await import('./pages/CopilotStudioConnectorPage')).CopilotStudioConnectorPage
+}));
 const FindingDetailPage = React.lazy(async () => ({
   default: (await import('./pages/FindingDetailPage')).FindingDetailPage
 }));
@@ -1202,6 +1208,8 @@ function AppShell() {
               <Route path="/inventory/ai/assets" element={<AiSecurityRoute><AiInventoryAssetsPage /></AiSecurityRoute>} />
               <Route path="/inventory/ai/knowledge-data" element={<AiSecurityRoute><AiKnowledgeMcpInventoryPage kind="knowledge-data" /></AiSecurityRoute>} />
               <Route path="/inventory/ai/mcp" element={<AiSecurityRoute><AiKnowledgeMcpInventoryPage kind="mcp" /></AiSecurityRoute>} />
+              <Route path="/inventory/ai/executions" element={<AiSecurityRoute><AiAgentExecutionsPage /></AiSecurityRoute>} />
+              <Route path="/connect/copilot-studio" element={<AiSecurityRoute><CopilotStudioConnectorPage /></AiSecurityRoute>} />
               <Route path="/inventory/ai/:assetId" element={<InventoryAiAssetRoute />} />
               <Route path="/inventory/software-identities/:softwareIdentityId" element={<SoftwareIdentityDetailRoute />} />
               <Route path="/inventory/:inventoryView?" element={<InventoryRoute />} />

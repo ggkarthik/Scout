@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.aisecurity.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ReviewDisposition;
 import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyRegistry.PolicyDefinition;
@@ -17,6 +18,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.time.Instant;
+import java.time.Duration;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -24,6 +27,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -33,6 +38,8 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class AiSecurityApiService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(AiSecurityApiService.class);
 
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
@@ -45,6 +52,7 @@ public class AiSecurityApiService {
     private final AuditEventService auditEventService;
     private final AiSecurityMetadataSanitizer metadataSanitizer;
     private final AiGridTenantPolicyDefaultsService policyDefaults;
+    private final AiAgentExecutionRelationshipProjectionService runtimeRelationships;
 
     public AiSecurityApiService(
             NamedParameterJdbcTemplate jdbc,
@@ -57,7 +65,8 @@ public class AiSecurityApiService {
             AiSecuritySyncRunFacade syncRunFacade,
             AuditEventService auditEventService,
             AiSecurityMetadataSanitizer metadataSanitizer,
-            AiGridTenantPolicyDefaultsService policyDefaults
+            AiGridTenantPolicyDefaultsService policyDefaults,
+            AiAgentExecutionRelationshipProjectionService runtimeRelationships
     ) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
@@ -70,6 +79,7 @@ public class AiSecurityApiService {
         this.auditEventService = auditEventService;
         this.metadataSanitizer = metadataSanitizer;
         this.policyDefaults = policyDefaults;
+        this.runtimeRelationships = runtimeRelationships;
     }
 
     public SummaryResponse summary(Tenant tenant) {
@@ -268,12 +278,12 @@ public class AiSecurityApiService {
                     .addValue("types", types.toArray(String[]::new))
                     .addValue("provider", normalizedProvider(provider), Types.VARCHAR)
                     .addValue("kind", blankToNull(kind), Types.VARCHAR)
-                    .addValue("sourceType", blankToNull(sourceType), Types.VARCHAR)
-                    .addValue("sensitivity", blankToNull(sensitivity), Types.VARCHAR)
-                    .addValue("publicContentAccess", blankToNull(publicContentAccess), Types.VARCHAR)
-                    .addValue("authenticationType", blankToNull(authenticationType), Types.VARCHAR)
-                    .addValue("endpointExposure", blankToNull(endpointExposure), Types.VARCHAR)
-                    .addValue("synchronizationStatus", blankToNull(synchronizationStatus), Types.VARCHAR)
+                    .addValue("sourceType", filterValue("sourceType", sourceType), Types.VARCHAR)
+                    .addValue("sensitivity", filterValue("sensitivity", sensitivity), Types.VARCHAR)
+                    .addValue("publicContentAccess", filterValue("publicContentAccess", publicContentAccess), Types.VARCHAR)
+                    .addValue("authenticationType", filterValue("configuredAuthType", authenticationType), Types.VARCHAR)
+                    .addValue("endpointExposure", filterValue("endpointExposure", endpointExposure), Types.VARCHAR)
+                    .addValue("synchronizationStatus", filterValue("status", synchronizationStatus), Types.VARCHAR)
                     .addValue("active", active, Types.BOOLEAN)
                     .addValue("limit", safeSize, Types.INTEGER).addValue("offset", safePage * safeSize, Types.INTEGER);
             String where = """
@@ -496,6 +506,56 @@ public class AiSecurityApiService {
         });
     }
 
+    public String exportArtifacts(Tenant tenant) {
+        return tenantExecution.run(tenant, () -> {
+            StringBuilder csv = new StringBuilder("id,name,provider,artifactType,nativeKind,accountId,region,active,metadata\n");
+            jdbc.query("""
+                    select id,name,provider,artifact_type,native_kind,account_id,region,active,attributes_json::text
+                      from ai_security_artifacts order by name,id limit 50000
+                    """, rs -> {
+                while (rs.next()) {
+                    Map<String, Object> metadata = AiSecurityFieldContract.responseSafe(readMap(rs.getString("attributes_json")));
+                    csv.append(csv(rs.getObject("id"))).append(',').append(csv(rs.getString("name"))).append(',')
+                            .append(csv(rs.getString("provider"))).append(',').append(csv(rs.getString("artifact_type"))).append(',')
+                            .append(csv(rs.getString("native_kind"))).append(',').append(csv(rs.getString("account_id"))).append(',')
+                            .append(csv(rs.getString("region"))).append(',').append(csv(rs.getBoolean("active"))).append(',')
+                            .append(csv(json(metadata))).append('\n');
+                }
+                return null;
+            });
+            return csv.toString();
+        });
+    }
+
+    static String csv(Object value) {
+        String text = value == null ? "" : value.toString();
+        int firstMeaningful = 0;
+        while (firstMeaningful < text.length()
+                && isSpreadsheetIgnorablePrefix(text.charAt(firstMeaningful))) {
+            firstMeaningful++;
+        }
+        boolean controlPrefix = !text.isEmpty() && (text.charAt(0) == '\t'
+                || text.charAt(0) == '\r' || text.charAt(0) == '\n');
+        boolean formulaPrefix = firstMeaningful < text.length()
+                && "=+-@".indexOf(text.charAt(firstMeaningful)) >= 0;
+        if (controlPrefix || formulaPrefix) {
+            text = "'" + text;
+        }
+        return "\"" + text.replace("\"", "\"\"") + "\"";
+    }
+
+    private static boolean isSpreadsheetIgnorablePrefix(char value) {
+        return Character.isWhitespace(value) || Character.isSpaceChar(value)
+                || Character.isISOControl(value) || value == '\uFEFF' || value == '\u200B';
+    }
+
+    private String filterValue(String field, String value) {
+        if (!AiSecurityFieldContract.allows(field, AiSecurityFieldContract.Tier.FILTER_ALLOWED)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Metadata field is not filterable");
+        }
+        return blankToNull(value);
+    }
+
     public List<RelationshipResponse> relationships(Tenant tenant, UUID artifactId) {
         return tenantExecution.run(tenant, () -> jdbc.query("""
                 select r.id, r.relationship_type, r.source_artifact_id, source.name as source_name,
@@ -526,6 +586,12 @@ public class AiSecurityApiService {
     }
 
     public GraphResponse graph(Tenant tenant, UUID rootArtifactId, int depth) {
+        return graph(tenant, rootArtifactId, depth, false, null, null);
+    }
+
+    public GraphResponse graph(Tenant tenant, UUID rootArtifactId, int depth, boolean includeRuntime,
+                               Instant runtimeFrom, Instant runtimeTo) {
+        RuntimeWindow runtimeWindow = runtimeWindow(rootArtifactId, includeRuntime, runtimeFrom, runtimeTo);
         int boundedDepth = Math.max(1, Math.min(depth, MAX_GRAPH_DEPTH));
         return tenantExecution.run(tenant, () -> {
             List<ArtifactResponse> nodes;
@@ -553,10 +619,55 @@ public class AiSecurityApiService {
                 });
                 nodes = artifactsByIds(ids.stream().limit(500).toList());
             }
+            AiAgentExecutionRelationshipProjectionService.RuntimeOverlay runtimeOverlay = null;
+            if (runtimeWindow != null) {
+                try {
+                    runtimeOverlay = runtimeRelationships.aggregate(tenant.getId(), rootArtifactId,
+                            runtimeWindow.from(), runtimeWindow.to());
+                    Set<UUID> present = nodes.stream().map(ArtifactResponse::id)
+                            .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+                    List<UUID> missing = AiAgentExecutionRelationshipProjectionService.referencedArtifactIds(runtimeOverlay)
+                            .stream().filter(id -> !present.contains(id)).toList();
+                    if (!missing.isEmpty()) {
+                        List<ArtifactResponse> enriched = new ArrayList<>(nodes);
+                        enriched.addAll(artifactsByIds(missing));
+                        nodes = enriched;
+                    }
+                } catch (RuntimeException error) {
+                    LOG.warn("AI runtime relationship overlay is unavailable: {}",
+                            error.getClass().getSimpleName());
+                    runtimeOverlay = AiAgentExecutionRelationshipProjectionService.unavailable(
+                            runtimeWindow.from(), runtimeWindow.to());
+                }
+            }
             boolean truncated = nodes.size() >= 500 || edges.size() > 1000;
-            return new GraphResponse(nodes.stream().limit(500).toList(), edges.stream().limit(1000).toList(), truncated);
+            return new GraphResponse(nodes.stream().limit(500).toList(), edges.stream().limit(1000).toList(),
+                    truncated, runtimeOverlay);
         });
     }
+
+    static RuntimeWindow runtimeWindow(UUID rootArtifactId, boolean includeRuntime,
+                                       Instant runtimeFrom, Instant runtimeTo) {
+        if (!includeRuntime) return null;
+        if (rootArtifactId == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Runtime graph requires rootArtifactId");
+        }
+        Instant now = Instant.now();
+        Instant to = runtimeTo == null ? now : runtimeTo;
+        Instant from = runtimeFrom == null ? to.minus(7, ChronoUnit.DAYS) : runtimeFrom;
+        if (!from.isBefore(to)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "runtimeFrom must be before runtimeTo");
+        }
+        if (!from.isBefore(now)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Runtime graph window cannot be future-only");
+        }
+        if (Duration.between(from, to).compareTo(Duration.ofDays(90)) > 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Runtime graph window cannot exceed 90 days");
+        }
+        return new RuntimeWindow(from, to);
+    }
+
+    record RuntimeWindow(Instant from, Instant to) { }
 
     /** BFS over ai_security_relationships from root, up to `depth` hops. Runs inside the caller's
      * tenantExecution.run(...) lambda (see graph() above) — search_path is already pinned to the
@@ -1220,7 +1331,9 @@ public class AiSecurityApiService {
                         || ("AWS".equals(normalized)
                                 && AiSecuritySyncRunFacade.AWS_SYNC_TYPE.equals(run.getSyncType()))
                         || ("AZURE".equals(normalized)
-                                && AiSecuritySyncRunFacade.AZURE_SYNC_TYPE.equals(run.getSyncType())))
+                                && AiSecuritySyncRunFacade.AZURE_SYNC_TYPE.equals(run.getSyncType()))
+                        || ("MICROSOFT_COPILOT".equals(normalized)
+                                && AiSecuritySyncRunFacade.COPILOT_SYNC_TYPE.equals(run.getSyncType())))
                 .map(this::run)
                 .toList();
     }
@@ -1263,7 +1376,7 @@ public class AiSecurityApiService {
         String value = blankToNull(provider);
         if (value == null) return null;
         String normalized = value.toUpperCase(java.util.Locale.ROOT);
-        if (!List.of("AWS", "AZURE").contains(normalized)) {
+        if (!List.of("AWS", "AZURE", "MICROSOFT_COPILOT").contains(normalized)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported AI Security provider");
         }
         return normalized;
@@ -1544,7 +1657,9 @@ public class AiSecurityApiService {
     public record GraphResponse(
             List<ArtifactResponse> nodes,
             List<RelationshipResponse> edges,
-            boolean truncated
+            boolean truncated,
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            AiAgentExecutionRelationshipProjectionService.RuntimeOverlay runtimeOverlay
     ) {
     }
 

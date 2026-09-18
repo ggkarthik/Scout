@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-do
 import { api } from '../api/client';
 import { pathForAiFindingDetail } from '../app/routes';
 import { timeAgo } from '../lib/time';
+import type { AiProvider } from '../features/ai-security/types';
 
 export function AiFindingsPage() {
   const navigate = useNavigate();
@@ -13,7 +14,7 @@ export function AiFindingsPage() {
   const severity = searchParams.get('severity') ?? undefined;
   const nativeKind = searchParams.get('nativeKind') ?? undefined;
   const [status, setStatus] = React.useState('OPEN');
-  const [provider, setProvider] = React.useState<'' | 'AWS' | 'AZURE'>('');
+  const [provider, setProvider] = React.useState<'' | AiProvider>('');
   const [subscription, setSubscription] = React.useState('');
   const deferredSubscription = React.useDeferredValue(subscription.trim());
   const findingsQuery = useQuery({
@@ -41,13 +42,14 @@ export function AiFindingsPage() {
         <div>
           <span className="ai-security-kicker">Configuration evidence, separate from CVEs</span>
           <h2>AI Findings</h2>
-          <p>Deterministic policy failures from complete AWS and Azure evidence scopes.</p>
+          <p>Deterministic policy failures from complete AWS, Azure, and Microsoft Copilot evidence scopes.</p>
           <Link className="btn btn-secondary" to="/findings/ai/exposures">View AI exposure paths</Link>
         </div>
-        <select value={provider} onChange={(event) => setProvider(event.target.value as '' | 'AWS' | 'AZURE')} aria-label="Cloud provider">
+        <select value={provider} onChange={(event) => setProvider(event.target.value as '' | AiProvider)} aria-label="Cloud provider">
           <option value="">All providers</option>
           <option value="AWS">AWS</option>
           <option value="AZURE">Azure</option>
+          <option value="MICROSOFT_COPILOT">Microsoft Copilot</option>
         </select>
         <select value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Finding status">
           <option value="OPEN">Open</option>

@@ -4,6 +4,7 @@ import com.prototype.vulnwatch.aisecurity.azure.AiSecurityAzureConnectorService.
 import com.prototype.vulnwatch.aisecurity.azure.AiSecurityAzureFoundryConfigService;
 import com.prototype.vulnwatch.aisecurity.azure.AiSecurityAzureFoundryConfigService.FoundryConfigRequest;
 import com.prototype.vulnwatch.aisecurity.azure.AiSecurityAzureFoundryConfigService.FoundryConfigResponse;
+import com.prototype.vulnwatch.aisecurity.azure.AzureFoundryRuntimeCollectionService;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityAccessService;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.IngestionJobAcceptedResponse;
@@ -29,17 +30,19 @@ public class AiSecurityAzureFoundryConfigController {
     private final RequestActorService actors;
     private final AiSecurityAccessService access;
     private final AiSecurityAzureFoundryConfigService service;
+    private final AzureFoundryRuntimeCollectionService runtime;
 
     public AiSecurityAzureFoundryConfigController(
             WorkspaceService workspace,
             RequestActorService actors,
             AiSecurityAccessService access,
-            AiSecurityAzureFoundryConfigService service
+            AiSecurityAzureFoundryConfigService service, AzureFoundryRuntimeCollectionService runtime
     ) {
         this.workspace = workspace;
         this.actors = actors;
         this.access = access;
         this.service = service;
+        this.runtime = runtime;
     }
 
     @GetMapping
@@ -64,6 +67,10 @@ public class AiSecurityAzureFoundryConfigController {
     public IngestionJobAcceptedResponse run() {
         return service.run(tenant(), actor());
     }
+
+    @PostMapping("/runtime-run")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
+    public AzureFoundryRuntimeCollectionService.Result runtimeRun() { return runtime.run(tenant()); }
 
     private Tenant tenant() {
         Tenant tenant = workspace.getWorkspace();

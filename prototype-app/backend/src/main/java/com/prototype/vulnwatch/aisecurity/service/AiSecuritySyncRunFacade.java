@@ -12,7 +12,8 @@ public class AiSecuritySyncRunFacade {
 
     public static final String AWS_SYNC_TYPE = "AI_SECURITY_AWS_BEDROCK";
     public static final String AZURE_SYNC_TYPE = "AI_SECURITY_AZURE_DISCOVERY";
-    private static final List<String> SYNC_TYPES = List.of(AWS_SYNC_TYPE, AZURE_SYNC_TYPE);
+    public static final String COPILOT_SYNC_TYPE = "AI_SECURITY_COPILOT_STUDIO";
+    private static final List<String> SYNC_TYPES = List.of(AWS_SYNC_TYPE, AZURE_SYNC_TYPE, COPILOT_SYNC_TYPE);
     private final SyncRunRepository repository;
 
     public AiSecuritySyncRunFacade(SyncRunRepository repository) {

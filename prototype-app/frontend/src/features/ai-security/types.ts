@@ -1,4 +1,5 @@
 export type AiArtifactType = 'AI_AGENT' | 'AI_AGENT_VERSION' | 'AI_PROMPT' | 'AI_TOOL' | 'AI_COMPONENT' | 'AI_MODEL' | 'AI_GUARDRAIL' | 'MCP_GATEWAY' | 'MCP_TARGET' | 'MCP_SERVER' | 'KNOWLEDGE_BASE' | 'DATA_SOURCE' | 'DATA_STORE' | 'SEARCH_INDEX' | 'OTHER_AI_ARTIFACT';
+export type AiProvider = 'AWS' | 'AZURE' | 'MICROSOFT_COPILOT';
 
 export type AiSecuritySummary = {
   artifactCounts: Record<string, number>;
@@ -486,6 +487,49 @@ export type AiSecurityGraph = {
   nodes: AiSecurityArtifact[];
   edges: AiSecurityRelationship[];
   truncated: boolean;
+  runtimeOverlay?: AiRuntimeGraphOverlay;
+};
+
+export type AiRuntimeGraphGroup = {
+  id: string;
+  provider: string;
+  source: string;
+  agentArtifactId: string | null;
+  agentVersionArtifactId: string | null;
+  executionCount: number;
+  successCount: number;
+  failureCount: number;
+  unknownCount: number;
+  resolvedCount: number;
+  unresolvedCount: number;
+  notApplicableCount: number;
+  firstEvidenceTime: string;
+  lastEvidenceTime: string;
+};
+
+export type AiRuntimeGraphEdge = {
+  id: string;
+  relationshipType: 'EXECUTED_AS' | 'PARTICIPATED_IN';
+  runtimeGroupId: string;
+  artifactId: string;
+  participantRole: 'MODEL' | 'TOOL' | 'PROMPT' | 'COMPONENT' | null;
+  executionCount: number;
+  firstEvidenceTime: string;
+  lastEvidenceTime: string;
+};
+
+export type AiRuntimeGraphOverlay = {
+  status: 'AVAILABLE' | 'UNAVAILABLE';
+  diagnostic: string | null;
+  windowStart: string;
+  windowEnd: string;
+  executionCount: number;
+  resolvedCount: number;
+  unresolvedCount: number;
+  notApplicableCount: number;
+  groups: AiRuntimeGraphGroup[];
+  edges: AiRuntimeGraphEdge[];
+  truncated: boolean;
 };
 
 export type AiSecurityFinding = {
@@ -691,6 +735,46 @@ export type AiSecurityAzureFoundryConfig = {
   foundryEndpointUrl: string | null;
   connectorId: string | null;
   credentialExpiresAt: string | null;
+};
+
+/** Metadata-only runtime records. Provider execution identifiers are intentionally absent. */
+export type AiAgentExecution = {
+  id: string;
+  provider: string;
+  agentArtifactId: string | null;
+  agentVersionArtifactId: string | null;
+  correlationStatus: 'RESOLVED' | 'UNRESOLVED' | 'NOT_APPLICABLE';
+  correlationDiagnostic: string | null;
+  source: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  status: string;
+  outcomeCategory: string | null;
+  approvalState: string | null;
+  policyState: string | null;
+  classification: string | null;
+  apiVersion: string | null;
+  tokenCount: number | null;
+  latencyMs: number | null;
+  retryCount: number | null;
+  spendMicros: number | null;
+  evidenceTime: string;
+};
+
+export type AiAgentExecutionPage = { items: AiAgentExecution[]; page: number; size: number; total: number };
+export type AiAgentExecutionEvent = {
+  id: string; executionId: string; sequence: number; eventTime: string; eventType: string;
+  status: string | null; classification: string | null; evidenceTime: string;
+};
+
+export type CopilotStudioConnector = {
+  id: string; organizationUrl: string; credentialProfileId: string; discoveryEnabled: boolean;
+  executionEnabled: boolean; killSwitch: boolean; scheduleCron: string; allowedDataverseHosts: string[];
+  createdAt: string; updatedAt: string;
+};
+
+export type AiSecurityConnectorFeatureFlag = {
+  featureKey: string; enabled: boolean; killSwitch: boolean; updatedBy: string | null; updatedAt: string | null;
 };
 
 export type AiSecurityAzureFamilyPermission = {

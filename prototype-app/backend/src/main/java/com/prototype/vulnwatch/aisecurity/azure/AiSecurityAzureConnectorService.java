@@ -31,7 +31,11 @@ public class AiSecurityAzureConnectorService {
             "AZURE_FOUNDRY_DEPLOYMENTS",
             "AZURE_RAI_POLICIES",
             "AZURE_FOUNDRY_AGENTS",
+            "AZURE_FOUNDRY_AGENT_VERSIONS",
             "AZURE_FOUNDRY_AGENT_TOOLS",
+            "AZURE_CLASSIC_FOUNDRY_AGENTS",
+            "AZURE_CLASSIC_FOUNDRY_AGENT_VERSIONS",
+            "AZURE_CLASSIC_FOUNDRY_AGENT_TOOLS",
             "AZURE_ML_WORKSPACES",
             "AZURE_ML_MODELS",
             "AZURE_ML_ENDPOINTS",
@@ -215,6 +219,7 @@ public class AiSecurityAzureConnectorService {
         }
         if ("AZURE_FOUNDRY_AGENTS".equals(family)
                 || "AZURE_FOUNDRY_AGENT_TOOLS".equals(family)
+                || family.startsWith("AZURE_CLASSIC_FOUNDRY_AGENT")
                 || family.startsWith("AZURE_SEARCH_INDEX")
                 || family.startsWith("AZURE_SEARCH_SKILL")
                 || family.startsWith("AZURE_SEARCH_DATA_SOURCE")) {

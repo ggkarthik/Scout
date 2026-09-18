@@ -73,6 +73,24 @@ app:
     # Cron for the leader-locked shadow-mismatch sweep (skipped entirely in LEGACY mode).
     shadow-sweep-cron: ${APP_ENTITLEMENTS_SHADOW_SWEEP_CRON:0 */30 * * * *}
   ai-security:
+    identity-hmac-key: ${APP_AI_SECURITY_IDENTITY_HMAC_KEY:}
+    identity-hmac-key-version: ${APP_AI_SECURITY_IDENTITY_HMAC_KEY_VERSION:v1}
+    identity-hmac-previous-key: ${APP_AI_SECURITY_IDENTITY_HMAC_PREVIOUS_KEY:}
+    identity-hmac-previous-key-version: ${APP_AI_SECURITY_IDENTITY_HMAC_PREVIOUS_KEY_VERSION:}
+    runtime-identity-hmac-key: ${APP_AI_SECURITY_RUNTIME_IDENTITY_HMAC_KEY:}
+    runtime-identity-hmac-key-version: ${APP_AI_SECURITY_RUNTIME_IDENTITY_HMAC_KEY_VERSION:v1}
+    runtime-identity-hmac-previous-key: ${APP_AI_SECURITY_RUNTIME_IDENTITY_HMAC_PREVIOUS_KEY:}
+    runtime-identity-hmac-previous-key-version: ${APP_AI_SECURITY_RUNTIME_IDENTITY_HMAC_PREVIOUS_KEY_VERSION:}
+    runtime:
+      enabled: ${APP_AI_SECURITY_RUNTIME_ENABLED:true}
+      max-events-per-execution: ${APP_AI_SECURITY_RUNTIME_MAX_EVENTS_PER_EXECUTION:1000}
+      max-metadata-bytes-per-execution: ${APP_AI_SECURITY_RUNTIME_MAX_METADATA_BYTES_PER_EXECUTION:16384}
+      max-api-calls-per-run: ${APP_AI_SECURITY_RUNTIME_MAX_API_CALLS_PER_RUN:100}
+      lookback-days: ${APP_AI_SECURITY_RUNTIME_LOOKBACK_DAYS:30}
+      overlap-days: ${APP_AI_SECURITY_RUNTIME_OVERLAP_DAYS:3}
+      retention-days: ${APP_AI_SECURITY_RUNTIME_RETENTION_DAYS:90}
+    copilot:
+      enabled: ${APP_AI_SECURITY_COPILOT_ENABLED:true}
     grid:
       enabled: ${APP_AI_GRID_ENABLED:true}
       # Demo-only convenience: publish the source-controlled bundled catalog to all
@@ -82,7 +100,7 @@ app:
       max-concurrent: ${APP_AI_SECURITY_AWS_MAX_CONCURRENT:2}
       admission-timeout-seconds: ${APP_AI_SECURITY_AWS_ADMISSION_TIMEOUT_SECONDS:30}
     azure:
-      enabled: ${APP_AI_SECURITY_AZURE_ENABLED:false}
+      enabled: ${APP_AI_SECURITY_AZURE_ENABLED:true}
       disabled-tenant-ids: ${APP_AI_SECURITY_AZURE_DISABLED_TENANT_IDS:}
       disabled-connector-ids: ${APP_AI_SECURITY_AZURE_DISABLED_CONNECTOR_IDS:}
       disabled-resource-families: ${APP_AI_SECURITY_AZURE_DISABLED_RESOURCE_FAMILIES:}
@@ -92,7 +110,9 @@ app:
       admission-timeout-seconds: ${APP_AI_SECURITY_AZURE_ADMISSION_TIMEOUT_SECONDS:30}
       credential-expiry-cron: ${APP_AI_SECURITY_AZURE_CREDENTIAL_EXPIRY_CRON:0 20 2 * * *}
       foundry-agents:
-        enabled: ${APP_AI_SECURITY_AZURE_FOUNDRY_AGENTS_ENABLED:false}
+        enabled: ${APP_AI_SECURITY_AZURE_FOUNDRY_AGENTS_ENABLED:true}
+      classic-foundry-agents:
+        enabled: ${APP_AI_SECURITY_AZURE_CLASSIC_FOUNDRY_AGENTS_ENABLED:true}
       search-data-plane:
         enabled: ${APP_AI_SECURITY_AZURE_SEARCH_DATA_PLANE_ENABLED:false}
     jobs:
@@ -156,7 +176,7 @@ app:
     require-tenant-context: ${APP_REQUIRE_TENANT_CONTEXT:true}
     default-schema: ${APP_DEFAULT_TENANT_SCHEMA:tenant_default}
     enforce-schema-version: ${APP_ENFORCE_TENANT_SCHEMA_VERSION:false}
-    minimum-compatible-schema-version: ${APP_MINIMUM_TENANT_SCHEMA_VERSION:53}
+    minimum-compatible-schema-version: ${APP_MINIMUM_TENANT_SCHEMA_VERSION:7}
   test-personas:
     enabled: ${APP_TEST_PERSONAS_ENABLED:false}
     token-ttl-minutes: ${APP_TEST_PERSONA_TOKEN_TTL_MINUTES:60}
