@@ -48,4 +48,24 @@ describe('CopilotStudioConnectorPage', () => {
     expect(await screen.findByText(/Discovery — bots: READY; components: READY/)).toBeInTheDocument();
     expect(screen.getByText(/Runtime — executions: DENIED/)).toBeInTheDocument();
   });
+
+  it('reports completed inventory and policy processing after discovery', async () => {
+    vi.spyOn(api, 'listAiSecurityConnectorFeatureFlags').mockResolvedValue([]);
+    vi.spyOn(api, 'listCopilotStudioConnectors').mockResolvedValue([{
+      id: 'connector-1', organizationUrl: 'https://org.crm.dynamics.com', credentialProfileId: 'profile-1',
+      discoveryEnabled: true, executionEnabled: false, killSwitch: false, scheduleCron: '0 0 * * * *',
+      allowedDataverseHosts: ['org.crm.dynamics.com'], createdAt: '2026-09-17T00:00:00Z', updatedAt: '2026-09-17T00:00:00Z',
+    }]);
+    const run = vi.spyOn(api, 'runCopilotStudioDiscovery').mockResolvedValue({
+      runId: 'run-1', artifacts: 5, incompleteScopes: 0, status: 'COMPLETE',
+    });
+
+    renderWithProviders(<CopilotStudioConnectorPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Run discovery' }));
+
+    await waitFor(() => expect(run).toHaveBeenCalledWith('connector-1', expect.anything()));
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Discovery completed: 5 inventory artifacts, 0 incomplete scopes. Policy validation ran for every complete scope.'
+    );
+  });
 });
