@@ -31,8 +31,15 @@ export function useIngestionJobsQuery(enabled = true) {
     queryKey: ['ingestion-jobs', { page: 0, size: 100 }],
     queryFn: () => api.listIngestionJobs(0, 100),
     enabled,
+    // Connector execution can enqueue a job while this query is still inside the
+    // application-wide stale window. The run queue must always reconcile with the
+    // server when it is opened, otherwise a newly queued job can remain invisible.
+    refetchOnMount: 'always',
     refetchInterval: (query) => (
-      (query.state.data?.items ?? []).some((job) => job.status.trim().toUpperCase() === 'QUEUED')
+      (query.state.data?.items ?? []).some((job) => {
+        const status = job.status.trim().toUpperCase();
+        return status === 'QUEUED' || status === 'RUNNING';
+      })
         ? RUN_QUEUE_REFRESH_INTERVAL_MS
         : false
     ),

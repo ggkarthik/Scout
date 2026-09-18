@@ -36,6 +36,7 @@ type InventoryRunMetadata = {
   message?: string;
   provider?: string;
   connectorId?: string;
+  ingestionJobId?: string;
   accountId?: string;
   awsAccountId?: string;
   subscriptionId?: string;
@@ -88,7 +89,8 @@ function isInventoryRunType(syncType: string): boolean {
     || normalized === 'AWS_DISCOVERY'
     || normalized === 'AZURE_DISCOVERY'
     || normalized === 'AI_SECURITY_AWS_BEDROCK'
-    || normalized === 'AI_SECURITY_AZURE_DISCOVERY';
+    || normalized === 'AI_SECURITY_AZURE_DISCOVERY'
+    || normalized === 'AI_SECURITY_COPILOT_STUDIO';
 }
 
 function isInventoryRun(run: SyncRun): boolean {
@@ -99,10 +101,20 @@ function isAiInventoryRun(run: SyncRun): boolean {
   return run.syncType.trim().toUpperCase().startsWith('AI_SECURITY_');
 }
 
-function queuedAiJobAsRun(job: IngestionJob): SyncRun {
+function aiJobAsRun(job: IngestionJob): SyncRun {
   const normalizedType = job.jobType.trim().toUpperCase();
-  const provider = normalizedType === 'AI_SECURITY_AZURE_DISCOVERY' ? 'AZURE' : 'AWS';
-  const connectorId = job.assetIdentifier.split(':', 2)[1];
+  const provider = normalizedType === 'AI_SECURITY_AZURE_DISCOVERY'
+    ? 'AZURE'
+    : normalizedType === 'AI_SECURITY_COPILOT_STUDIO'
+      ? 'MICROSOFT_COPILOT'
+      : 'AWS';
+  const connectorId = job.assetIdentifier.split(':').slice(1).join(':') || undefined;
+  const status = job.status.trim().toUpperCase();
+  const message = status === 'QUEUED'
+    ? 'Waiting for the AI Security discovery worker to claim this job.'
+    : status === 'RUNNING'
+      ? 'The AI Security discovery worker is starting this run.'
+      : job.failureMessage ?? undefined;
   return {
     id: `ingestion-job-${job.jobId}`,
     syncType: normalizedType,
@@ -113,14 +125,40 @@ function queuedAiJobAsRun(job: IngestionJob): SyncRun {
     recordsInserted: 0,
     recordsUpdated: 0,
     recordsFailed: 0,
-    startedAt: job.requestedAt,
+    startedAt: job.startedAt ?? job.requestedAt,
+    completedAt: job.completedAt ?? undefined,
+    errorMessage: status === 'FAILED' ? job.failureMessage ?? undefined : undefined,
     metadataJson: JSON.stringify({
       provider,
       connectorId,
-      triggerMode: 'Queued',
-      message: 'Waiting for the AI Security discovery worker to claim this job.'
+      ingestionJobId: job.jobId,
+      triggerMode: 'Connector',
+      message
     })
   };
+}
+
+function hasReplacementSyncRun(job: IngestionJob, syncRuns: SyncRun[]): boolean {
+  let resultRunId: string | undefined;
+  if (job.resultJson) {
+    try {
+      const result = JSON.parse(job.resultJson) as { runId?: string };
+      resultRunId = result.runId;
+    } catch {
+      // A malformed result should not hide the ingestion job from operators.
+    }
+  }
+  if (resultRunId && syncRuns.some((run) => run.id === resultRunId)) return true;
+
+  const connectorId = job.assetIdentifier.split(':').slice(1).join(':');
+  if (!connectorId) return false;
+  const requestedAt = new Date(job.requestedAt).getTime();
+  return syncRuns.some((run) => {
+    if (run.syncType.trim().toUpperCase() !== job.jobType.trim().toUpperCase()) return false;
+    const metadata = parseRunMetadata(run.metadataJson);
+    return metadata.connectorId === connectorId
+      && new Date(run.startedAt).getTime() >= requestedAt;
+  });
 }
 
 function queueLabel(run: SyncRun): string {
@@ -143,6 +181,7 @@ function formatSyncType(value: string): string {
   if (normalized === 'AZURE_DISCOVERY') return 'Azure Cloud Discovery';
   if (normalized === 'AI_SECURITY_AWS_BEDROCK') return 'AWS AI Discovery';
   if (normalized === 'AI_SECURITY_AZURE_DISCOVERY') return 'Azure AI Discovery';
+  if (normalized === 'AI_SECURITY_COPILOT_STUDIO') return 'Microsoft Copilot Discovery';
   if (normalized === 'SERVICENOW_CMDB') return 'ServiceNow CMDB Live Sync';
   if (normalized === 'GITHUB_REPOSITORY_SBOM') return 'GitHub Repository SBOM';
   if (normalized === 'GITHUB_GHCR_SBOM') return 'GitHub GHCR SBOM';
@@ -260,6 +299,7 @@ function buildRunRows(runs: SyncRun[]): DataTableRow[] {
               {detailLine('Trigger', metadata.triggerMode)}
               {detailLine('Provider', metadata.provider)}
               {detailLine('Connector ID', metadata.connectorId)}
+              {detailLine('Ingestion job ID', metadata.ingestionJobId)}
               {detailLine('AWS account', metadata.accountId ?? metadata.awsAccountId)}
               {detailLine('Azure tenant', metadata.azureTenantId)}
               {detailLine('Azure subscription', metadata.subscriptionId)}
@@ -315,11 +355,12 @@ export function InventoryRunQueuePage() {
   const inventoryRuns = React.useMemo(
     () => {
       const syncRuns = (inventoryRunsQuery.data ?? []).filter((run) => isInventoryRun(run));
-      const queuedAiJobs = (ingestionJobsQuery.data?.items ?? [])
-        .filter((job) => job.status.trim().toUpperCase() === 'QUEUED')
+      const visibleAiJobs = (ingestionJobsQuery.data?.items ?? [])
+        .filter((job) => ['QUEUED', 'RUNNING', 'FAILED'].includes(job.status.trim().toUpperCase()))
         .filter((job) => job.jobType.trim().toUpperCase().startsWith('AI_SECURITY_'))
-        .map(queuedAiJobAsRun);
-      return [...queuedAiJobs, ...syncRuns];
+        .filter((job) => !hasReplacementSyncRun(job, syncRuns))
+        .map(aiJobAsRun);
+      return [...visibleAiJobs, ...syncRuns];
     },
     [ingestionJobsQuery.data, inventoryRunsQuery.data]
   );
