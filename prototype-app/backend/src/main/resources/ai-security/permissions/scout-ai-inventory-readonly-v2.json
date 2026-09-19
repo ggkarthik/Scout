@@ -9,6 +9,7 @@
         "bedrock:ListCustomModels", "bedrock:ListGuardrails", "bedrock:ListImportedModels",
         "bedrock:ListInferenceProfiles", "bedrock:ListModelCustomizationJobs",
         "bedrock:ListProvisionedModelThroughputs", "bedrock:ListAgents", "bedrock:GetAgent",
+        "bedrock:ListAgentVersions", "bedrock:ListAgentAliases", "bedrock:GetAgentVersion",
         "bedrock:ListAgentActionGroups", "bedrock:GetAgentActionGroup", "bedrock:ListKnowledgeBases",
         "bedrock:ListDataSources", "bedrock:GetDataSource", "bedrock:ListAgentKnowledgeBases",
         "bedrock:ListPrompts", "bedrock:ListFlows",
@@ -21,7 +22,10 @@
       "Effect": "Allow",
       "Action": [
         "bedrock-agentcore:ListGateways", "bedrock-agentcore:GetGateway",
-        "bedrock-agentcore:ListGatewayTargets", "bedrock-agentcore:GetGatewayTarget"
+        "bedrock-agentcore:ListGatewayTargets", "bedrock-agentcore:GetGatewayTarget",
+        "bedrock-agentcore:ListAgentRuntimes", "bedrock-agentcore:ListAgentRuntimeVersions",
+        "bedrock-agentcore:ListBrowsers", "bedrock-agentcore:ListCodeInterpreters",
+        "bedrock-agentcore:ListMemories"
       ],
       "Resource": "*"
     },

@@ -100,19 +100,23 @@ public class AiGridCapabilityService {
             jdbc.update("""
                     insert into ai_grid_capability_observations
                         (id,tenant_id,run_id,provider,capability_id,connector,account_id,region,resource_family,
-                         observed_at,expires_at,status,detail)
+                         observed_at,expires_at,status,reason_code,evidence_scopes_json,detail)
                     values (:id,:tenantId,:runId,:provider,:capability,:connector,:accountId,:region,:family,
-                            :observedAt,:expiresAt,:status,:detail)
+                            :observedAt,:expiresAt,:status,:reasonCode,cast(:evidenceScopes as jsonb),:detail)
                     on conflict (tenant_id,run_id,provider,capability_id,account_id,region) do update set
                         observed_at=excluded.observed_at,expires_at=excluded.expires_at,status=excluded.status,
-                        detail=excluded.detail,resource_family=excluded.resource_family
+                        detail=excluded.detail,resource_family=excluded.resource_family,
+                        reason_code=excluded.reason_code,evidence_scopes_json=excluded.evidence_scopes_json
                     """, new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("tenantId", tenant.getId())
                     .addValue("runId", envelope.runId()).addValue("provider", envelope.provider().toUpperCase())
                     .addValue("capability", capability).addValue("connector", envelope.connectorId().toString())
                     .addValue("accountId", envelope.accountId()).addValue("region", envelope.region())
                     .addValue("family", envelope.resourceFamily()).addValue("observedAt", Timestamp.from(envelope.observedAt()))
                     .addValue("expiresAt", Timestamp.from(envelope.observedAt().plusSeconds(86400)))
-                    .addValue("status", capabilityStatus(scopeStatus)).addValue("detail", "collector scope " + envelope.scopeKey()));
+                    .addValue("status", capabilityStatus(scopeStatus))
+                    .addValue("reasonCode", reasonCode(scopeStatus))
+                    .addValue("evidenceScopes", "[\"" + escapeJson(envelope.scopeKey()) + "\"]")
+                    .addValue("detail", "collector scope " + envelope.scopeKey()));
         }
     }
 
@@ -134,20 +138,30 @@ public class AiGridCapabilityService {
     private List<String> capabilitiesFor(String provider, String resourceFamily) {
         String family = resourceFamily == null ? "" : resourceFamily.toUpperCase();
         if ("AWS".equalsIgnoreCase(provider)) {
-            if (family.contains("EFFECTIVE_ACCESS")) return List.of("AWS_EFFECTIVE_ACCESS");
-            if (family.contains("LINKED_DATA_STORES")) return List.of("AWS_LINKED_DATA_STORES");
-            if (family.contains("CONSUMPTION_TELEMETRY")) return List.of("AWS_CONSUMPTION_TELEMETRY");
-            if (family.contains("MODEL_DATA_PROVENANCE")) return List.of("AWS_MODEL_DATA_PROVENANCE");
-            if (family.startsWith("BEDROCK_AGENTS")) return List.of("BEDROCK_AGENTS");
-            if (family.startsWith("BEDROCK_GUARDRAILS")) return List.of("BEDROCK_GUARDRAILS");
-            if (family.startsWith("BEDROCK_KNOWLEDGE") || family.startsWith("BEDROCK_DATA_")) return List.of("BEDROCK_KNOWLEDGE_BASES");
-            if (family.startsWith("BEDROCK_DEPLOYABLE") || family.startsWith("BEDROCK_INFERENCE") || family.startsWith("BEDROCK_MODEL_")) return List.of("BEDROCK_MODELS_JOBS");
-            if (family.startsWith("BEDROCK_INVOCATION")) return List.of("BEDROCK_INVOCATION_LOGGING");
-            if (family.startsWith("IAM")) return List.of("IAM_ROLE_POLICIES");
-            if (family.startsWith("LAMBDA")) return List.of("LAMBDA_URLS");
-            if (family.startsWith("AWS_AGENTCORE")) return List.of("AGENTCORE_GATEWAYS_TARGETS");
-            if (family.startsWith("SAGEMAKER")) return List.of("SAGEMAKER_DOMAINS_MODELS_ENDPOINTS");
-            if (family.startsWith("AWS_MACIE")) return List.of("MACIE_CLASSIFICATION");
+            return switch (family) {
+                case "EFFECTIVE_ACCESS", "AWS_EFFECTIVE_ACCESS" -> List.of("AWS_EFFECTIVE_ACCESS");
+                case "LINKED_DATA_STORES", "AWS_LINKED_DATA_STORES" -> List.of("AWS_LINKED_DATA_STORES");
+                case "CONSUMPTION_TELEMETRY", "AWS_CONSUMPTION_TELEMETRY" -> List.of("AWS_CONSUMPTION_TELEMETRY");
+                case "MODEL_DATA_PROVENANCE", "AWS_MODEL_DATA_PROVENANCE" -> List.of("AWS_MODEL_DATA_PROVENANCE");
+                case "BEDROCK_AGENT_VERSIONS" -> List.of("BEDROCK_AGENT_VERSIONS_ALIASES");
+                case "BEDROCK_AGENTS" -> List.of("BEDROCK_AGENTS");
+                case "BEDROCK_GUARDRAILS" -> List.of("BEDROCK_GUARDRAILS");
+                case "BEDROCK_KNOWLEDGE_BASES", "BEDROCK_DATA_SOURCES", "BEDROCK_DATA_STORES" -> List.of("BEDROCK_KNOWLEDGE_BASES");
+                case "BEDROCK_DEPLOYABLE_MODELS", "BEDROCK_INFERENCE_PROFILES", "BEDROCK_MODEL_CUSTOMIZATION_JOBS" -> List.of("BEDROCK_MODELS_JOBS");
+                case "BEDROCK_PROMPTS", "BEDROCK_FLOWS" -> List.of("BEDROCK_PROMPTS_TOOLS");
+                case "BEDROCK_INVOCATION_LOGGING" -> List.of("BEDROCK_INVOCATION_LOGGING");
+                case "IAM_GLOBAL" -> List.of("IAM_ROLE_POLICIES");
+                case "LAMBDA_URLS" -> List.of("LAMBDA_URLS");
+                case "AWS_AGENTCORE_RUNTIME", "AWS_AGENTCORE_RUNTIMES", "AWS_AGENTCORE_BROWSERS",
+                        "AWS_AGENTCORE_CODE_INTERPRETERS", "AWS_AGENTCORE_MEMORIES" -> List.of("AGENTCORE_RUNTIME_TOOLS");
+                case "AWS_AGENTCORE_GATEWAYS", "AWS_AGENTCORE_GATEWAY_TARGETS" -> List.of("AGENTCORE_GATEWAYS_TARGETS");
+                case "SAGEMAKER_DOMAINS", "SAGEMAKER_MODEL_REGISTRY", "SAGEMAKER_ENDPOINTS",
+                        "SAGEMAKER_ENDPOINT_CONFIGURATIONS", "SAGEMAKER_JOBS", "SAGEMAKER_PIPELINES",
+                        "SAGEMAKER_COMPUTE", "SAGEMAKER_EXECUTION_ROLES", "SAGEMAKER_NETWORKING",
+                        "SAGEMAKER_SPACES" -> List.of("SAGEMAKER_DOMAINS_MODELS_ENDPOINTS");
+                case "AWS_MACIE_PII" -> List.of("MACIE_CLASSIFICATION");
+                default -> List.of();
+            };
         }
         if ("AZURE".equalsIgnoreCase(provider)) {
             if (family.contains("EFFECTIVE_ACCESS")) return List.of("AZURE_EFFECTIVE_ACCESS");
@@ -177,6 +191,21 @@ public class AiGridCapabilityService {
             case FAILED -> "ERROR";
             case UNSUPPORTED -> "UNSUPPORTED_API";
         };
+    }
+
+    private String reasonCode(ScopeStatus status) {
+        return switch (status) {
+            case COMPLETE -> "OBSERVED";
+            case DISABLED -> "CONNECTOR_DISABLED";
+            case UNAUTHORIZED -> "MISSING_PERMISSION";
+            case PARTIAL -> "PARTIAL_EVIDENCE";
+            case FAILED -> "COLLECTOR_ERROR";
+            case UNSUPPORTED -> "UNSUPPORTED_API";
+        };
+    }
+
+    private String escapeJson(String value) {
+        return value == null ? "" : value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     private Instant timestamp(Timestamp value) { return value == null ? null : value.toInstant(); }

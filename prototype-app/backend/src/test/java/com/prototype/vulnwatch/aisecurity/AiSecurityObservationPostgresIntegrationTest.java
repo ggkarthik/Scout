@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.aisecurity;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -171,6 +172,50 @@ class AiSecurityObservationPostgresIntegrationTest {
                 evidenceEnvelope(
                         tenant, connectorId, runId, "GLOBAL", "IAM_GLOBAL", "global-iam", List.of(agent)));
         assertEquals("FAIL", wildcardRoleOutcome(tenant, runId));
+    }
+
+    @Test
+    void scopeOwnedAttributesRemoveOnlyThatScopesStaleKeysAndStayTenantBound() {
+        Tenant tenant = provision("Scope Owned Attributes Co", "scope-owned-attributes-co");
+        UUID connectorId = connectorService.save(
+                tenant,
+                new AiSecurityAwsConnectorService.ConnectorConfigRequest(
+                        "123456789012", null, null, List.of("us-east-1"), true)
+        ).id();
+        String resourceId = "arn:aws:bedrock:us-east-1:123456789012:agent/owned-attributes-agent";
+
+        UUID firstRun = syncRunFacade.start(tenant).getId();
+        observationService.ingest(tenant, evidenceEnvelope(
+                tenant, connectorId, firstRun, "us-east-1", "BEDROCK_AGENTS", "owned-attributes-1",
+                List.of(new ArtifactObservation(resourceId, "AI_AGENT", "AWS_BEDROCK_AGENT", "Owned agent",
+                        Map.of("iamWildcardActions", true, "deployedArtifact", true)))));
+
+        UUID otherScopeRun = syncRunFacade.start(tenant).getId();
+        observationService.ingest(tenant, evidenceEnvelope(
+                tenant, connectorId, otherScopeRun, "us-east-1", "BEDROCK_AGENT_VERSIONS", "owned-attributes-2",
+                List.of(new ArtifactObservation(resourceId, "AI_AGENT", "AWS_BEDROCK_AGENT", "Owned agent",
+                        Map.of("iamEvidenceAvailable", true)))));
+
+        UUID secondRun = syncRunFacade.start(tenant).getId();
+        observationService.ingest(tenant, evidenceEnvelope(
+                tenant, connectorId, secondRun, "us-east-1", "BEDROCK_AGENTS", "owned-attributes-3",
+                List.of(new ArtifactObservation(resourceId, "AI_AGENT", "AWS_BEDROCK_AGENT", "Owned agent",
+                        Map.of("iamWildcardActions", false)))));
+
+        Map<String, Object> attributes = tenantExecution.run(tenant, () -> jdbc.queryForMap("""
+                select attributes_json from ai_security_artifacts
+                 where provider_resource_id = :resourceId
+                """, Map.of("resourceId", resourceId)));
+        String json = String.valueOf(attributes.get("attributes_json"));
+        assertTrue(json.contains("iamWildcardActions"));
+        assertTrue(json.contains("iamEvidenceAvailable"));
+        assertTrue(json.contains("false"));
+        assertFalse(json.contains("deployedArtifact"));
+
+        Tenant otherTenant = provision("Other Scope Owned Attributes Co", "other-scope-owned-attributes-co");
+        assertEquals(0, tenantExecution.run(otherTenant, () -> jdbc.queryForObject(
+                "select count(*) from ai_security_artifacts where provider_resource_id = :resourceId",
+                Map.of("resourceId", resourceId), Integer.class)));
     }
 
     @Test

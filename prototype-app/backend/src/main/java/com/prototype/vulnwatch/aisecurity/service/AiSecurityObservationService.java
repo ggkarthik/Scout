@@ -305,6 +305,15 @@ public class AiSecurityObservationService {
     private UUID upsertArtifact(Tenant tenant, ObservationEnvelopeV1 envelope, ArtifactObservation artifact,
                                 Map<String, Object> attributes) {
         UUID id = UUID.randomUUID();
+        List<String> previouslyOwnedAttributes = jdbc.query("""
+                select o.attribute_key
+                  from ai_security_artifact_attribute_ownership o
+                  join ai_security_artifacts a on a.id=o.artifact_id and a.tenant_id=o.tenant_id
+                 where o.tenant_id=:tenantId and a.provider=:provider
+                   and a.provider_resource_id=:providerResourceId and o.scope_key=:scopeKey
+                """, new MapSqlParameterSource().addValue("tenantId", tenant.getId())
+                .addValue("provider", envelope.provider()).addValue("providerResourceId", artifact.providerResourceId())
+                .addValue("scopeKey", envelope.scopeKey()), (rs, rowNum) -> rs.getString(1));
         MapSqlParameterSource params = base(envelope)
                 .addValue("id", id)
                 .addValue("tenantId", tenant.getId())
@@ -318,8 +327,9 @@ public class AiSecurityObservationService {
                 .addValue("piiInfoTypes", json(artifact.piiInfoTypes()))
                 .addValue("piiFindingCount", artifact.piiFindingCount())
                 .addValue("piiLastScannedAt", artifact.piiLastScannedAt() == null ? null : timestamp(artifact.piiLastScannedAt()))
+                .addValue("previouslyOwnedAttributes", previouslyOwnedAttributes.toArray(String[]::new))
                 .addValue("observedAt", timestamp(envelope.observedAt()));
-        return jdbc.queryForObject("""
+        UUID artifactId = jdbc.queryForObject("""
                 insert into ai_security_artifacts (
                     id, tenant_id, provider, provider_resource_id, artifact_type, native_kind, name,
                     account_id, region, active, attributes_json, first_observed_at, last_observed_at,
@@ -339,7 +349,8 @@ public class AiSecurityObservationService {
                             else excluded.region
                         end,
                         active = true,
-                        attributes_json = ai_security_artifacts.attributes_json || excluded.attributes_json,
+                        attributes_json = (ai_security_artifacts.attributes_json - cast(:previouslyOwnedAttributes as text[]))
+                            || excluded.attributes_json,
                         last_observed_at = excluded.last_observed_at,
                         deactivated_at = null,
                         pii_scan_status = excluded.pii_scan_status,
@@ -349,6 +360,23 @@ public class AiSecurityObservationService {
                         pii_last_scanned_at = excluded.pii_last_scanned_at
                 returning id
                 """, params, UUID.class);
+        jdbc.update("""
+                delete from ai_security_artifact_attribute_ownership
+                 where tenant_id=:tenantId and artifact_id=:artifactId and scope_key=:scopeKey
+                """, Map.of("tenantId", tenant.getId(), "artifactId", artifactId, "scopeKey", envelope.scopeKey()));
+        if (!attributes.isEmpty()) {
+            jdbc.update("""
+                    insert into ai_security_artifact_attribute_ownership
+                        (tenant_id,artifact_id,scope_key,attribute_key,observed_at)
+                    select :tenantId,:artifactId,:scopeKey,key,:observedAt
+                      from jsonb_object_keys(cast(:attributes as jsonb)) key
+                    on conflict (tenant_id,artifact_id,scope_key,attribute_key) do update
+                        set observed_at=excluded.observed_at
+                    """, new MapSqlParameterSource().addValue("tenantId", tenant.getId())
+                    .addValue("artifactId", artifactId).addValue("scopeKey", envelope.scopeKey())
+                    .addValue("observedAt", timestamp(envelope.observedAt())).addValue("attributes", json(attributes)));
+        }
+        return artifactId;
     }
 
     private void upsertSource(
