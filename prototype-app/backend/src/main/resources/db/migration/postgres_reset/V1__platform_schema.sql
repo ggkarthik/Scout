@@ -6150,21 +6150,36 @@ BEGIN
     DROP TABLE platform.ai_grid_policy_migration_ledger;
 END $$;
 
--- Preserve pre-governed posture policies in the clean baseline.  They do not
--- have package digests, so the digest-bound shipment block above cannot create
--- their general-availability distribution records.
+-- Preserve pre-governed posture policies in the clean baseline. Their legacy
+-- digests still require the same immutable approval and distribution binding
+-- as the governed package catalog.
+INSERT INTO platform.ai_grid_policy_release_decisions
+    (id, policy_id, policy_version, package_digest, decision, reason, decided_by)
+SELECT md5('AI_GRID_V1_LEGACY_SHIPMENT:' || policy_id || ':' || version || ':' || package_digest)::uuid,
+       policy_id, version, package_digest, 'APPROVED',
+       'Source-controlled V1 legacy compatibility shipment', 'ai-grid-v1-compatibility'
+  FROM platform.ai_grid_policy_versions
+ WHERE release_family IS NULL
+   AND package_digest IS NOT NULL
+ON CONFLICT (id) DO NOTHING;
+
 UPDATE platform.ai_grid_policy_versions
    SET lifecycle = 'PUBLISHED', published_at = coalesce(published_at, now())
  WHERE release_family IS NULL
+   AND package_digest IS NOT NULL
    AND lifecycle = 'VALIDATED';
 
 INSERT INTO platform.ai_grid_policy_distribution
-    (policy_id, available, default_selection, rollout_stage, canary_tenant_ids_json, updated_by)
-SELECT policy_id, true, default_selection, 'GENERAL_AVAILABILITY', '[]'::jsonb,
-       'ai-grid-v1-compatibility'
-  FROM platform.ai_grid_policy_versions
- WHERE release_family IS NULL
-   AND lifecycle = 'PUBLISHED'
+    (policy_id, available, default_selection, rollout_stage, canary_tenant_ids_json,
+     pinned_version, updated_by, approved_package_digest, release_decision_id)
+SELECT p.policy_id, true, p.default_selection, 'GENERAL_AVAILABILITY', '[]'::jsonb,
+       p.version, 'ai-grid-v1-compatibility', p.package_digest, d.id
+  FROM platform.ai_grid_policy_versions p
+  JOIN platform.ai_grid_policy_release_decisions d
+    ON d.policy_id = p.policy_id AND d.policy_version = p.version
+   AND d.package_digest = p.package_digest AND d.decision = 'APPROVED'
+ WHERE p.release_family IS NULL
+   AND p.lifecycle = 'PUBLISHED'
 ON CONFLICT (policy_id) DO NOTHING;
 
 -- Metadata-only activity evidence is contextual and may never validate an exposure by itself.

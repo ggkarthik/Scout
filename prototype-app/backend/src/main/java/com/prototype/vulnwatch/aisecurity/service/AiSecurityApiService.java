@@ -1139,7 +1139,7 @@ public class AiSecurityApiService {
                   from platform.ai_grid_policy_versions p
                   join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id
                    and (p.version=d.pinned_version or (d.pinned_version is null and p.package_digest is null))
-                 where p.lifecycle in ('PUBLISHED', 'CANARY', 'DEPRECATED')
+                 where p.lifecycle in ('VALIDATED', 'PUBLISHED', 'CANARY', 'DEPRECATED')
                    and (d.available=true or p.lifecycle='DEPRECATED')
                    and (d.rollout_stage='GENERAL_AVAILABILITY'
                         or (d.rollout_stage in ('CANARY','DEV') and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
@@ -1154,7 +1154,7 @@ public class AiSecurityApiService {
                   from platform.ai_grid_policy_versions p
                   join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id
                    and (p.version=d.pinned_version or (d.pinned_version is null and p.package_digest is null))
-                 where p.policy_id=:id and p.lifecycle in ('PUBLISHED', 'CANARY', 'DEPRECATED')
+                 where p.policy_id=:id and p.lifecycle in ('VALIDATED', 'PUBLISHED', 'CANARY', 'DEPRECATED')
                    and (d.available=true or p.lifecycle='DEPRECATED')
                    and (d.rollout_stage='GENERAL_AVAILABILITY'
                         or (d.rollout_stage in ('CANARY','DEV') and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
@@ -1167,7 +1167,7 @@ public class AiSecurityApiService {
     private List<PolicyParameterSpec> policyParameterSpecs(String policyId) {
         List<String> definitions = jdbc.query("""
                 select parameter_definitions_json::text from platform.ai_grid_policy_versions
-                 where policy_id=:id and lifecycle in ('PUBLISHED', 'CANARY')
+                 where policy_id=:id and lifecycle in ('VALIDATED', 'PUBLISHED', 'CANARY')
                  order by published_at desc nulls last, version desc limit 1
                 """, Map.of("id", policyId), (rs, n) -> rs.getString(1));
         List<PolicyParameterSpec> catalogSpecs = definitions.isEmpty() ? List.of() : parameterSpecs(definitions.get(0));
