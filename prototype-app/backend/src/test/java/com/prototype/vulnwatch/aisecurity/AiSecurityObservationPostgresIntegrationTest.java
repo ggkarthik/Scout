@@ -292,6 +292,8 @@ class AiSecurityObservationPostgresIntegrationTest {
                 new AiSecurityAwsConnectorService.ConnectorConfigRequest(
                         "123456789012", null, null, List.of("us-east-1"), true)).id();
         UUID runId = syncRunFacade.start(tenant).getId();
+        capabilityService.registerRun(tenant, runId, "AWS", connectorId, "123456789012",
+                List.of("us-east-1"), List.of("BEDROCK_AGENT_VERSIONS"));
         String agentId = "arn:aws:bedrock:us-east-1:123456789012:agent/graph-agent";
         String versionId = agentId + "/version/3";
         String aliasId = agentId + "/alias/production";
@@ -319,6 +321,7 @@ class AiSecurityObservationPostgresIntegrationTest {
                 "123456789012", "us-east-1", "BEDROCK_AGENT_VERSIONS", scopeKey, 0, 1,
                 runId + ":versions:0", "definition-graph-hash", Instant.now(), ScopeStatus.COMPLETE,
                 artifacts, relationships, List.of()));
+        capabilityService.finalizeRun(tenant, runId);
 
         tenantExecution.run(tenant, () -> {
             assertEquals(5, jdbc.queryForObject("select count(*) from ai_security_artifacts where active=true",

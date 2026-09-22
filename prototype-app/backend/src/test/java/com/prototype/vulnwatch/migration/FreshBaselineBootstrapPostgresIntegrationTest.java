@@ -40,7 +40,7 @@ class FreshBaselineBootstrapPostgresIntegrationTest {
                 select count(*) from platform.ai_grid_release_manifest_items
                  where release_id='R2' and subject_type='CORRELATION' and subject_version='1.0.0'
                 """));
-        assertEquals(0, queryForInt(DATABASE, "select count(*) from platform.ai_grid_policy_versions where policy_id='AWS_BEDROCK_WEAK_GUARDRAIL'"));
+        assertEquals(1, queryForInt(DATABASE, "select count(*) from platform.ai_grid_policy_versions where policy_id='AWS_BEDROCK_WEAK_GUARDRAIL'"));
         assertEquals(1, queryForInt(DATABASE, "select count(*) from platform.ai_grid_capability_definitions where capability_id='COPILOT_STUDIO_METADATA'"));
         assertEquals(0, queryForInt(DATABASE, """
                 select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace
