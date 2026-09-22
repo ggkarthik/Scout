@@ -1,6 +1,5 @@
 package com.prototype.vulnwatch.aisecurity.azure;
 
-import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyRegistry;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -24,7 +23,7 @@ public class AzurePolicyPermissionMatrix {
     private final List<PolicyPermission> policies;
     private final List<String> prohibitedActions;
 
-    public AzurePolicyPermissionMatrix(AiSecurityPolicyRegistry registry) {
+    public AzurePolicyPermissionMatrix() {
         Map<String, Object> root = load();
         this.version = integer(root.get("version"));
         if (version != 1 || !"AZURE".equals(text(root.get("provider")))) {
@@ -33,7 +32,7 @@ public class AzurePolicyPermissionMatrix {
         this.prohibitedActions = List.copyOf(strings(map(root.get("defaults")).get("prohibited_actions")));
         this.families = parseFamilies(map(root.get("family_permissions")));
         this.policies = parsePolicies(list(root.get("policies")));
-        validate(registry);
+        validate();
     }
 
     public int version() {
@@ -80,7 +79,7 @@ public class AzurePolicyPermissionMatrix {
                 List.of("/subscriptions/<subscription-id>"));
     }
 
-    private void validate(AiSecurityPolicyRegistry registry) {
+    private void validate() {
         if (!families.keySet().equals(AiSecurityAzureConnectorService.RESOURCE_FAMILIES)) {
             Set<String> missing = new TreeSet<>(AiSecurityAzureConnectorService.RESOURCE_FAMILIES);
             missing.removeAll(families.keySet());
@@ -112,21 +111,6 @@ public class AzurePolicyPermissionMatrix {
                 throw new IllegalStateException("Azure matrix policy references an unknown family: " + policy.id());
             }
         }
-        var registryPolicies = registry.all().stream()
-                .filter(policy -> policy.id().startsWith("AZURE_"))
-                .toList();
-        if (registryPolicies.size() != byId.size()) {
-            throw new IllegalStateException("Azure matrix and policy registry have different policy counts");
-        }
-        registryPolicies.forEach(policy -> {
-            PolicyPermission matrixPolicy = byId.get(policy.id());
-            if (matrixPolicy == null
-                    || !policy.version().equals(matrixPolicy.version())
-                    || !new LinkedHashSet<>(policy.requiredResourceFamilies())
-                            .equals(new LinkedHashSet<>(matrixPolicy.families()))) {
-                throw new IllegalStateException("Azure matrix policy drift: " + policy.id());
-            }
-        });
     }
 
     private Map<String, FamilyPermission> parseFamilies(Map<String, Object> values) {

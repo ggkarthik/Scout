@@ -86,31 +86,115 @@ public class AiAgentExecutionIngestionService {
     public AgentResolution resolveAgent(Tenant tenant, String provider, String agentReference, String versionReference) {
         if (blank(agentReference)) return new AgentResolution(null, null, "UNRESOLVED", "AGENT_REFERENCE_MISSING");
         return tenantExecution.run(tenant, () -> {
-            List<UUID> agents = jdbc.query("""
-                    select id from ai_security_artifacts
-                     where tenant_id=:tenantId and provider=:provider and artifact_type='AI_AGENT' and active=true
-                       and (provider_resource_id=:reference or lower(name)=lower(:reference))
-                     limit 2
-                    """, new MapSqlParameterSource().addValue("tenantId", tenant.getId()).addValue("provider", provider)
-                    .addValue("reference", agentReference), (rs, row) -> rs.getObject(1, UUID.class));
-            if (agents.size() != 1) return new AgentResolution(null, null, "UNRESOLVED",
-                    agents.isEmpty() ? "AGENT_REFERENCE_NOT_FOUND" : "AGENT_REFERENCE_AMBIGUOUS");
-            UUID agentId = agents.get(0);
-            List<UUID> versions = jdbc.query("""
-                    select v.id
-                      from ai_security_artifacts v
-                      join ai_security_relationships r on r.source_artifact_id=v.id and r.target_artifact_id=:agentId
-                       and r.relationship_type='VERSION_OF' and r.active=true
-                     where v.active=true and (:version is null or v.provider_resource_id=:version
-                            or v.attributes_json->>'version'=:version)
-                     order by case when v.attributes_json->>'version'=:version then 0 else 1 end, v.last_observed_at desc
-                     limit 2
-                    """, new MapSqlParameterSource().addValue("agentId", agentId).addValue("version", versionReference),
-                    (rs, row) -> rs.getObject(1, UUID.class));
-            UUID versionId = versions.size() == 1 ? versions.get(0) : null;
-            String diagnostic = versionReference != null && versionId == null ? "AGENT_VERSION_REFERENCE_NOT_FOUND" : null;
-            return new AgentResolution(agentId, versionId, "RESOLVED", diagnostic);
+            MapSqlParameterSource parameters = new MapSqlParameterSource()
+                    .addValue("tenantId", tenant.getId()).addValue("provider", provider)
+                    .addValue("reference", agentReference);
+            List<ArtifactMatch> candidates = matches("""
+                    artifact_type='AI_AGENT'
+                    and (provider_resource_id=:reference or attributes_json->>'agentId'=:reference)
+                    """, parameters);
+            if (candidates.size() > 1) return ambiguous();
+            ArtifactMatch match = candidates.stream().findFirst().orElse(null);
+            if (match == null) {
+                candidates = matches("""
+                    native_kind='AWS_BEDROCK_AGENT_ALIAS'
+                    and (provider_resource_id=:reference or attributes_json->>'aliasId'=:reference)
+                    """, parameters);
+                if (candidates.size() > 1) return ambiguous();
+                match = candidates.stream().findFirst().orElse(null);
+            }
+            if (match == null) {
+                candidates = matches("artifact_type='AI_AGENT_VERSION' and provider_resource_id=:reference", parameters);
+                if (candidates.size() > 1) return ambiguous();
+                match = candidates.stream().findFirst().orElse(null);
+            }
+            if (match == null) {
+                candidates = matches("artifact_type='AI_AGENT' and lower(name)=lower(:reference)", parameters);
+                if (candidates.size() > 1) return ambiguous();
+                match = candidates.stream().findFirst().orElse(null);
+            }
+            if (match == null) return new AgentResolution(
+                    null, null, "UNRESOLVED", "AGENT_REFERENCE_NOT_FOUND");
+
+            UUID agentId;
+            UUID referencedVersion = null;
+            boolean alias = "AWS_BEDROCK_AGENT_ALIAS".equals(match.nativeKind());
+            if ("AI_AGENT_VERSION".equals(match.artifactType())) {
+                agentId = relatedArtifact(match.id(), "VERSION_OF", false);
+                referencedVersion = match.id();
+            } else if (alias) {
+                agentId = relatedArtifact(match.id(), "HAS_COMPONENT", true);
+            } else {
+                agentId = match.id();
+            }
+            if (agentId == null) return new AgentResolution(null, null, "UNRESOLVED",
+                    alias ? "AGENT_ALIAS_PARENT_NOT_FOUND" : "AGENT_PARENT_NOT_FOUND");
+
+            if (alias) {
+                List<UUID> routed = routedVersions(match.id(), versionReference);
+                if (routed.size() > 1 && blank(versionReference)) return new AgentResolution(
+                        agentId, null, "MULTI_TARGET", "AGENT_ALIAS_MULTIPLE_TARGETS");
+                if (routed.size() != 1) return new AgentResolution(agentId, null, "UNRESOLVED",
+                        blank(versionReference) ? "AGENT_ALIAS_ROUTE_NOT_FOUND" : "AGENT_VERSION_REFERENCE_NOT_FOUND");
+                return new AgentResolution(agentId, routed.get(0), "RESOLVED", null);
+            }
+
+            if (!blank(versionReference)) {
+                List<UUID> versions = childVersions(agentId, versionReference);
+                if (versions.size() != 1) return new AgentResolution(agentId, null, "RESOLVED",
+                        "AGENT_VERSION_REFERENCE_NOT_FOUND");
+                referencedVersion = versions.get(0);
+            }
+            return new AgentResolution(agentId, referencedVersion, "RESOLVED", null);
         });
+    }
+
+    private List<ArtifactMatch> matches(String predicate, MapSqlParameterSource parameters) {
+        return jdbc.query("""
+                select id,artifact_type,native_kind from ai_security_artifacts
+                 where tenant_id=:tenantId and provider=:provider and active=true and
+                """ + predicate + " limit 2", parameters, (rs, row) -> new ArtifactMatch(
+                rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3)));
+    }
+
+    private AgentResolution ambiguous() {
+        return new AgentResolution(null, null, "UNRESOLVED", "AGENT_REFERENCE_AMBIGUOUS");
+    }
+
+    private List<UUID> routedVersions(UUID aliasId, String versionReference) {
+        return jdbc.query("""
+                select v.id from ai_security_relationships r
+                  join ai_security_artifacts v on v.id=r.target_artifact_id and v.active=true
+                 where r.source_artifact_id=:aliasId and r.relationship_type='SERVES_VERSION' and r.active=true
+                   and (:version is null or v.provider_resource_id=:version or v.attributes_json->>'version'=:version)
+                 order by v.id limit 3
+                """, new MapSqlParameterSource().addValue("aliasId", aliasId)
+                .addValue("version", blank(versionReference) ? null : versionReference),
+                (rs, row) -> rs.getObject(1, UUID.class));
+    }
+
+    private List<UUID> childVersions(UUID agentId, String versionReference) {
+        return jdbc.query("""
+                select v.id from ai_security_artifacts v
+                  join ai_security_relationships r on r.source_artifact_id=v.id and r.target_artifact_id=:agentId
+                   and r.relationship_type='VERSION_OF' and r.active=true
+                 where v.active=true and (v.provider_resource_id=:version or v.attributes_json->>'version'=:version)
+                 order by v.id limit 2
+                """, new MapSqlParameterSource().addValue("agentId", agentId).addValue("version", versionReference),
+                (rs, row) -> rs.getObject(1, UUID.class));
+    }
+
+    private UUID relatedArtifact(UUID artifactId, String relationshipType, boolean artifactIsTarget) {
+        String sql = artifactIsTarget ? """
+                select source_artifact_id from ai_security_relationships
+                 where target_artifact_id=:id and relationship_type=:type and active=true limit 2
+                """ : """
+                select target_artifact_id from ai_security_relationships
+                 where source_artifact_id=:id and relationship_type=:type and active=true limit 2
+                """;
+        List<UUID> values = jdbc.query(sql, Map.of("id", artifactId, "type", relationshipType),
+                (rs, row) -> rs.getObject(1, UUID.class));
+        return values.size() == 1 ? values.get(0) : null;
     }
 
     private Result persist(Tenant tenant, UUID connectorId, RuntimeExecution input) {
@@ -210,8 +294,10 @@ public class AiAgentExecutionIngestionService {
                        case r.relationship_type when 'USES_MODEL' then 'MODEL' when 'USES_TOOL' then 'TOOL'
                             when 'USES_PROMPT' then 'PROMPT' else 'COMPONENT' end,:evidenceTime
                   from ai_security_relationships r
+                  join ai_security_artifacts participant on participant.id=r.target_artifact_id
                  where r.source_artifact_id=:source and r.active=true
                    and r.relationship_type in ('USES_MODEL','USES_TOOL','USES_PROMPT','HAS_COMPONENT')
+                   and participant.native_kind <> 'AWS_BEDROCK_AGENT_ALIAS'
                 on conflict (tenant_id,execution_id,artifact_id,participant_role) do nothing
                 """, new MapSqlParameterSource().addValue("tenantId", tenant.getId()).addValue("executionId", executionId)
                 .addValue("source", source).addValue("evidenceTime", Timestamp.from(evidenceTime)));
@@ -251,5 +337,6 @@ public class AiAgentExecutionIngestionService {
     public record Result(UUID executionId, boolean duplicate) { }
     public record AgentResolution(UUID agentArtifactId, UUID agentVersionArtifactId,
                                   String status, String diagnostic) { }
+    private record ArtifactMatch(UUID id, String artifactType, String nativeKind) { }
     public record CursorState(Instant timestamp, int lookbackDays, int overlapDays) { }
 }

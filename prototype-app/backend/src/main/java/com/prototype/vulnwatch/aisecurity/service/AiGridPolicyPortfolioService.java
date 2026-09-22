@@ -70,17 +70,6 @@ public class AiGridPolicyPortfolioService {
         catch (Exception ex) { return false; }
     }
 
-    @Deprecated
-    public List<FrameworkCoverage> owaspCoverage() { return TenantContext.runAsPlatform(() -> OWASP.stream().map(id -> new FrameworkCoverage(id, count("""
-            select count(*) from platform.ai_grid_policy_versions p
-             where p.lifecycle='PUBLISHED' and (
-                   p.framework_mappings_json->'OWASP_LLM_TOP_10' ? :id
-                   or (jsonb_typeof(p.framework_mappings_json)='array' and exists (
-                       select 1 from jsonb_array_elements(p.framework_mappings_json) mapping
-                        where mapping->>'framework'='OWASP_GENAI_LLM_TOP_10'
-                          and mapping->>'frameworkVersion'='2026'
-                          and mapping->>'controlId'=:id)))
-            """, Map.of("id", id)))).toList()); }
     public List<Candidate> candidates() { return TenantContext.runAsPlatform(() -> jdbc.query("""
             select id,title,source_type,status,technology_id,rationale,framework_mappings_json::text,risk_score,reach_score,evidence_maturity,remediation_clarity,owner,created_by,created_at,updated_at
               from platform.ai_grid_policy_candidates order by (risk_score*35+reach_score*20+evidence_maturity*30+remediation_clarity*15) desc,created_at desc
@@ -92,9 +81,7 @@ public class AiGridPolicyPortfolioService {
             """, new MapSqlParameterSource().addValue("id",id).addValue("title",command.title()).addValue("source",command.sourceType()).addValue("status",command.status()).addValue("technology",command.technologyId()).addValue("rationale",command.rationale()).addValue("mappings",json(command.frameworkMappings())).addValue("risk",score(command.riskScore())).addValue("reach",score(command.reachScore())).addValue("evidence",score(command.evidenceMaturity())).addValue("clarity",score(command.remediationClarity())).addValue("owner",command.owner()).addValue("actor",actor));
         audit.record("ai_grid.policy_candidate.created","ai_grid_policy_candidate",id.toString(),"{\"source\":\""+command.sourceType()+"\"}"); return candidates().stream().filter(candidate -> candidate.id().equals(id)).findFirst().orElseThrow(); }); }
     private int score(int value) { if(value<1||value>5) throw new IllegalArgumentException("Candidate scores must be between 1 and 5"); return value; }
-    private long count(String sql, Map<String,Object> params) { Long result=jdbc.queryForObject(sql,params,Long.class); return result==null?0:result; }
     private String json(Map<String,Object> value) { try{return mapper.writeValueAsString(value==null?Map.of():value);}catch(Exception ex){throw new IllegalArgumentException(ex);} }
-    public record FrameworkCoverage(String owaspId,long publishedPolicyCount) {}
     public record ControlCoverage(String controlId, String coverageStatus, List<PolicyControlMapping> policies) {}
     public record PolicyControlMapping(String policyId, String provider, String mappingType, String rationale,
                                        boolean conditional, String baseEvidenceTiersJson) {}

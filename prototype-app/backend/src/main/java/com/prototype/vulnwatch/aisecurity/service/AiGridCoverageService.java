@@ -188,7 +188,7 @@ public class AiGridCoverageService {
         return tenantExecution.run(tenant, () -> {
             CurrentState state = currentState();
             if (state == null) return List.of();
-            return jdbc.query("""
+            List<CoverageDimension> dimensions = new java.util.ArrayList<>(jdbc.query("""
                     with expanded as (
                         select c.*, d.dimension, d.value
                           from ai_grid_current_expected_candidates c
@@ -218,7 +218,23 @@ public class AiGridCoverageService {
                     """, Map.of("epochId", state.epochId()), (rs, n) -> new CoverageDimension(
                     state.epochId(), rs.getString("dimension"), rs.getString("value"),
                     rs.getLong("expected"), rs.getLong("recorded"), rs.getLong("missing"),
-                    rs.getLong("pass"), rs.getLong("fail"), rs.getLong("no_decision")));
+                    rs.getLong("pass"), rs.getLong("fail"), rs.getLong("no_decision"))));
+            dimensions.addAll(jdbc.query("""
+                    select case when gap.id is null then 'ATTACHED' else 'UNATTACHED_REQUIRED' end value,
+                           count(*) expected,
+                           count(*) filter (where gap.id is null) recorded,
+                           count(*) filter (where gap.id is not null) missing
+                      from ai_grid_current_coverage_artifacts artifact
+                      left join ai_grid_coverage_gaps gap on gap.coverage_epoch_id=:epochId
+                       and gap.artifact_id=artifact.artifact_id and gap.state='UNATTACHED_RESOURCE'
+                       and gap.status='OPEN'
+                     where artifact.epoch_id=:epochId
+                     group by value order by value
+                    """, Map.of("epochId", state.epochId()), (rs, n) -> new CoverageDimension(
+                    state.epochId(), "ASSOCIATION", rs.getString("value"), rs.getLong("expected"),
+                    rs.getLong("recorded"), rs.getLong("missing"), rs.getLong("recorded"),
+                    rs.getLong("missing"), 0)));
+            return List.copyOf(dimensions);
         });
     }
 

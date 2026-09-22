@@ -36,6 +36,33 @@ class AiSecurityMetadataSanitizerTest {
     }
 
     @Test
+    void registersEveryAwsConnectorMaturityNativeKind() {
+        for (String nativeKind : List.of(
+                "AWS_BEDROCK_AGENT_VERSION", "AWS_BEDROCK_AGENT_ALIAS", "AWS_BEDROCK_ACTION_GROUP",
+                "AWS_BEDROCK_AGENT_INSTRUCTION", "AWS_BEDROCK_AGENT_PROMPT", "AWS_IAM_ROLE",
+                "AWS_AGENTCORE_RUNTIME", "AWS_AGENTCORE_RUNTIME_VERSION", "AWS_AGENTCORE_BROWSER",
+                "AWS_AGENTCORE_CODE_INTERPRETER", "AWS_AGENTCORE_MEMORY")) {
+            var result = sanitizer.sanitize("AWS", nativeKind, Map.of("status", "ACTIVE"));
+            assertEquals("ACTIVE", result.attributes().get("status"), nativeKind);
+            assertFalse(result.rejectedFieldNames().contains("nativeKind"), nativeKind);
+        }
+    }
+
+    @Test
+    void retainsReviewedAwsVersionAliasToolAndIdentityMetadata() {
+        var alias = sanitizer.sanitize("AWS", "AWS_BEDROCK_AGENT_ALIAS", Map.of(
+                "aliasId", "alias-1", "routedVersions", List.of("3"), "deployedArtifact", true));
+        var tool = sanitizer.sanitize("AWS", "AWS_BEDROCK_ACTION_GROUP", Map.of(
+                "actionGroupId", "tool-1", "lambdaArn", "arn:aws:lambda:us-east-1:123:function:tool"));
+        var role = sanitizer.sanitize("AWS", "AWS_IAM_ROLE", Map.of(
+                "iamWildcardActions", false, "iamPassRole", true, "permissionBoundaryAttached", true));
+
+        assertEquals(List.of("3"), alias.attributes().get("routedVersions"));
+        assertEquals("tool-1", tool.attributes().get("actionGroupId"));
+        assertEquals(true, role.attributes().get("iamPassRole"));
+    }
+
+    @Test
     void permitsOnlySafeAzureDataStorePostureMetadata() {
         var result = sanitizer.sanitize("AZURE", "AZURE_STORAGE_ACCOUNTS", Map.of(
                 "storeType", "AZURE_STORAGE", "connectionString", "AccountKey=secret", "headers", Map.of("x-api-key", "secret")));

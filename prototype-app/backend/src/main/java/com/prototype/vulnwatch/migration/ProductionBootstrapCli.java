@@ -3,7 +3,6 @@ package com.prototype.vulnwatch.migration;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.client.ResendEmailClient;
 import com.prototype.vulnwatch.service.TenantSchemaService;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -17,8 +16,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
-import org.flywaydb.core.api.output.RepairResult;
-import org.flywaydb.core.api.output.ValidateResult;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
@@ -30,12 +27,6 @@ public final class ProductionBootstrapCli {
     private static final String DEFAULT_TENANT_SLUG = "default-workspace";
     private static final String DEFAULT_TENANT_SCHEMA = "tenant_default";
     private static final String LOCK_NAME = "scout-production-bootstrap";
-    // Retained only for backward-compatible opt-in repair code; normal bootstrap never invokes it.
-    private static final String REPAIRABLE_TENANT_MIGRATION_VERSION = "45";
-    private static final int REPAIRABLE_TENANT_MIGRATION_CHECKSUM = -1614728776;
-    private static final int CURRENT_TENANT_MIGRATION_CHECKSUM = 1898972758;
-    private static final String V45_MIGRATION_RESOURCE = "db/migration/tenant/V45__ai_security_bounded_context.sql";
-    private static final String V45_CONNECTOR_CONFIG_TABLE = "ai_security_connector_configs";
     private static final UUID DEFAULT_TENANT_ID = UUID.nameUUIDFromBytes(
             "scout-default-tenant".getBytes(StandardCharsets.UTF_8));
 
@@ -404,162 +395,6 @@ public final class ProductionBootstrapCli {
                             + " expected=" + templateChecksum + " actual=" + tenantChecksum);
         }
         markCurrent(connection, tenant, tenantChecksum, runId);
-    }
-
-    private static int repairTenantV45ChecksumsIfApproved(
-            Connection connection,
-            Config config
-    ) throws SQLException {
-        if (!config.repairTenantV45Checksum()) {
-            return 0;
-        }
-        int repairedTenantCount = 0;
-        for (TenantSchema tenant : tenants(connection, "ACTIVE")) {
-            if (repairTenantV45ChecksumIfApproved(connection, config, tenant)) {
-                repairedTenantCount++;
-            }
-        }
-        return repairedTenantCount;
-    }
-
-    private static boolean repairTenantV45ChecksumIfApproved(
-            Connection connection,
-            Config config,
-            TenantSchema tenant
-    ) throws SQLException {
-        Flyway flyway = tenantFlyway(config, tenant);
-        try (PreparedStatement statement = connection.prepareStatement("""
-                select version, checksum
-                from %s.tenant_schema_history
-                where (version = ? or version like ?) and success
-                """.formatted(quotedIdentifier(tenant.schemaName())))) {
-            statement.setString(1, REPAIRABLE_TENANT_MIGRATION_VERSION);
-            statement.setString(2, REPAIRABLE_TENANT_MIGRATION_VERSION + ".%");
-            try (ResultSet result = statement.executeQuery()) {
-                if (!result.next()) {
-                    throw new BootstrapFailure(
-                            "tenant_checksum_repair_refused",
-                            "V45 history record was not found");
-                }
-                String observedVersion = result.getString("version");
-                int observedChecksum = result.getInt("checksum");
-                if (result.next()) {
-                    throw new BootstrapFailure(
-                            "tenant_checksum_repair_refused",
-                            "V45 checksum lookup returned more than one migration");
-                }
-                if (observedChecksum == CURRENT_TENANT_MIGRATION_CHECKSUM) {
-                    return false;
-                }
-                if (observedChecksum != REPAIRABLE_TENANT_MIGRATION_CHECKSUM) {
-                    throw new BootstrapFailure(
-                            "tenant_checksum_repair_refused",
-                            "V45 history checksum is not approved: version=" + observedVersion
-                                    + " checksum=" + observedChecksum);
-                }
-            }
-        }
-
-        RepairResult repair = flyway.repair();
-        if (repair.migrationsAligned == null
-                || repair.migrationsAligned.size() != 1
-                || !REPAIRABLE_TENANT_MIGRATION_VERSION.equals(repair.migrationsAligned.get(0).version)) {
-            throw new BootstrapFailure(
-                    "tenant_checksum_repair_refused",
-                    "Repair changed migration history outside the approved V45 checksum");
-        }
-        ValidateResult repairedValidation = flyway.validateWithResult();
-        if (!repairedValidation.validationSuccessful) {
-            throw new BootstrapFailure(
-                    "tenant_checksum_repair_failed",
-                    "V45 checksum repair did not restore Flyway validation");
-        }
-        return true;
-    }
-
-    private static int reconcileMissingV45SchemaObjects(Connection connection) throws Exception {
-        int reconciledTenantCount = 0;
-        for (TenantSchema tenant : tenants(connection, "ACTIVE")) {
-            if (!hasSingleSuccessfulV45History(connection, tenant) || tableExists(connection, tenant, V45_CONNECTOR_CONFIG_TABLE)) {
-                continue;
-            }
-            executeV45MigrationIdempotently(connection, tenant);
-            if (!tableExists(connection, tenant, V45_CONNECTOR_CONFIG_TABLE)) {
-                throw new BootstrapFailure(
-                        "tenant_v45_schema_reconciliation_failed",
-                        "V45 reconciliation did not create " + V45_CONNECTOR_CONFIG_TABLE + " in " + tenant.schemaName());
-            }
-            reconciledTenantCount++;
-        }
-        return reconciledTenantCount;
-    }
-
-    private static boolean hasSingleSuccessfulV45History(Connection connection, TenantSchema tenant) throws SQLException {
-        if (!tableExists(connection, tenant, "tenant_schema_history")) {
-            return false;
-        }
-        try (PreparedStatement statement = connection.prepareStatement("""
-                select count(*)
-                from %s.tenant_schema_history
-                where (version = ? or version like ?) and success
-                """.formatted(quotedIdentifier(tenant.schemaName())))) {
-            statement.setString(1, REPAIRABLE_TENANT_MIGRATION_VERSION);
-            statement.setString(2, REPAIRABLE_TENANT_MIGRATION_VERSION + ".%");
-            try (ResultSet result = statement.executeQuery()) {
-                result.next();
-                int count = result.getInt(1);
-                if (count > 1) {
-                    throw new BootstrapFailure(
-                            "tenant_v45_schema_reconciliation_refused",
-                            "V45 history lookup returned more than one migration for " + tenant.schemaName());
-                }
-                return count == 1;
-            }
-        }
-    }
-
-    private static boolean tableExists(Connection connection, TenantSchema tenant, String tableName) throws SQLException {
-        try (PreparedStatement statement = connection.prepareStatement("""
-                select exists (
-                    select 1
-                    from information_schema.tables
-                    where table_schema = ? and table_name = ?
-                )
-                """)) {
-            statement.setString(1, tenant.schemaName());
-            statement.setString(2, tableName);
-            try (ResultSet result = statement.executeQuery()) {
-                result.next();
-                return result.getBoolean(1);
-            }
-        }
-    }
-
-    private static void executeV45MigrationIdempotently(Connection connection, TenantSchema tenant) throws Exception {
-        try (InputStream stream = ProductionBootstrapCli.class.getClassLoader().getResourceAsStream(V45_MIGRATION_RESOURCE)) {
-            if (stream == null) {
-                throw new BootstrapFailure(
-                        "tenant_v45_schema_reconciliation_failed",
-                        "Missing approved V45 migration resource");
-            }
-            String script = new String(stream.readAllBytes(), StandardCharsets.UTF_8)
-                    .replace("${tenantId}", tenant.tenantId().toString())
-                    .replace("${tenantSchema}", tenant.schemaName());
-            boolean originalAutoCommit = connection.getAutoCommit();
-            try {
-                connection.setAutoCommit(false);
-                try (Statement statement = connection.createStatement()) {
-                    statement.execute("set local search_path to " + quotedIdentifier(tenant.schemaName()) + ", platform");
-                    statement.execute(script);
-                }
-                connection.commit();
-            } catch (Exception exception) {
-                connection.rollback();
-                throw exception;
-            } finally {
-                connection.setAutoCommit(originalAutoCommit);
-            }
-        }
     }
 
     private static void migrateTenant(Config config, TenantSchema tenant) {
@@ -1100,7 +935,6 @@ public final class ProductionBootstrapCli {
             String runtimeDbPassword,
             String expectedDatabase,
             boolean reportOnly,
-            boolean repairTenantV45Checksum,
             boolean platformOwnerBootstrapEnabled,
             String platformOwnerBootstrapEmail,
             String platformOwnerBootstrapExternalSubject,
@@ -1136,7 +970,6 @@ public final class ProductionBootstrapCli {
                     Boolean.parseBoolean(env(
                             "BOOTSTRAP_REPORT_ONLY",
                             env("APP_SCHEMA_MIGRATION_REPORT_ONLY", "false"))),
-                    Boolean.parseBoolean(env("BOOTSTRAP_REPAIR_TENANT_V45_CHECKSUM", "false")),
                     ownerBootstrapEnabled,
                     ownerBootstrapEmail,
                     env("APP_SECURITY_BOOTSTRAP_PLATFORM_OWNERS_USERS_0_EXTERNAL_SUBJECT", ownerBootstrapEmail),

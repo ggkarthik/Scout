@@ -19,6 +19,7 @@ import com.prototype.vulnwatch.aisecurity.service.AiGridOwnershipService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridApiService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridBudgetService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridCoverageService;
+import com.prototype.vulnwatch.aisecurity.service.AiGridCapabilityService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridRetentionService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridSystemService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridReconciliationService;
@@ -74,6 +75,7 @@ class AiSecurityObservationPostgresIntegrationTest {
     @Autowired private com.prototype.vulnwatch.aisecurity.service.AiSecurityApiService aiSecurityApiService;
     @Autowired private AiGridBudgetService budgetService;
     @Autowired private AiGridCoverageService coverageService;
+    @Autowired private AiGridCapabilityService capabilityService;
     @Autowired private AiGridRetentionService retentionService;
     @Autowired private AiGridSystemService systemService;
     @Autowired private AiGridRunMetricsService runMetricsService;
@@ -85,6 +87,44 @@ class AiSecurityObservationPostgresIntegrationTest {
 
     @MockBean private IngestionJobWorkerService ingestionJobWorkerService;
     @MockBean private FindingDeltaQueueService findingDeltaQueueService;
+
+    @Test
+    void capabilityManifestsFinalizeMissingScopesExactlyOnce() {
+        Tenant tenant = provision("Capability Manifest Co", "capability-manifest-co");
+        UUID connectorId = connectorService.save(
+                tenant,
+                new AiSecurityAwsConnectorService.ConnectorConfigRequest(
+                        "123456789012", null, null, List.of("us-east-1"), true)
+        ).id();
+        UUID runId = syncRunFacade.start(tenant).getId();
+
+        capabilityService.registerRun(tenant, runId, "AWS", connectorId, "123456789012",
+                List.of("us-east-1"), List.of("BEDROCK_AGENTS", "IAM_GLOBAL"));
+        observationService.ingest(tenant, new ObservationEnvelopeV1(
+                AiSecurityObservationService.CONTRACT_VERSION, runId, connectorId, tenant.getId(), "AWS",
+                "123456789012", "us-east-1", "BEDROCK_AGENTS",
+                "AWS:123456789012:us-east-1:BEDROCK_AGENTS", 0, 1,
+                runId + ":capability:0", "capability-manifest-hash", Instant.now(), ScopeStatus.COMPLETE,
+                List.of(), List.of(), List.of()));
+
+        capabilityService.finalizeRun(tenant, runId);
+        capabilityService.finalizeRun(tenant, runId);
+
+        Map<String, String> states = tenantExecution.run(tenant, () -> jdbc.query(
+                "select capability_id,status from ai_grid_capability_observations where run_id=:runId",
+                Map.of("runId", runId), rs -> {
+                    Map<String, String> result = new java.util.HashMap<>();
+                    while (rs.next()) result.put(rs.getString(1), rs.getString(2));
+                    return result;
+                }));
+        assertEquals("COMPLETE", states.get("BEDROCK_AGENTS"));
+        assertEquals("PARTIAL", states.get("IAM_ROLE_POLICIES"));
+        assertEquals("PARTIAL", states.get("AWS_EFFECTIVE_ACCESS"));
+        assertEquals(3, states.size(), "finalization is idempotent and emits one observation per manifest");
+        assertEquals(2, tenantExecution.run(tenant, () -> jdbc.queryForObject(
+                "select count(*) from ai_grid_capability_observations where run_id=:runId and reason_code='MISSING_EVIDENCE_SCOPE'",
+                Map.of("runId", runId), Integer.class)));
+    }
 
     @Test
     void enforcesReplayAndSnapshotCompletenessWithinTenantBoundary() {
@@ -216,6 +256,87 @@ class AiSecurityObservationPostgresIntegrationTest {
         assertEquals(0, tenantExecution.run(otherTenant, () -> jdbc.queryForObject(
                 "select count(*) from ai_security_artifacts where provider_resource_id = :resourceId",
                 Map.of("resourceId", resourceId), Integer.class)));
+    }
+
+    @Test
+    void partialScopeCannotDeletePreviouslyOwnedAttributes() {
+        Tenant tenant = provision("Partial Attribute Co", "partial-attribute-co");
+        UUID connectorId = connectorService.save(tenant,
+                new AiSecurityAwsConnectorService.ConnectorConfigRequest(
+                        "123456789012", null, null, List.of("us-east-1"), true)).id();
+        String resourceId = "arn:aws:bedrock:us-east-1:123456789012:agent/partial-attribute-agent";
+
+        UUID completeRun = syncRunFacade.start(tenant).getId();
+        observationService.ingest(tenant, envelope(tenant, connectorId, completeRun, "partial-owned-1",
+                ScopeStatus.COMPLETE, List.of(new ArtifactObservation(resourceId, "AI_AGENT", "AWS_BEDROCK_AGENT",
+                        "Partial agent", Map.of("deployedArtifact", true, "iamWildcardActions", true)))));
+        UUID partialRun = syncRunFacade.start(tenant).getId();
+        observationService.ingest(tenant, envelope(tenant, connectorId, partialRun, "partial-owned-2",
+                ScopeStatus.PARTIAL, List.of(new ArtifactObservation(resourceId, "AI_AGENT", "AWS_BEDROCK_AGENT",
+                        "Partial agent", Map.of("iamWildcardActions", false)))));
+
+        tenantExecution.run(tenant, () -> {
+            String attributes = jdbc.queryForObject("""
+                    select attributes_json::text from ai_security_artifacts where provider_resource_id=:resourceId
+                    """, Map.of("resourceId", resourceId), String.class);
+            assertTrue(attributes.contains("deployedArtifact"));
+            assertTrue(attributes.contains("false"));
+            return null;
+        });
+    }
+
+    @Test
+    void persistsCanonicalAwsVersionAliasAndToolGraph() {
+        Tenant tenant = provision("AWS Definition Graph Co", "aws-definition-graph-co");
+        UUID connectorId = connectorService.save(tenant,
+                new AiSecurityAwsConnectorService.ConnectorConfigRequest(
+                        "123456789012", null, null, List.of("us-east-1"), true)).id();
+        UUID runId = syncRunFacade.start(tenant).getId();
+        capabilityService.registerRun(tenant, runId, "AWS", connectorId, "123456789012",
+                List.of("us-east-1"), List.of("BEDROCK_AGENT_VERSIONS"));
+        String agentId = "arn:aws:bedrock:us-east-1:123456789012:agent/graph-agent";
+        String versionId = agentId + "/version/3";
+        String aliasId = agentId + "/alias/production";
+        String toolId = versionId + "/tool/tool-1";
+        String lambdaId = "arn:aws:lambda:us-east-1:123456789012:function:tool-1";
+        List<ArtifactObservation> artifacts = List.of(
+                new ArtifactObservation(agentId, "AI_AGENT", "AWS_BEDROCK_AGENT", "Graph agent", Map.of()),
+                new ArtifactObservation(versionId, "AI_AGENT_VERSION", "AWS_BEDROCK_AGENT_VERSION", "Graph agent v3",
+                        Map.of("version", "3", "status", "PREPARED")),
+                new ArtifactObservation(aliasId, "AI_COMPONENT", "AWS_BEDROCK_AGENT_ALIAS", "production",
+                        Map.of("aliasId", "production", "routedVersions", List.of("3"))),
+                new ArtifactObservation(toolId, "AI_TOOL", "AWS_BEDROCK_ACTION_GROUP", "tool-1",
+                        Map.of("actionGroupId", "tool-1", "lambdaArn", lambdaId)),
+                new ArtifactObservation(lambdaId, "SUPPORTING_RESOURCE", "AWS_LAMBDA_FUNCTION", "tool-1",
+                        Map.of("lambdaArn", lambdaId)));
+        List<RelationshipObservation> relationships = List.of(
+                new RelationshipObservation(versionId, agentId, "VERSION_OF", Map.of()),
+                new RelationshipObservation(agentId, aliasId, "HAS_COMPONENT", Map.of()),
+                new RelationshipObservation(aliasId, versionId, "SERVES_VERSION", Map.of()),
+                new RelationshipObservation(versionId, toolId, "USES_TOOL", Map.of()),
+                new RelationshipObservation(toolId, lambdaId, "IMPLEMENTED_BY", Map.of()));
+        String scopeKey = "AWS:123456789012:us-east-1:BEDROCK_AGENT_VERSIONS";
+        observationService.ingest(tenant, new ObservationEnvelopeV1(
+                AiSecurityObservationService.CONTRACT_VERSION, runId, connectorId, tenant.getId(), "AWS",
+                "123456789012", "us-east-1", "BEDROCK_AGENT_VERSIONS", scopeKey, 0, 1,
+                runId + ":versions:0", "definition-graph-hash", Instant.now(), ScopeStatus.COMPLETE,
+                artifacts, relationships, List.of()));
+        capabilityService.finalizeRun(tenant, runId);
+
+        tenantExecution.run(tenant, () -> {
+            assertEquals(5, jdbc.queryForObject("select count(*) from ai_security_artifacts where active=true",
+                    Map.of(), Integer.class));
+            assertEquals(5, jdbc.queryForObject("select count(*) from ai_security_relationships where active=true",
+                    Map.of(), Integer.class));
+            assertEquals("AI_COMPONENT", jdbc.queryForObject(
+                    "select artifact_type from ai_security_artifacts where provider_resource_id=:id",
+                    Map.of("id", aliasId), String.class));
+            assertEquals("COMPLETE", jdbc.queryForObject("""
+                    select status from ai_grid_capability_observations
+                     where run_id=:runId and capability_id='BEDROCK_AGENT_VERSIONS_ALIASES'
+                    """, Map.of("runId", runId), String.class));
+            return null;
+        });
     }
 
     @Test

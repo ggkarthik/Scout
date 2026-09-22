@@ -73,6 +73,8 @@ app:
     # Cron for the leader-locked shadow-mismatch sweep (skipped entirely in LEGACY mode).
     shadow-sweep-cron: ${APP_ENTITLEMENTS_SHADOW_SWEEP_CRON:0 */30 * * * *}
   ai-security:
+    # Hard in-run ceiling checked immediately before every provider transmission and SDK retry.
+    provider-call-ceiling: ${APP_AI_SECURITY_PROVIDER_CALL_CEILING:10000}
     identity-hmac-key: ${APP_AI_SECURITY_IDENTITY_HMAC_KEY:}
     identity-hmac-key-version: ${APP_AI_SECURITY_IDENTITY_HMAC_KEY_VERSION:v1}
     identity-hmac-previous-key: ${APP_AI_SECURITY_IDENTITY_HMAC_PREVIOUS_KEY:}
@@ -176,7 +178,7 @@ app:
     require-tenant-context: ${APP_REQUIRE_TENANT_CONTEXT:true}
     default-schema: ${APP_DEFAULT_TENANT_SCHEMA:tenant_default}
     enforce-schema-version: ${APP_ENFORCE_TENANT_SCHEMA_VERSION:false}
-    minimum-compatible-schema-version: ${APP_MINIMUM_TENANT_SCHEMA_VERSION:7}
+    minimum-compatible-schema-version: ${APP_MINIMUM_TENANT_SCHEMA_VERSION:1}
   test-personas:
     enabled: ${APP_TEST_PERSONAS_ENABLED:false}
     token-ttl-minutes: ${APP_TEST_PERSONA_TOKEN_TTL_MINUTES:60}

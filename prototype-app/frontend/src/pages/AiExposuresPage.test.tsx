@@ -11,7 +11,7 @@ describe('AiExposuresPage', () => {
     vi.spyOn(api, 'listAiGridExposures').mockResolvedValue({
       nextCursor: null,
       items: [{
-        id: 'exposure-1', correlationId: 'R2_EXTERNAL_SENSITIVE_ACCESS', correlationVersion: '1.0.0',
+        id: 'exposure-1', correlationId: 'R2_EXTERNAL_SENSITIVE_ACCESS', correlationVersion: '2.0.0',
         title: 'Externally reachable AI path to sensitive data', severity: 'CRITICAL',
         state: 'EXPOSURE_HYPOTHESIS', status: 'OPEN', confidence: 0.6,
         rootCauseArtifactId: 'artifact-1', firstObservedAt: '2026-08-01T00:00:00Z',

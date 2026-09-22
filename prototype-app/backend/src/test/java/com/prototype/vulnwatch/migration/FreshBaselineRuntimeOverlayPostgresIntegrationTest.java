@@ -13,20 +13,19 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 import org.flywaydb.core.Flyway;
-import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 @EnabledIfSystemProperty(named = "run.postgres.it", matches = "true")
-class RuntimeOverlayV7PostgresIntegrationTest {
+class FreshBaselineRuntimeOverlayPostgresIntegrationTest {
     private static final LocalPostgresTestDatabase.DatabaseConfig DATABASE =
-            LocalPostgresTestDatabase.provision("runtime_overlay_v7");
+            LocalPostgresTestDatabase.provision("fresh_baseline_runtime_overlay");
     private static final UUID TENANT_ID = UUID.fromString("e5fe0d29-1d64-4175-8ce6-c34f42b214cc");
 
     @Test
-    void v7TenantServesAnEmptyRuntimeOverlayWithoutV8Indexes() throws Exception {
+    void freshBaselineServesAnEmptyRuntimeOverlay() throws Exception {
         Flyway.configure().dataSource(DATABASE.url(), DATABASE.username(), DATABASE.password())
                 .defaultSchema("public").locations("filesystem:src/main/resources/db/migration/postgres_reset")
                 .load().migrate();
@@ -34,9 +33,9 @@ class RuntimeOverlayV7PostgresIntegrationTest {
                 .schemas("tenant_default").defaultSchema("tenant_default").table("tenant_schema_history")
                 .locations("filesystem:src/main/resources/db/migration/tenant")
                 .placeholders(Map.of("tenantId", TENANT_ID.toString(), "tenantSchema", "tenant_default"))
-                .target(MigrationVersion.fromVersion("7")).load();
+                .load();
         tenant.migrate();
-        assertEquals("7", tenant.info().current().getVersion().getVersion());
+        assertEquals("1", tenant.info().current().getVersion().getVersion());
 
         try (Connection connection = DriverManager.getConnection(DATABASE.url(), DATABASE.username(), DATABASE.password())) {
             try (Statement statement = connection.createStatement()) {

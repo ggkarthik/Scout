@@ -33,6 +33,8 @@ function buildNode(overrides: Partial<AiSecurityArtifact> = {}): AiSecurityArtif
     piiInfoTypes: [],
     piiFindingCount: 0,
     piiLastScannedAt: null,
+    attachmentState: 'ROOT',
+    systemIds: [],
     ...overrides,
   };
 }
@@ -45,7 +47,7 @@ function buildGraph(overrides: Partial<AiSecurityGraph> = {}): AiSecurityGraph {
     ],
     edges: [{
       id: 'edge-1',
-      relationshipType: 'INVOKES_LAMBDA',
+      relationshipType: 'IMPLEMENTED_BY',
       sourceArtifactId: 'artifact-1',
       sourceName: 'depth-agent',
       targetArtifactId: 'artifact-2',

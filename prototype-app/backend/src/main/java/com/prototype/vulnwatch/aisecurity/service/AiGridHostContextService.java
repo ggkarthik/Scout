@@ -41,9 +41,14 @@ public class AiGridHostContextService {
             throw new IllegalArgumentException("Producer is not authorized for this host-context fact");
         if (input.confidence() == null || input.confidence() < 0 || input.confidence() > 1)
             throw new IllegalArgumentException("Trusted validating evidence requires calibrated confidence");
+        if (producer.requiresExpiry() && input.validUntil() == null)
+            throw new IllegalArgumentException("This trusted evidence producer requires validUntil");
+        Instant observedAt = input.observedAt();
+        if (producer.bucketByUtcDay() && observedAt != null)
+            observedAt = observedAt.truncatedTo(java.time.temporal.ChronoUnit.DAYS);
         return persist(tenant, artifactId, producerId, new HostFactInput(input.factKey(), input.value(), input.state(),
                 producer.provenance(), producer.evidenceClass(), producer.sourcePort(), input.evidenceReference(),
-                input.observedAt(), input.validFrom(), input.validUntil(), producer.method(), producer.methodVersion(),
+                observedAt, input.validFrom(), input.validUntil(), producer.method(), producer.methodVersion(),
                 input.confidence()));
     }
 
@@ -147,16 +152,23 @@ public class AiGridHostContextService {
     private static final Map<String, Producer> PRODUCERS = Map.of(
             "SCOUT_REACHABILITY_GRAPH", new Producer("VERIFIED", "GRAPH_ANALYSIS", "REACHABILITY",
                     "SCOUT_REACHABILITY_GRAPH", "1.0.0", Set.of("network.internet_reachability_verified",
-                    "identity.inadequate_authentication_verified")),
+                    "identity.inadequate_authentication_verified"), false, false),
             "SCOUT_DATA_SECURITY", new Producer("CONFIRMED", "DSPM", "DATA",
-                    "SCOUT_DATA_SECURITY", "1.0.0", Set.of("data.sensitive_access_confirmed")),
+                    "SCOUT_DATA_SECURITY", "1.0.0", Set.of("data.sensitive_access_confirmed"), false, false),
             "SCOUT_IDENTITY_GRAPH", new Producer("DERIVED", "GRAPH_ANALYSIS", "IDENTITY",
                     "SCOUT_IDENTITY_GRAPH", "1.0.0", Set.of("identity.effective_excessive_privilege_derived",
-                    "impact.secret_or_consequential_access_confirmed")),
+                    "impact.secret_or_consequential_access_confirmed"), false, false),
             "SCOUT_RUNTIME_CONTROL", new Producer("VERIFIED", "RUNTIME_OBSERVATION", "ASSET",
                     "SCOUT_RUNTIME_CONTROL", "1.0.0", Set.of("input.untrusted_path_verified",
-                    "agent.autonomous_execution_verified", "control.execution_boundary_inadequate_verified"))
+                    "agent.autonomous_execution_verified", "control.execution_boundary_inadequate_verified"), false, false),
+            "SCOUT_AWS_ACTIVITY", new Producer("OBSERVED", "RUNTIME_OBSERVATION", "ASSET",
+                    "SCOUT_AWS_ACTIVITY", "1.0.0", Set.of(
+                    "activity.agent_invocation_observed", "activity.tool_use_observed",
+                    "activity.identity_use_observed", "activity.external_action_observed",
+                    "activity.sensitive_data_access_observed", "activity.invocation_count_observed",
+                    "activity.agent_last_observed_at"), true, true)
     );
     private record Producer(String provenance, String evidenceClass, String sourcePort, String method,
-                            String methodVersion, Set<String> factKeys) {}
+                            String methodVersion, Set<String> factKeys, boolean requiresExpiry,
+                            boolean bucketByUtcDay) {}
 }

@@ -7,6 +7,7 @@ import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ObservationE
 import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.RelationshipObservation;
 import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ScopeStatus;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityObservationService;
+import com.prototype.vulnwatch.aisecurity.service.AiGridCapabilityService;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityConnectorFeatureFlagService;
 import com.prototype.vulnwatch.aisecurity.service.AiSecuritySyncRunFacade;
 import com.prototype.vulnwatch.domain.Tenant;
@@ -29,14 +30,17 @@ public class CopilotStudioDiscoveryService {
     private final CopilotStudioConnectorService configs; private final AiSecurityAzureCredentialService credentials;
     private final CopilotStudioDataverseClient dataverse; private final AiSecurityObservationService observations;
     private final AiSecuritySyncRunFacade runs;
+    private final AiGridCapabilityService capabilities;
     private final AiSecurityConnectorFeatureFlagService featureFlags;
     private final boolean enabled;
     public CopilotStudioDiscoveryService(CopilotStudioConnectorService configs, AiSecurityAzureCredentialService credentials,
                                          CopilotStudioDataverseClient dataverse, AiSecurityObservationService observations,
-                                         AiSecuritySyncRunFacade runs, AiSecurityConnectorFeatureFlagService featureFlags,
+                                         AiSecuritySyncRunFacade runs, AiGridCapabilityService capabilities,
+                                         AiSecurityConnectorFeatureFlagService featureFlags,
                                          @Value("${app.ai-security.copilot.enabled:false}") boolean enabled) {
         this.configs = configs; this.credentials = credentials; this.dataverse = dataverse; this.observations = observations;
         this.runs = runs;
+        this.capabilities = capabilities;
         this.featureFlags = featureFlags;
         this.enabled = enabled;
     }
@@ -45,11 +49,15 @@ public class CopilotStudioDiscoveryService {
         var config = configs.required(tenant, connectorId);
         if (!config.discoveryEnabled() || config.killSwitch()) throw new ResponseStatusException(HttpStatus.CONFLICT, "Copilot discovery is disabled");
         UUID runId = runs.start(tenant, AiSecuritySyncRunFacade.COPILOT_SYNC_TYPE).getId();
+        capabilities.registerRun(tenant, runId, "MICROSOFT_COPILOT", connectorId,
+                config.organizationUrl(), List.of("GLOBAL"), List.of("COPILOT_STUDIO"));
         try {
             Result result = collect(tenant, connectorId, config, runId);
+            capabilities.finalizeRun(tenant, runId);
             runs.complete(tenant.getId(), runId, result.artifacts(), result.incompleteScopes(), null);
             return result;
         } catch (RuntimeException error) {
+            capabilities.finalizeRun(tenant, runId);
             runs.fail(tenant.getId(), runId, "Copilot Studio discovery failed: " + error.getClass().getSimpleName());
             throw error;
         }
@@ -99,18 +107,15 @@ public class CopilotStudioDiscoveryService {
                     case COMPONENT -> "HAS_COMPONENT";
                 };
                 relationships.add(edge(versionId, componentId, relationship));
-                if (component.category() == CopilotStudioDataverseClient.ComponentCategory.TOOL) {
-                    String botId = id(config.organizationUrl(), "bots", component.botId());
-                    relationships.add(edge(botId, componentId, "USES_TOOL"));
-                }
             }
         }
         List<Diagnostic> diagnostics = source.coverageGaps().stream().map(gap -> new Diagnostic(
                 "COPILOT_" + gap.scope(), "Copilot scope is incomplete",
                 gap.status() == 429 || gap.status() >= 500, List.of(), null)).toList();
         ScopeStatus status = diagnostics.isEmpty() ? ScopeStatus.COMPLETE : ScopeStatus.PARTIAL;
+        String scopeKey = "MICROSOFT_COPILOT:" + config.organizationUrl() + ":GLOBAL:COPILOT_STUDIO";
         observations.ingest(tenant, new ObservationEnvelopeV1("OBSERVATION_V1", runId, connectorId, tenant.getId(), "MICROSOFT_COPILOT", null,
-                config.organizationUrl(), "GLOBAL", "COPILOT_STUDIO", config.organizationUrl(), 1, 1, hash(runId + "|" + artifacts.size()), hash("copilot|" + artifacts.size() + "|" + relationships.size()), Instant.now(), status, artifacts, relationships, diagnostics));
+                config.organizationUrl(), "GLOBAL", "COPILOT_STUDIO", scopeKey, 1, 1, hash(runId + "|" + artifacts.size()), hash("copilot|" + artifacts.size() + "|" + relationships.size()), Instant.now(), status, artifacts, relationships, diagnostics));
         return new Result(runId, artifacts.size(), diagnostics.size(), status);
     }
     public CopilotStudioDataverseClient.PermissionTest test(Tenant tenant, UUID connectorId) {

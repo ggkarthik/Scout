@@ -1,7 +1,7 @@
 package com.prototype.vulnwatch.aisecurity.service;
 
-import java.util.Set;
 import java.util.Locale;
+import java.util.Set;
 
 /** Canonical AI Grid vocabulary shared by collectors, graph derivation and API validation. */
 public final class AiSecurityTaxonomy {
@@ -21,11 +21,7 @@ public final class AiSecurityTaxonomy {
     public static final Set<String> EXPLICIT_ARTIFACT_TYPES = Set.of(
             "AI_AGENT", "AI_AGENT_VERSION", "AI_PROMPT", "AI_TOOL", "AI_COMPONENT", "AI_MODEL",
             "AI_GUARDRAIL", "MCP_GATEWAY", "MCP_TARGET", "MCP_SERVER", "KNOWLEDGE_BASE",
-            "DATA_SOURCE", "DATA_STORE", "SEARCH_INDEX", "OTHER_AI_ARTIFACT");
-
-    /** These edges describe lineage/definition, not system membership. */
-    public static final Set<String> NON_MEMBERSHIP_RELATIONSHIPS = Set.of(
-            VERSION_OF, ACTIVE_VERSION, USES_PROMPT, HAS_COMPONENT);
+            "DATA_SOURCE", "DATA_STORE", "SEARCH_INDEX", "SUPPORTING_RESOURCE", "OTHER_AI_ARTIFACT");
 
     private AiSecurityTaxonomy() { }
 

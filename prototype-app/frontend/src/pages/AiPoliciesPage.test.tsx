@@ -65,14 +65,14 @@ describe('AiPoliciesPage', () => {
 
   it('navigates to the policy detail page when a row is clicked', async () => {
     vi.spyOn(api, 'listAiGridPolicies').mockResolvedValue([buildPolicy()]);
-    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([{
+    vi.spyOn(api, 'getAiGridPolicyDetail').mockResolvedValue({
       id: 'AGCF-AWS-001', version: '1.0.0', name: 'Public knowledge-base S3 source', severity: 'CRITICAL',
       artifactTypes: [], requiredResourceFamilies: [], description: 'Block public access and restrict the bucket policy.',
       remediation: 'Block public access and restrict the bucket policy.', controlMappings: {}, available: true, enabled: true,
       lifecycle: 'PUBLISHED',
       openFindings: 0, lifetimeFindings: 0, lastEvaluatedAt: null, decisionCoverage: 1, decisionCoverageThreshold: 1,
       decisionCoverageStatus: 'PASS', evaluatedArtifacts: 1, noDecisionCount: 0,
-    }]);
+    });
     vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({ items: [], page: 0, size: 200, total: 0 });
     renderPoliciesPage();
 
@@ -92,14 +92,14 @@ describe('AiPoliciesPage', () => {
       }),
       buildPolicy({ policyId: 'AGCF-AZR-001', name: 'Azure public network access', provider: 'AZURE' }),
     ]);
-    vi.spyOn(api, 'listAiGridPolicyDetails').mockResolvedValue([{
+    vi.spyOn(api, 'getAiGridPolicyDetail').mockResolvedValue({
       id: 'AGCF-AWS-013', version: '1.0.0', name: 'Sensitive-data agent lacks PII guardrail', severity: 'CRITICAL',
       artifactTypes: [], requiredResourceFamilies: [], description: 'Require a PII guardrail.',
       remediation: 'Attach a PII guardrail.', controlMappings: {}, available: true, enabled: true,
       lifecycle: 'PUBLISHED',
       openFindings: 0, lifetimeFindings: 0, lastEvaluatedAt: null, decisionCoverage: 1, decisionCoverageThreshold: 1,
       decisionCoverageStatus: 'PASS', evaluatedArtifacts: 1, noDecisionCount: 0,
-    }]);
+    });
     vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({ items: [], page: 0, size: 200, total: 0 });
     renderPoliciesPage();
 

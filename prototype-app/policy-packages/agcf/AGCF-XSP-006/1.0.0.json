@@ -15,7 +15,7 @@
     "mode": "CORRELATION_PATH",
     "correlationPath": {
       "correlationId": "R2_SENSITIVE_RETRIEVAL_CONTROL_GAP",
-      "correlationVersion": "1.0.0"
+      "correlationVersion": "2.0.0"
     }
   },
   "baseEvidenceTiers": [

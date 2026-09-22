@@ -317,7 +317,7 @@ class ProductionSafetyValidatorTest {
             boolean testPersonasEnabled,
             PlatformOwnerBootstrapProperties platformOwnerBootstrapProperties
     ) {
-        return new ProductionSafetyValidator(
+        ProductionSafetyValidator validator = new ProductionSafetyValidator(
                 true,
                 "",
                 creatorKey,
@@ -336,6 +336,8 @@ class ProductionSafetyValidatorTest {
                 false,
                 safeRoleJdbcTemplate(),
                 platformOwnerBootstrapProperties);
+        ReflectionTestUtils.setField(validator, "aiIdentityHmacKey", testHmacKey());
+        return validator;
     }
 
     private ProductionSafetyValidator validator(
@@ -417,7 +419,7 @@ class ProductionSafetyValidatorTest {
             JdbcTemplate jdbcTemplate,
             PlatformOwnerBootstrapProperties platformOwnerBootstrapProperties
     ) {
-        return new ProductionSafetyValidator(
+        ProductionSafetyValidator validator = new ProductionSafetyValidator(
                 true,
                 "",
                 creatorKey,
@@ -436,6 +438,8 @@ class ProductionSafetyValidatorTest {
                 validateRlsRuntimeRole,
                 jdbcTemplate,
                 platformOwnerBootstrapProperties);
+        ReflectionTestUtils.setField(validator, "aiIdentityHmacKey", testHmacKey());
+        return validator;
     }
 
     private PlatformOwnerBootstrapProperties disabledBootstrap() {
@@ -445,7 +449,7 @@ class ProductionSafetyValidatorTest {
     }
 
     private ProductionSafetyValidator hmacValidator(String hmacSecret, boolean allowHmacInProduction) {
-        return new ProductionSafetyValidator(
+        ProductionSafetyValidator validator = new ProductionSafetyValidator(
                 true,
                 "",
                 "",
@@ -464,6 +468,8 @@ class ProductionSafetyValidatorTest {
                 false,
                 safeRoleJdbcTemplate(),
                 disabledBootstrap());
+        ReflectionTestUtils.setField(validator, "aiIdentityHmacKey", testHmacKey());
+        return validator;
     }
 
     private PlatformOwnerBootstrapProperties enabledBootstrap() {

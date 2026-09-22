@@ -13,7 +13,8 @@
         "bedrock:ListAgentActionGroups", "bedrock:GetAgentActionGroup", "bedrock:ListKnowledgeBases",
         "bedrock:ListDataSources", "bedrock:GetDataSource", "bedrock:ListAgentKnowledgeBases",
         "bedrock:ListPrompts", "bedrock:ListFlows",
-        "bedrock:GetFoundationModel", "bedrock:GetCustomModel", "bedrock:GetImportedModel"
+        "bedrock:GetFoundationModel", "bedrock:GetCustomModel", "bedrock:GetImportedModel",
+        "bedrock:GetKnowledgeBase", "bedrock:ListFoundationModels"
       ],
       "Resource": "*"
     },
@@ -23,7 +24,8 @@
       "Action": [
         "bedrock-agentcore:ListGateways", "bedrock-agentcore:GetGateway",
         "bedrock-agentcore:ListGatewayTargets", "bedrock-agentcore:GetGatewayTarget",
-        "bedrock-agentcore:ListAgentRuntimes", "bedrock-agentcore:ListAgentRuntimeVersions",
+        "bedrock-agentcore:ListAgentRuntimes", "bedrock-agentcore:GetAgentRuntime",
+        "bedrock-agentcore:ListAgentRuntimeVersions", "bedrock-agentcore:ListAgentRuntimeEndpoints",
         "bedrock-agentcore:ListBrowsers", "bedrock-agentcore:ListCodeInterpreters",
         "bedrock-agentcore:ListMemories"
       ],
@@ -46,8 +48,10 @@
       "Sid": "LinkedReadOnlyEvidence",
       "Effect": "Allow",
       "Action": [
-        "iam:GetPolicy", "iam:GetPolicyVersion", "iam:GetRole", "iam:GetRolePolicy", "iam:ListAttachedRolePolicies",
-        "iam:ListRolePolicies", "lambda:GetFunctionUrlConfig", "s3:GetBucketPolicyStatus"
+        "iam:ListRoles", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:GetRole", "iam:GetRolePolicy", "iam:ListAttachedRolePolicies",
+        "iam:ListRolePolicies", "access-analyzer:ListFindings",
+        "lambda:ListFunctions", "lambda:GetFunctionUrlConfig", "lambda:GetPolicy",
+        "s3:ListAllMyBuckets", "s3:GetBucketPolicyStatus", "s3:GetPublicAccessBlock"
       ],
       "Resource": "*"
     },

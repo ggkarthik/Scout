@@ -34,6 +34,8 @@ function buildArtifact(overrides: Partial<AiSecurityArtifact> = {}): AiSecurityA
     piiInfoTypes: [],
     piiFindingCount: 0,
     piiLastScannedAt: null,
+    attachmentState: 'ROOT',
+    systemIds: [],
     ...overrides,
   };
 }
@@ -135,7 +137,7 @@ describe('AiAssetDetailPage', () => {
     expect(screen.getByText(/inputStrength: HIGH/)).toBeInTheDocument();
     expect(screen.queryByText('1 item')).not.toBeInTheDocument();
     // An empty array still renders as "None", not an empty/garbled string.
-    expect(screen.getByText('None')).toBeInTheDocument();
+    expect(screen.getAllByText('None').length).toBeGreaterThan(0);
   });
 
   it('shows an explicit insufficient-evidence state for unknown data sensitivity', async () => {

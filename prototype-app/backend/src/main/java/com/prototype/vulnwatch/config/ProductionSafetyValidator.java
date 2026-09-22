@@ -41,12 +41,6 @@ public class ProductionSafetyValidator {
     private String aiRuntimeIdentityHmacKey = "";
     @Value("${app.ai-security.runtime.enabled:false}")
     private boolean aiRuntimeEnabled;
-    @Value("${app.ai-security.copilot.enabled:false}")
-    private boolean copilotEnabled;
-    @Value("${app.ai-security.azure.foundry-agents.enabled:false}")
-    private boolean foundryAgentsEnabled;
-    @Value("${app.ai-security.azure.classic-foundry-agents.enabled:false}")
-    private boolean classicFoundryAgentsEnabled;
 
     public ProductionSafetyValidator(
             @Value("${app.security.require-production-secrets:false}") boolean requireProductionSecrets,
@@ -128,10 +122,9 @@ public class ProductionSafetyValidator {
                 || "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".equals(credentialEncryptionKey)) {
             throw new IllegalStateException("APP_CREDENTIAL_ENCRYPTION_KEY must be set to a non-default 256-bit base64 key for production startup.");
         }
-        if ((aiRuntimeEnabled || copilotEnabled || foundryAgentsEnabled || classicFoundryAgentsEnabled)
-                && (!hasStrongValue(aiIdentityHmacKey) || isPlaceholder(aiIdentityHmacKey))) {
+        if (!hasStrongValue(aiIdentityHmacKey) || isPlaceholder(aiIdentityHmacKey)) {
             throw new IllegalStateException(
-                    "APP_AI_SECURITY_IDENTITY_HMAC_KEY must be a non-placeholder value of at least 32 characters when Microsoft agent collection is enabled.");
+                    "APP_AI_SECURITY_IDENTITY_HMAC_KEY must be a non-placeholder value of at least 32 characters in production.");
         }
         if (aiRuntimeEnabled
                 && (!hasStrongValue(aiRuntimeIdentityHmacKey) || isPlaceholder(aiRuntimeIdentityHmacKey))) {

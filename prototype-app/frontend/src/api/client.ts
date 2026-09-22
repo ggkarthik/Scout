@@ -518,10 +518,13 @@ import type {
   AiSecurityAzureCredentialProfile,
   AiSecurityAzureFoundryConfig,
   AiSecurityAzureRequirements,
+  AiSecurityAwsPreflight,
+  AiSecurityAwsRequirements,
   AiAgentExecutionEvent,
   AiAgentExecutionPage,
   CopilotStudioConnector,
   AiSecurityConnectorFeatureFlag,
+  AiActivityEvidence,
   AiSecurityFinding,
   AiSecurityGraph,
   AiSecurityPage,
@@ -544,12 +547,8 @@ import type {
   AiGridPhase1CorpusBootstrap,
   AiGridPhase1CorpusReadiness,
   AiGridPhase1CorpusCertification,
-  AiGridPhase1MigrationPreview,
   AiGridPhase1PreviewCertificationProfile,
   AiGridPhase1PreviewStatus,
-  AiGridPhase1MigrationResult,
-  AiGridControlCoverage,
-  AiGridOwaspCoverage,
   AiGridPolicyCandidate,
   AiGridPolicySelection,
   AiGridOwner,
@@ -1439,16 +1438,6 @@ export const api = {
   certifyPlatformAiGridPhase1Corpus: () => request<AiGridPhase1CorpusCertification>(
     '/platform/ai-grid/validation/releases/phase-1/certification-corpus/certify', { method: 'POST' },
   ),
-  getPlatformAiGridPhase1MigrationPreview: (tenantId: string) => request<AiGridPhase1MigrationPreview>(
-    `/platform/ai-grid/migrations/phase-1/tenants/${encodeURIComponent(tenantId)}/preview`,
-  ),
-  applyPlatformAiGridPhase1Migration: (tenantId: string) => request<AiGridPhase1MigrationResult>(
-    `/platform/ai-grid/migrations/phase-1/tenants/${encodeURIComponent(tenantId)}/apply`, { method: 'POST' },
-  ),
-  /** @deprecated Retained for one release; use getPlatformAiGridFrameworkCoverage. */
-  getPlatformAiGridOwaspCoverage: () => request<AiGridOwaspCoverage[]>('/platform/ai-grid/policies/portfolio/owasp'),
-  getPlatformAiGridFrameworkCoverage: (framework = 'OWASP_GENAI_LLM_TOP_10', version = '2026') =>
-    request<AiGridControlCoverage[]>(`/platform/ai-grid/policies/portfolio/frameworks?framework=${encodeURIComponent(framework)}&version=${encodeURIComponent(version)}`),
   getPlatformAiGridPolicyCandidates: () => request<AiGridPolicyCandidate[]>('/platform/ai-grid/policies/portfolio/candidates'),
   createPlatformAiGridPolicyCandidate: (payload: {
     title: string; sourceType: string; status: string; technologyId?: string; rationale: string;
@@ -1558,6 +1547,8 @@ export const api = {
   },
   getAiSecurityArtifact: (artifactId: string) =>
     request<AiSecurityArtifact>(`/ai-security/artifacts/${encodeURIComponent(artifactId)}`),
+  getAiActivityEvidence: (artifactId: string) =>
+    request<AiActivityEvidence[]>(`/ai-security/artifacts/${encodeURIComponent(artifactId)}/activity-evidence`),
   getAiSecurityGraph: (rootArtifactId?: string, depth?: number, runtime?: { from?: string; to?: string }) => {
     const params = new URLSearchParams();
     if (rootArtifactId) params.set('rootArtifactId', rootArtifactId);
@@ -1612,12 +1603,13 @@ export const api = {
     method: 'PUT',
     body: JSON.stringify({ disposition, reason }),
   }),
-  listAiGridPolicyDetails: () => request<AiSecurityPolicy[]>('/ai-policies/details'),
-  updateAiGridPolicyEnabled: (policyId: string, enabled: boolean) =>
-    request<AiSecurityPolicy>(`/ai-policies/${encodeURIComponent(policyId)}/enabled`, {
-      method: 'PATCH',
-      body: JSON.stringify({ enabled }),
-    }),
+  getAiGridPolicyDetail: (policyId: string) =>
+    request<AiSecurityPolicy>(`/ai-policies/${encodeURIComponent(policyId)}`),
+  listAiGridPolicyDetails: async () => {
+    const summaries = await request<AiGridPolicy[]>('/ai-policies');
+    return Promise.all(summaries.map((policy) =>
+      request<AiSecurityPolicy>(`/ai-policies/${encodeURIComponent(policy.policyId)}`)));
+  },
   getAiGridPolicyConfiguration: (policyId: string) =>
     request<PolicyConfiguration>(`/ai-policies/${encodeURIComponent(policyId)}/configuration`),
   updateAiGridPolicyScope: (
@@ -1693,6 +1685,10 @@ export const api = {
   }),
   testAiSecurityConnector: () =>
     request<AiSecurityConnectionTest>('/connectors/ai-security/aws/test', { method: 'POST' }),
+  getAiSecurityAwsRequirements: () =>
+    request<AiSecurityAwsRequirements>('/connectors/ai-security/aws/requirements'),
+  runAiSecurityAwsPreflight: () =>
+    request<AiSecurityAwsPreflight>('/connectors/ai-security/aws/preflight', { method: 'POST' }),
   runAiSecurityConnector: () =>
     request<{ jobId: string; status: string; message: string }>('/connectors/ai-security/aws/run', { method: 'POST' }),
   listAiSecurityAzureConnectors: () =>

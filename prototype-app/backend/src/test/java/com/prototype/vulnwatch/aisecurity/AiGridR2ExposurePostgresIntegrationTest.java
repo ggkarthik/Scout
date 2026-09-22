@@ -108,8 +108,8 @@ class AiGridR2ExposurePostgresIntegrationTest {
             exposures.correlateCompleteRun(tenant, recurrenceRun);
             assertEquals(exposureId, jdbc.queryForObject("select id from ai_grid_exposure_paths", Map.of(), UUID.class));
             assertEquals(1, count("select count(*) from findings where finding_kind='AI_EXPOSURE' and status='OPEN'"));
-            assertEquals(4, count("select count(*) from ai_grid_system_revisions"),
-                    "returning to an earlier membership set must still produce a new immutable revision");
+            assertEquals(3, count("select count(*) from ai_grid_system_revisions"),
+                    "returning to a non-current membership set must produce a new immutable revision");
             return null;
         });
     }

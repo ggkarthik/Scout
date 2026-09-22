@@ -124,6 +124,11 @@ public class AiSecurityController {
         return apiService.artifact(tenant, artifactId);
     }
 
+    @GetMapping("/artifacts/{artifactId}/activity-evidence")
+    public List<AiSecurityApiService.ActivityEvidenceResponse> activityEvidence(@PathVariable UUID artifactId) {
+        return apiService.activityEvidence(tenant(), artifactId);
+    }
+
     @GetMapping(value = "/artifacts-export", produces = "text/csv")
     public ResponseEntity<String> exportArtifacts() {
         return ResponseEntity.ok()

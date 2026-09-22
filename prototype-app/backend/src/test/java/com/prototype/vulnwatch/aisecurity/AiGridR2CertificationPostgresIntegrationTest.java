@@ -33,7 +33,7 @@ class AiGridR2CertificationPostgresIntegrationTest {
     @Autowired private NamedParameterJdbcTemplate jdbc;
 
     @Test
-    void allThreeTemplateThresholdsAreSeparateAndOperationalGatesRemainComputed() {
+    void allTemplateThresholdsAreSeparateAndOperationalGatesRemainComputed() {
         var initial = certification.readiness();
         assertFalse(initial.ready());
         assertTrue(initial.gates().stream().anyMatch(g ->
@@ -60,8 +60,9 @@ class AiGridR2CertificationPostgresIntegrationTest {
                         1, 0.95, "R2-LABELS-1", answerKeyRunId), "platform-owner"));
 
         for (String id : List.of("R2_EXTERNAL_SENSITIVE_ACCESS", "R2_EXCESSIVE_TOOL_PRIVILEGE",
-                "R2_UNTRUSTED_AUTONOMOUS_EXECUTION")) {
-            var review = certification.createPrecisionReview(new PrecisionReviewCommand(id, "1.0.0",
+                "R2_UNTRUSTED_AUTONOMOUS_EXECUTION", "R2_EXTERNAL_MCP_SENSITIVE_ACCESS",
+                "R2_MCP_WEAK_AUTH_EXECUTION", "R2_SENSITIVE_RETRIEVAL_CONTROL_GAP")) {
+            var review = certification.createPrecisionReview(new PrecisionReviewCommand(id, "2.0.0",
                     "Representative provider and resource-family cohort", "stratified-random", 30, 0.95,
                     "R2-LABELS-1", answerKeyRunId), "platform-owner");
             jdbc.update("""

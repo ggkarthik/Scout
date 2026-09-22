@@ -13,8 +13,11 @@ import com.prototype.vulnwatch.aisecurity.service.AiSecurityAwsConnectorService.
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityObservationService;
 import com.prototype.vulnwatch.aisecurity.service.AiSecuritySyncRunFacade;
 import com.prototype.vulnwatch.aisecurity.service.AiGridBudgetService;
+import com.prototype.vulnwatch.aisecurity.service.AiGridCapabilityService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridProviderCallCounter;
+import com.prototype.vulnwatch.aisecurity.service.AiGridRelationshipSemantics;
 import com.prototype.vulnwatch.aisecurity.service.AiGridRunMetricsService;
+import com.prototype.vulnwatch.aisecurity.service.AiSecurityDigestService;
 import com.prototype.vulnwatch.domain.SyncRun;
 import com.prototype.vulnwatch.domain.Tenant;
 import java.net.URLDecoder;
@@ -80,6 +83,8 @@ import software.amazon.awssdk.services.bedrockagent.model.ListPromptsRequest;
 import software.amazon.awssdk.services.bedrockagentcorecontrol.BedrockAgentCoreControlClient;
 import software.amazon.awssdk.services.bedrockagentcorecontrol.model.GetGatewayRequest;
 import software.amazon.awssdk.services.bedrockagentcorecontrol.model.GetGatewayTargetRequest;
+import software.amazon.awssdk.services.bedrockagentcorecontrol.model.GetAgentRuntimeRequest;
+import software.amazon.awssdk.services.bedrockagentcorecontrol.model.ListAgentRuntimeEndpointsRequest;
 import software.amazon.awssdk.services.bedrockagentcorecontrol.model.ListAgentRuntimeVersionsRequest;
 import software.amazon.awssdk.services.bedrockagentcorecontrol.model.ListAgentRuntimesRequest;
 import software.amazon.awssdk.services.bedrockagentcorecontrol.model.ListBrowsersRequest;
@@ -91,6 +96,7 @@ import software.amazon.awssdk.services.iam.IamClient;
 import software.amazon.awssdk.services.iam.model.GetPolicyRequest;
 import software.amazon.awssdk.services.iam.model.GetPolicyVersionRequest;
 import software.amazon.awssdk.services.iam.model.GetRolePolicyRequest;
+import software.amazon.awssdk.services.iam.model.GetRoleRequest;
 import software.amazon.awssdk.services.iam.model.ListAttachedRolePoliciesRequest;
 import software.amazon.awssdk.services.iam.model.ListRolePoliciesRequest;
 import software.amazon.awssdk.services.lambda.LambdaClient;
@@ -122,6 +128,21 @@ import software.amazon.awssdk.services.sagemaker.model.ListTransformJobsRequest;
 public class AwsBedrockDiscoveryService {
 
     private static final Logger LOG = LoggerFactory.getLogger(AwsBedrockDiscoveryService.class);
+    private static final List<String> COLLECTOR_FAMILIES = List.of(
+            "BEDROCK_AGENTS", "BEDROCK_AGENT_VERSIONS", "BEDROCK_AGENT_DEFINITIONS",
+            "BEDROCK_DEPLOYABLE_MODELS", "BEDROCK_INFERENCE_PROFILES", "BEDROCK_MODEL_CUSTOMIZATION_JOBS",
+            "BEDROCK_PROMPTS", "BEDROCK_FLOWS", "IAM_GLOBAL", "LAMBDA_URLS",
+            "BEDROCK_KNOWLEDGE_BASES", "BEDROCK_DATA_SOURCES", "BEDROCK_DATA_STORES",
+            "AWS_AGENTCORE_GATEWAYS", "AWS_AGENTCORE_GATEWAY_TARGETS", "AWS_AGENTCORE_RUNTIMES",
+            "AWS_AGENTCORE_BROWSERS", "AWS_AGENTCORE_CODE_INTERPRETERS", "AWS_AGENTCORE_MEMORIES",
+            "S3_EXPOSURE", "AWS_MACIE_PII", "BEDROCK_GUARDRAILS", "BEDROCK_INVOCATION_LOGGING",
+            "SAGEMAKER_DOMAINS", "SAGEMAKER_SPACES", "SAGEMAKER_MODEL_REGISTRY", "SAGEMAKER_ENDPOINTS",
+            "SAGEMAKER_ENDPOINT_CONFIGURATIONS", "SAGEMAKER_JOBS", "SAGEMAKER_PIPELINES",
+            "SAGEMAKER_COMPUTE", "SAGEMAKER_EXECUTION_ROLES", "SAGEMAKER_NETWORKING");
+
+    public static List<String> collectorFamilies() {
+        return COLLECTOR_FAMILIES;
+    }
 
     private final AiSecurityAwsConnectorService connectorService;
     private final AiSecurityObservationService observationService;
@@ -131,8 +152,11 @@ public class AwsBedrockDiscoveryService {
     private final AiGridBudgetService budgets;
     private final AiGridProviderCallCounter providerCalls;
     private final AiGridRunMetricsService runMetrics;
+    private final AiGridCapabilityService capabilities;
     private final AwsMaciePiiLookupService maciePiiLookupService;
+    private final AiSecurityDigestService digestService;
     private final boolean maciePiiEnabled;
+    private final long providerCallCeiling;
     private final ExecutionInterceptor providerCallInterceptor = new ExecutionInterceptor() {
         @Override
         public void beforeTransmission(Context.BeforeTransmission context, ExecutionAttributes executionAttributes) {
@@ -149,8 +173,11 @@ public class AwsBedrockDiscoveryService {
             AiGridBudgetService budgets,
             AiGridProviderCallCounter providerCalls,
             AiGridRunMetricsService runMetrics,
+            AiGridCapabilityService capabilities,
             AwsMaciePiiLookupService maciePiiLookupService,
-            @Value("${app.ai-security.aws.macie-pii.enabled:false}") boolean maciePiiEnabled
+            AiSecurityDigestService digestService,
+            @Value("${app.ai-security.aws.macie-pii.enabled:false}") boolean maciePiiEnabled,
+            @Value("${app.ai-security.provider-call-ceiling:10000}") long providerCallCeiling
     ) {
         this.connectorService = connectorService;
         this.observationService = observationService;
@@ -160,8 +187,11 @@ public class AwsBedrockDiscoveryService {
         this.budgets = budgets;
         this.providerCalls = providerCalls;
         this.runMetrics = runMetrics;
+        this.capabilities = capabilities;
         this.maciePiiLookupService = maciePiiLookupService;
+        this.digestService = digestService;
         this.maciePiiEnabled = maciePiiEnabled;
+        this.providerCallCeiling = providerCallCeiling;
     }
 
     public DiscoveryResult discover(Tenant tenant, UUID connectorId) {
@@ -176,22 +206,17 @@ public class AwsBedrockDiscoveryService {
                 "regions", config.regions())));
         int artifacts = 0;
         int failedScopes = 0;
-        try (var measurement = providerCalls.begin()) {
+        capabilities.registerRun(tenant, run.getId(), "AWS", connectorId, config.accountId(),
+                config.regions(), COLLECTOR_FAMILIES);
+        try (var measurement = providerCalls.begin(providerCallCeiling)) {
             try {
-                budgets.admit(tenant, run.getId(), "AWS", List.of(
-                        "BEDROCK_AGENTS", "IAM_GLOBAL", "LAMBDA_URLS", "BEDROCK_KNOWLEDGE_BASES", "BEDROCK_DATA_SOURCES", "BEDROCK_DATA_STORES",
-                        "AWS_AGENTCORE_GATEWAYS", "AWS_AGENTCORE_GATEWAY_TARGETS",
-                        "S3_EXPOSURE", "AWS_MACIE_PII", "BEDROCK_GUARDRAILS", "BEDROCK_INVOCATION_LOGGING",
-                        "SAGEMAKER_DOMAINS", "SAGEMAKER_SPACES", "SAGEMAKER_MODEL_REGISTRY",
-                        "SAGEMAKER_ENDPOINTS", "SAGEMAKER_ENDPOINT_CONFIGURATIONS", "SAGEMAKER_JOBS",
-                        "SAGEMAKER_PIPELINES", "SAGEMAKER_COMPUTE", "SAGEMAKER_EXECUTION_ROLES",
-                        "SAGEMAKER_NETWORKING"), "*", "*");
+                budgets.admit(tenant, run.getId(), "AWS", COLLECTOR_FAMILIES, "*", "*");
                 try (CredentialsHandle credentials = connectorService.credentials(config)) {
                     Set<String> ingestedScopeKeys = new java.util.HashSet<>();
                     for (String regionName : config.regions()) {
                         Region region = Region.of(regionName);
                         try (var permit = admissionService.acquire(config.accountId(), regionName)) {
-                            RegionContext context = discoverRegion(config, credentials.provider(), region);
+                            RegionContext context = discoverRegion(tenant, config, credentials.provider(), region);
                             for (ScopePayload scope : context.scopes()) {
                                 // Global scopes are collected during each regional pass, but
                                 // the receipt contract permits one global scope per run.
@@ -210,6 +235,7 @@ public class AwsBedrockDiscoveryService {
                     }
                 }
                 int persistedArtifacts = observationService.countPersistedArtifacts(tenant, run.getId());
+                capabilities.finalizeRun(tenant, run.getId());
                 runMetrics.recordProviderCalls(tenant, run.getId(), "AWS", measurement.count());
                 budgets.reconcile(tenant, run.getId(), "AWS");
                 syncRunFacade.complete(
@@ -222,6 +248,7 @@ public class AwsBedrockDiscoveryService {
                                 "providerApiCalls", measurement.count())));
                 return new DiscoveryResult(run.getId(), persistedArtifacts, failedScopes);
             } catch (Exception ex) {
+                capabilities.finalizeRun(tenant, run.getId());
                 runMetrics.recordProviderCalls(tenant, run.getId(), "AWS", measurement.count());
                 budgets.reconcile(tenant, run.getId(), "AWS");
                 syncRunFacade.fail(tenant.getId(), run.getId(), "AWS Bedrock discovery failed");
@@ -231,11 +258,13 @@ public class AwsBedrockDiscoveryService {
     }
 
     private RegionContext discoverRegion(
-            ConnectorSecret config, AwsCredentialsProvider credentials, Region region) {
+            Tenant tenant, ConnectorSecret config, AwsCredentialsProvider credentials, Region region) {
         List<ScopePayload> scopes = new ArrayList<>();
         AgentContext agents = collectAgents(config, credentials, region, scopes);
-        Map<String, List<String>> deployedVersions = collectAgentVersionsAndAliases(config, credentials, region, scopes);
-        collectIam(config, credentials, region, agents, scopes);
+        Map<String, List<String>> deployedVersions = collectAgentVersionsAndAliases(
+                tenant, config, credentials, region, true, scopes);
+        scopes.add(complete("BEDROCK_AGENT_DEFINITIONS", List.of(), List.of()));
+        collectIam(config, credentials, region, agents, deployedVersions, true, scopes);
         collectLambdaUrls(config, credentials, region, agents, deployedVersions, scopes);
         collectKnowledgeBases(config, credentials, region, agents, deployedVersions, scopes);
         collectAgentCoreGateways(config, credentials, region, scopes);
@@ -359,7 +388,7 @@ public class AwsBedrockDiscoveryService {
             token = null;
             do {
                 var page = agent.listPrompts(ListPromptsRequest.builder().nextToken(token).build());
-                for (var prompt : page.promptSummaries()) prompts.add(new ArtifactObservation(prompt.arn(), "OTHER_AI_ARTIFACT", "AWS_BEDROCK_PROMPT", prompt.name(), Map.of("id", prompt.id(), "version", safeValue(prompt.version()))));
+                for (var prompt : page.promptSummaries()) prompts.add(new ArtifactObservation(prompt.arn(), "AI_PROMPT", "AWS_BEDROCK_PROMPT", prompt.name(), Map.of("providerNativeId", prompt.id(), "version", safeValue(prompt.version()))));
                 token = page.nextToken();
             } while (hasText(token));
             scopes.add(complete("BEDROCK_PROMPTS", prompts, List.of()));
@@ -582,8 +611,8 @@ public class AwsBedrockDiscoveryService {
 
     /** Inventory immutable deployed versions and alias routing without treating DRAFT as production. */
     private Map<String, List<String>> collectAgentVersionsAndAliases(
-            ConnectorSecret config, AwsCredentialsProvider credentials, Region region,
-            List<ScopePayload> scopes) {
+            Tenant tenant, ConnectorSecret config, AwsCredentialsProvider credentials, Region region,
+            boolean includeDefinitions, List<ScopePayload> scopes) {
         List<ArtifactObservation> artifacts = new ArrayList<>();
         List<RelationshipObservation> relationships = new ArrayList<>();
         Map<String, List<String>> deployedVersions = new LinkedHashMap<>();
@@ -595,30 +624,35 @@ public class AwsBedrockDiscoveryService {
                 var agents = client.listAgents(ListAgentsRequest.builder().nextToken(agentsToken).build());
                 for (var summary : agents.agentSummaries()) {
                     String agentArn = arn(config, region, "agent/" + summary.agentId());
+                    boolean draftObserved = false;
                     String versionsToken = null;
                     do {
                         var versions = client.listAgentVersions(ListAgentVersionsRequest.builder()
                                 .agentId(summary.agentId()).nextToken(versionsToken).build());
                         for (var version : versions.agentVersionSummaries()) {
-                            if (!hasText(version.agentVersion()) || "DRAFT".equalsIgnoreCase(version.agentVersion())) continue;
+                            if (!hasText(version.agentVersion())) continue;
                             String versionArn = agentArn + "/version/" + version.agentVersion();
                             var versionDetail = client.getAgentVersion(GetAgentVersionRequest.builder()
                                     .agentId(summary.agentId()).agentVersion(version.agentVersion()).build()).agentVersion();
                             Map<String, Object> attributes = new LinkedHashMap<>();
-                            attributes.put("agentId", summary.agentId());
                             attributes.put("version", version.agentVersion());
                             attributes.put("status", version.agentStatusAsString());
-                            attributes.put("deployedArtifact", true);
+                            attributes.put("deployedArtifact", false);
                             attributes.put("createdAt", version.createdAt() == null ? "" : version.createdAt().toString());
                             attributes.put("updatedAt", version.updatedAt() == null ? "" : version.updatedAt().toString());
                             artifacts.add(new ArtifactObservation(versionArn, "AI_AGENT_VERSION",
                                     "AWS_BEDROCK_AGENT_VERSION",
                                     summary.agentName() + " v" + version.agentVersion(), attributes));
+                            draftObserved |= "DRAFT".equalsIgnoreCase(version.agentVersion());
                             relationships.add(new RelationshipObservation(versionArn, agentArn, "VERSION_OF",
                                     Map.of("confidence", "DIRECT", "sourceApi", "ListAgentVersions")));
-                            addVersionPromptArtifacts(versionArn, versionDetail, artifacts, relationships);
-                            addVersionToolArtifacts(client, summary.agentId(), version.agentVersion(), versionArn,
-                                    artifacts, relationships);
+                            if (includeDefinitions) {
+                                addVersionModelAndGuardrailArtifacts(config, region, versionArn, versionDetail,
+                                        artifacts, relationships);
+                                addVersionPromptArtifacts(tenant, versionArn, versionDetail, artifacts, relationships);
+                                addVersionToolArtifacts(client, summary.agentId(), version.agentVersion(), versionArn,
+                                        artifacts, relationships);
+                            }
                         }
                         versionsToken = versions.nextToken();
                     } while (hasText(versionsToken));
@@ -633,24 +667,31 @@ public class AwsBedrockDiscoveryService {
                                     ? alias.routingConfiguration().stream().map(item -> item.agentVersion())
                                     .filter(this::hasText).toList() : List.of();
                             Map<String, Object> attributes = new LinkedHashMap<>();
-                            attributes.put("agentId", summary.agentId());
                             attributes.put("aliasId", alias.agentAliasId());
                             attributes.put("aliasName", safeValue(alias.agentAliasName()));
                             attributes.put("status", alias.agentAliasStatusAsString());
                             attributes.put("invocationState", alias.aliasInvocationStateAsString());
                             attributes.put("routedVersions", routedVersions);
                             attributes.put("deployedArtifact", true);
-                            artifacts.add(new ArtifactObservation(aliasArn, "OTHER_AI_ARTIFACT",
+                            artifacts.add(new ArtifactObservation(aliasArn, "AI_COMPONENT",
                                     "AWS_BEDROCK_AGENT_ALIAS", safeValue(alias.agentAliasName()), attributes));
+                            relationships.add(new RelationshipObservation(agentArn, aliasArn, "HAS_COMPONENT",
+                                    Map.of("confidence", "DIRECT", "evidence", Map.of(
+                                            "sourceApi", "ListAgentAliases", "field", "agentId"))));
                             for (String version : routedVersions) {
                                 deployedVersions.computeIfAbsent(summary.agentId(), ignored -> new ArrayList<>()).add(version);
                                 relationships.add(new RelationshipObservation(aliasArn,
-                                        agentArn + "/version/" + version, "ROUTES_TO",
-                                        Map.of("confidence", "DIRECT", "sourceApi", "ListAgentAliases")));
+                                        agentArn + "/version/" + version, "SERVES_VERSION",
+                                        Map.of("confidence", "DIRECT", "evidence", Map.of(
+                                                "sourceApi", "ListAgentAliases",
+                                                "field", "routingConfiguration.agentVersion"))));
                             }
                         }
                         aliasesToken = aliases.nextToken();
                     } while (hasText(aliasesToken));
+                    if (deployedVersions.getOrDefault(summary.agentId(), List.of()).isEmpty() && draftObserved) {
+                        deployedVersions.put(summary.agentId(), new ArrayList<>(List.of("DRAFT")));
+                    }
                 }
                 agentsToken = agents.nextToken();
             } while (hasText(agentsToken));
@@ -662,6 +703,40 @@ public class AwsBedrockDiscoveryService {
         }
         deployedVersions.replaceAll((agentId, versions) -> versions.stream().distinct().toList());
         return Map.copyOf(deployedVersions);
+    }
+
+    private void addVersionModelAndGuardrailArtifacts(
+            ConnectorSecret config,
+            Region region,
+            String versionArn,
+            software.amazon.awssdk.services.bedrockagent.model.AgentVersion version,
+            List<ArtifactObservation> artifacts,
+            List<RelationshipObservation> relationships) {
+        if (version == null) return;
+        if (hasText(version.foundationModel())) {
+            String modelId = version.foundationModel();
+            String modelResourceId = modelId.startsWith("arn:")
+                    ? modelId : "bedrock:model:" + region.id() + ":" + modelId;
+            artifacts.add(new ArtifactObservation(modelResourceId, "AI_MODEL", "AWS_BEDROCK_MODEL", modelId,
+                    Map.of("referencedBy", "agentVersion")));
+            relationships.add(new RelationshipObservation(versionArn, modelResourceId, "USES_MODEL",
+                    Map.of("confidence", "DIRECT", "evidence", Map.of(
+                            "sourceApi", "GetAgentVersion", "field", "foundationModel"))));
+        }
+        if (version.guardrailConfiguration() != null
+                && hasText(version.guardrailConfiguration().guardrailIdentifier())) {
+            String guardrailId = version.guardrailConfiguration().guardrailIdentifier();
+            String guardrailArn = guardrailId.startsWith("arn:")
+                    ? guardrailId : arn(config, region, "guardrail/" + guardrailId);
+            Map<String, Object> guardrailAttributes = new LinkedHashMap<>();
+            guardrailAttributes.put("version", safeValue(version.guardrailConfiguration().guardrailVersion()));
+            artifacts.add(new ArtifactObservation(guardrailArn, "AI_GUARDRAIL", "AWS_BEDROCK_GUARDRAIL",
+                    guardrailId, guardrailAttributes));
+            relationships.add(new RelationshipObservation(versionArn, guardrailArn, "USES_GUARDRAIL",
+                    Map.of("confidence", "DIRECT", "evidence", Map.of(
+                            "sourceApi", "GetAgentVersion", "field", "guardrailConfiguration"),
+                            "guardrailVersion", safeValue(version.guardrailConfiguration().guardrailVersion()))));
+        }
     }
 
     private void addVersionToolArtifacts(
@@ -689,9 +764,12 @@ public class AwsBedrockDiscoveryService {
                 relationships.add(new RelationshipObservation(versionArn, toolId, "USES_TOOL",
                         Map.of("confidence", "DIRECT", "sourceApi", "GetAgentActionGroup")));
                 if (hasText(lambdaArn)) {
-                    relationships.add(new RelationshipObservation(toolId, lambdaArn, "INVOKES_LAMBDA",
-                            Map.of("confidence", "DIRECT", "sourceApi", "GetAgentActionGroup",
-                                    "field", "actionGroupExecutor.lambda")));
+                    artifacts.add(new ArtifactObservation(lambdaArn, "SUPPORTING_RESOURCE", "AWS_LAMBDA_FUNCTION",
+                            functionName(lambdaArn), Map.of("lambdaArn", lambdaArn)));
+                    relationships.add(new RelationshipObservation(toolId, lambdaArn, "IMPLEMENTED_BY",
+                            Map.of("confidence", "DIRECT", "evidence", Map.of(
+                                    "sourceApi", "GetAgentActionGroup",
+                                    "field", "actionGroupExecutor.lambda"))));
                 }
             }
             token = page.nextToken();
@@ -700,6 +778,7 @@ public class AwsBedrockDiscoveryService {
 
     /** Stores prompt structure and a digest only; prompt bodies are never persisted. */
     private void addVersionPromptArtifacts(
+            Tenant tenant,
             String versionArn,
             software.amazon.awssdk.services.bedrockagent.model.AgentVersion version,
             List<ArtifactObservation> artifacts,
@@ -707,10 +786,12 @@ public class AwsBedrockDiscoveryService {
         if (version == null) return;
         if (hasText(version.instruction())) {
             String promptId = versionArn + "/prompt/instruction";
+            AiSecurityDigestService.Digest digest = digestService.digest(
+                    tenant, "AWS_AGENT_INSTRUCTION", version.instruction());
             artifacts.add(new ArtifactObservation(promptId, "AI_PROMPT", "AWS_BEDROCK_AGENT_INSTRUCTION",
                     "Agent instruction", Map.of("promptType", "INSTRUCTION",
-                            "promptDigest", sha256(version.instruction()),
-                            "promptLength", version.instruction().length(),
+                            "promptDigest", digest.value(), "digestAlgorithm", digest.algorithm(),
+                            "digestKeyVersion", digest.keyVersion(), "promptLength", version.instruction().length(),
                             "bodyStored", false)));
             relationships.add(new RelationshipObservation(versionArn, promptId, "USES_PROMPT",
                     Map.of("confidence", "DIRECT", "sourceApi", "GetAgentVersion", "field", "instruction")));
@@ -727,7 +808,11 @@ public class AwsBedrockDiscoveryService {
             attributes.put("foundationModel", safeValue(prompt.foundationModel()));
             attributes.put("bodyStored", false);
             if (hasText(prompt.basePromptTemplate())) {
-                attributes.put("promptDigest", sha256(prompt.basePromptTemplate()));
+                AiSecurityDigestService.Digest digest = digestService.digest(
+                        tenant, "AWS_AGENT_PROMPT:" + type, prompt.basePromptTemplate());
+                attributes.put("promptDigest", digest.value());
+                attributes.put("digestAlgorithm", digest.algorithm());
+                attributes.put("digestKeyVersion", digest.keyVersion());
                 attributes.put("promptLength", prompt.basePromptTemplate().length());
             }
             artifacts.add(new ArtifactObservation(promptId, "AI_PROMPT", "AWS_BEDROCK_AGENT_PROMPT",
@@ -743,30 +828,45 @@ public class AwsBedrockDiscoveryService {
             AwsCredentialsProvider credentials,
             Region region,
             AgentContext agents,
+            Map<String, List<String>> deployedVersions,
+            boolean identityGraphAllowed,
             List<ScopePayload> scopes
     ) {
         List<ArtifactObservation> artifacts = new ArrayList<>();
         List<RelationshipObservation> relationships = new ArrayList<>();
+        List<Diagnostic> diagnostics = new ArrayList<>();
         try (IamClient iam = IamClient.builder().region(Region.AWS_GLOBAL).credentialsProvider(credentials)
                 .overrideConfiguration(c -> c.addExecutionInterceptor(providerCallInterceptor)).build()) {
             for (AgentFact agent : agents.facts().values()) {
                 if (!hasText(agent.roleArn())) {
-                    artifacts.add(agentUpdate(agent, Map.of("iamEvidenceAvailable", false)));
                     continue;
                 }
-                boolean wildcardActions = hasWildcardActions(iam, agent.roleArn());
-                artifacts.add(new ArtifactObservation(agent.roleArn(), "OTHER_AI_ARTIFACT", "AWS_IAM_ROLE",
-                        roleName(agent.roleArn()), Map.of("roleArn", agent.roleArn(),
-                                "wildcardActions", wildcardActions,
-                                "evidenceSource", "IAM policy and policy-version APIs")));
-                artifacts.add(agentUpdate(agent, Map.of(
-                        "iamEvidenceAvailable", true,
-                        "iamWildcardActions", wildcardActions)));
-                relationships.add(new RelationshipObservation(agent.arn(), agent.roleArn(), "ASSUMES_ROLE",
-                        Map.of("confidence", "DIRECT", "sourceApi", "Bedrock GetAgent",
-                                "field", "agentResourceRoleArn")));
+                try {
+                    Map<String, Object> roleFacts = rolePolicyFacts(iam, agent.roleArn(), config.accountId());
+                    if (identityGraphAllowed) {
+                        artifacts.add(new ArtifactObservation(agent.roleArn(), "SUPPORTING_RESOURCE", "AWS_IAM_ROLE",
+                                roleName(agent.roleArn()), roleFacts));
+                        for (String version : deployedVersions.getOrDefault(agent.id(), List.of())) {
+                            relationships.add(new RelationshipObservation(
+                                    agent.arn() + "/version/" + version, agent.roleArn(), "ASSUMES_ROLE",
+                                    Map.of("confidence", "DIRECT", "evidence", Map.of(
+                                            "sourceApi", "Bedrock GetAgentVersion",
+                                            "field", "agentResourceRoleArn"),
+                                            "deploymentStage", "DRAFT".equalsIgnoreCase(version)
+                                                    ? "PRE_DEPLOYMENT" : "SERVED")));
+                        }
+                    }
+                } catch (Exception ex) {
+                    diagnostics.add(new Diagnostic("IAM_ROLE_EVIDENCE_PARTIAL",
+                            "IAM evidence was unavailable for one execution role", false,
+                            List.of("iam:GetRole", "iam:ListAttachedRolePolicies", "iam:GetPolicy",
+                                    "iam:GetPolicyVersion", "iam:ListRolePolicies", "iam:GetRolePolicy"),
+                            sha256(agent.roleArn()).substring(0, 16)));
+                }
             }
-            scopes.add(completeGlobal("IAM_GLOBAL", artifacts, relationships));
+            scopes.add(new ScopePayload("IAM_GLOBAL", true,
+                    diagnostics.isEmpty() ? ScopeStatus.COMPLETE : ScopeStatus.PARTIAL,
+                    artifacts, relationships, List.copyOf(diagnostics)));
         } catch (Exception ex) {
             scopes.add(failedGlobal("IAM_GLOBAL", ex, List.of(
                     "iam:GetRole", "iam:ListAttachedRolePolicies", "iam:GetPolicy",
@@ -783,7 +883,6 @@ public class AwsBedrockDiscoveryService {
             List<ScopePayload> scopes
     ) {
         List<ArtifactObservation> artifacts = new ArrayList<>();
-        List<RelationshipObservation> relationships = new ArrayList<>();
         try (BedrockAgentClient bedrock = BedrockAgentClient.builder()
                 .region(region).credentialsProvider(credentials)
                 .overrideConfiguration(c -> c.addExecutionInterceptor(providerCallInterceptor)).build();
@@ -795,7 +894,6 @@ public class AwsBedrockDiscoveryService {
                 for (String version : deployedVersions.getOrDefault(agent.id(), List.of())) {
                     lambdaArns.addAll(actionGroupLambdas(bedrock, agent.id(), version));
                 }
-                String effectiveAuth = "ABSENT";
                 for (String lambdaArn : lambdaArns) {
                     String authType;
                     try {
@@ -804,20 +902,12 @@ public class AwsBedrockDiscoveryService {
                     } catch (ResourceNotFoundException ex) {
                         authType = "ABSENT";
                     }
-                    if ("NONE".equals(authType)) {
-                        effectiveAuth = "NONE";
-                    } else if (!"NONE".equals(effectiveAuth) && !"ABSENT".equals(authType)) {
-                        effectiveAuth = authType;
-                    }
                     artifacts.add(new ArtifactObservation(
                             lambdaArn, "SUPPORTING_RESOURCE", "AWS_LAMBDA_FUNCTION", functionName(lambdaArn),
                             Map.of("functionUrlAuthType", authType, "lambdaArn", lambdaArn)));
-                    relationships.add(new RelationshipObservation(
-                            agent.arn(), lambdaArn, "INVOKES_LAMBDA", Map.of()));
                 }
-                artifacts.add(agentUpdate(agent, Map.of("lambdaUrlAuthType", effectiveAuth)));
             }
-            scopes.add(complete("LAMBDA_URLS", artifacts, relationships));
+            scopes.add(complete("LAMBDA_URLS", artifacts, List.of()));
         } catch (Exception ex) {
             scopes.add(failed("LAMBDA_URLS", ex, List.of(
                     "bedrock:ListAgentActionGroups", "bedrock:GetAgentActionGroup",
@@ -840,7 +930,6 @@ public class AwsBedrockDiscoveryService {
         List<RelationshipObservation> knowledgeRelationships = new ArrayList<>();
         List<RelationshipObservation> dataSourceRelationships = new ArrayList<>();
         List<RelationshipObservation> dataStoreRelationships = new ArrayList<>();
-        Map<String, Integer> dataSourceCountByKbId = new HashMap<>();
         try (BedrockAgentClient bedrock = BedrockAgentClient.builder()
                 .region(region).credentialsProvider(credentials)
                 .overrideConfiguration(c -> c.addExecutionInterceptor(providerCallInterceptor)).build();
@@ -913,25 +1002,25 @@ public class AwsBedrockDiscoveryService {
                     attributes.put("dataSourceCount", dataSourceCount);
                     kbArtifacts.add(new ArtifactObservation(
                             kbArn, "KNOWLEDGE_BASE", "AWS_BEDROCK_KNOWLEDGE_BASE", summary.name(), attributes));
-                    dataSourceCountByKbId.put(summary.knowledgeBaseId(), dataSourceCount);
                 }
                 token = response.nextToken();
             } while (hasText(token));
 
             for (AgentFact agent : agents.facts().values()) {
-                List<software.amazon.awssdk.services.bedrockagent.model.AgentKnowledgeBaseSummary> attachedKnowledgeBases = new ArrayList<>();
                 for (String version : deployedVersions.getOrDefault(agent.id(), List.of())) {
-                    attachedKnowledgeBases.addAll(bedrock.listAgentKnowledgeBases(ListAgentKnowledgeBasesRequest.builder()
-                            .agentId(agent.id()).agentVersion(version).build()).agentKnowledgeBaseSummaries());
+                    var versionKnowledgeBases = bedrock.listAgentKnowledgeBases(ListAgentKnowledgeBasesRequest.builder()
+                            .agentId(agent.id()).agentVersion(version).build()).agentKnowledgeBaseSummaries();
+                    for (var kb : versionKnowledgeBases) {
+                        knowledgeRelationships.add(new RelationshipObservation(
+                                agent.arn() + "/version/" + version,
+                                arn(config, region, "knowledge-base/" + kb.knowledgeBaseId()),
+                                "USES_KNOWLEDGE_BASE", Map.of("confidence", "DIRECT", "evidence", Map.of(
+                                        "sourceApi", "ListAgentKnowledgeBases",
+                                        "field", "agentVersion+knowledgeBaseId"),
+                                        "deploymentStage", "DRAFT".equalsIgnoreCase(version)
+                                                ? "PRE_DEPLOYMENT" : "SERVED")));
+                    }
                 }
-                int agentDataSourceAccessCount = 0;
-                for (var kb : attachedKnowledgeBases) {
-                    knowledgeRelationships.add(new RelationshipObservation(
-                            agent.arn(), arn(config, region, "knowledge-base/" + kb.knowledgeBaseId()),
-                            "USES_KNOWLEDGE_BASE", Map.of()));
-                    agentDataSourceAccessCount += dataSourceCountByKbId.getOrDefault(kb.knowledgeBaseId(), 0);
-                }
-                kbArtifacts.add(agentUpdate(agent, Map.of("dataSourceAccessCount", agentDataSourceAccessCount)));
             }
             scopes.add(complete("BEDROCK_KNOWLEDGE_BASES", kbArtifacts, knowledgeRelationships));
             scopes.add(complete("BEDROCK_DATA_SOURCES", dataSourceArtifacts, dataSourceRelationships));
@@ -1036,24 +1125,36 @@ public class AwsBedrockDiscoveryService {
             do {
                 var page = client.listAgentRuntimes(ListAgentRuntimesRequest.builder().nextToken(token).build());
                 for (var runtime : page.agentRuntimes()) {
-                    String runtimeId = hasText(runtime.agentRuntimeArn())
+                    boolean stableRuntimeArn = hasText(runtime.agentRuntimeArn());
+                    String runtimeId = stableRuntimeArn
                             ? runtime.agentRuntimeArn() : arn(config, region, "runtime/" + runtime.agentRuntimeId());
-                    artifacts.add(new ArtifactObservation(runtimeId, "OTHER_AI_ARTIFACT", "AWS_AGENTCORE_RUNTIME",
-                            safeValue(runtime.agentRuntimeName()), Map.of(
-                                    "runtimeId", safeValue(runtime.agentRuntimeId()),
-                                    "version", safeValue(runtime.agentRuntimeVersion()),
-                                    "status", safeValue(runtime.statusAsString()),
-                                    "deployedArtifact", true)));
+                    int relationshipStart = relationships.size();
+                    var detail = client.getAgentRuntime(GetAgentRuntimeRequest.builder()
+                            .agentRuntimeId(runtime.agentRuntimeId()).build());
+                    if (hasText(detail.roleArn())) {
+                        artifacts.add(new ArtifactObservation(detail.roleArn(), "SUPPORTING_RESOURCE", "AWS_IAM_ROLE",
+                                roleName(detail.roleArn()), Map.of("roleArn", detail.roleArn())));
+                        relationships.add(direct(runtimeId, detail.roleArn(), "ASSUMES_ROLE",
+                                "GetAgentRuntime", "roleArn"));
+                    }
+                    if (detail.workloadIdentityDetails() != null
+                            && hasText(detail.workloadIdentityDetails().workloadIdentityArn())) {
+                        String identityArn = detail.workloadIdentityDetails().workloadIdentityArn();
+                        artifacts.add(new ArtifactObservation(identityArn, "SUPPORTING_RESOURCE",
+                                "AWS_AGENTCORE_WORKLOAD_IDENTITY", identityArn,
+                                Map.of("providerNativeId", identityArn)));
+                        relationships.add(direct(runtimeId, identityArn, "USES_EXECUTION_ROLE",
+                                "GetAgentRuntime", "workloadIdentityDetails.workloadIdentityArn"));
+                    }
                     String versionToken = null;
                     do {
                         var versions = client.listAgentRuntimeVersions(ListAgentRuntimeVersionsRequest.builder()
                                 .agentRuntimeId(runtime.agentRuntimeId()).nextToken(versionToken).build());
                         for (var version : versions.agentRuntimes()) {
-                            String versionId = hasText(version.agentRuntimeArn()) ? version.agentRuntimeArn()
-                                    : runtimeId + "/version/" + version.agentRuntimeVersion();
-                            artifacts.add(new ArtifactObservation(versionId, "OTHER_AI_ARTIFACT",
+                            String versionId = runtimeId + "/version/" + version.agentRuntimeVersion();
+                            artifacts.add(new ArtifactObservation(versionId, "AI_COMPONENT",
                                     "AWS_AGENTCORE_RUNTIME_VERSION", safeValue(version.agentRuntimeName()), Map.of(
-                                    "runtimeId", safeValue(version.agentRuntimeId()),
+                                    "providerNativeId", safeValue(version.agentRuntimeId()),
                                     "version", safeValue(version.agentRuntimeVersion()),
                                     "status", safeValue(version.statusAsString()), "deployedArtifact", true)));
                             relationships.add(new RelationshipObservation(versionId, runtimeId, "VERSION_OF",
@@ -1061,6 +1162,44 @@ public class AwsBedrockDiscoveryService {
                         }
                         versionToken = versions.nextToken();
                     } while (hasText(versionToken));
+                    String endpointToken = null;
+                    do {
+                        var endpoints = client.listAgentRuntimeEndpoints(ListAgentRuntimeEndpointsRequest.builder()
+                                .agentRuntimeId(runtime.agentRuntimeId()).nextToken(endpointToken).build());
+                        for (var endpoint : endpoints.runtimeEndpoints()) {
+                            String endpointId = hasText(endpoint.agentRuntimeEndpointArn())
+                                    ? endpoint.agentRuntimeEndpointArn() : runtimeId + "/endpoint/" + endpoint.id();
+                            artifacts.add(new ArtifactObservation(endpointId, "AI_COMPONENT",
+                                    "AWS_AGENTCORE_RUNTIME_ENDPOINT", safeValue(endpoint.name()), Map.of(
+                                    "providerNativeId", safeValue(endpoint.id()),
+                                    "liveVersion", safeValue(endpoint.liveVersion()),
+                                    "targetVersion", safeValue(endpoint.targetVersion()),
+                                    "status", safeValue(endpoint.statusAsString()),
+                                    "deployedArtifact", true)));
+                            relationships.add(direct(runtimeId, endpointId, "HAS_DEPLOYMENT",
+                                    "ListAgentRuntimeEndpoints", "agentRuntimeArn"));
+                            if (hasText(endpoint.liveVersion())) {
+                                relationships.add(direct(endpointId,
+                                        runtimeId + "/version/" + endpoint.liveVersion(), "SERVES_VERSION",
+                                        "ListAgentRuntimeEndpoints", "liveVersion"));
+                            }
+                        }
+                        endpointToken = endpoints.nextToken();
+                    } while (hasText(endpointToken));
+                    boolean stableMembership = relationships.subList(relationshipStart, relationships.size()).stream()
+                            .anyMatch(edge -> runtimeId.equals(edge.sourceProviderResourceId())
+                                    && AiGridRelationshipSemantics.SYSTEM_MEMBERSHIP_RELATIONSHIPS
+                                    .contains(edge.relationshipType()));
+                    artifacts.add(new ArtifactObservation(runtimeId, "AI_COMPONENT", "AWS_AGENTCORE_RUNTIME",
+                            safeValue(runtime.agentRuntimeName()), Map.of(
+                                    "providerNativeId", safeValue(runtime.agentRuntimeId()),
+                                    "version", safeValue(runtime.agentRuntimeVersion()),
+                                    "status", safeValue(runtime.statusAsString()),
+                                    "deployedArtifact", true,
+                                    "stableRuntimeArnObserved", stableRuntimeArn,
+                                    "authoritativeWorkloadBoundaryObserved", true,
+                                    "stableMembershipObserved", stableMembership,
+                                    "agentCoreRootQualified", stableRuntimeArn && stableMembership)));
                 }
                 token = page.nextToken();
             } while (hasText(token));
@@ -1071,7 +1210,8 @@ public class AwsBedrockDiscoveryService {
             scopes.add(complete("AWS_AGENTCORE_MEMORIES", listAgentCoreMemories(client), List.of()));
         } catch (Exception ex) {
             scopes.add(failed("AWS_AGENTCORE_RUNTIMES", ex, List.of(
-                    "bedrock-agentcore:ListAgentRuntimes", "bedrock-agentcore:ListAgentRuntimeVersions")));
+                    "bedrock-agentcore:ListAgentRuntimes", "bedrock-agentcore:GetAgentRuntime",
+                    "bedrock-agentcore:ListAgentRuntimeVersions", "bedrock-agentcore:ListAgentRuntimeEndpoints")));
             scopes.add(failed("AWS_AGENTCORE_BROWSERS", ex, List.of("bedrock-agentcore:ListBrowsers")));
             scopes.add(failed("AWS_AGENTCORE_CODE_INTERPRETERS", ex, List.of("bedrock-agentcore:ListCodeInterpreters")));
             scopes.add(failed("AWS_AGENTCORE_MEMORIES", ex, List.of("bedrock-agentcore:ListMemories")));
@@ -1084,7 +1224,7 @@ public class AwsBedrockDiscoveryService {
         do {
             var page = client.listBrowsers(ListBrowsersRequest.builder().nextToken(token).build());
             for (var item : page.browserSummaries()) artifacts.add(new ArtifactObservation(item.browserArn(),
-                    "OTHER_AI_ARTIFACT", "AWS_AGENTCORE_BROWSER", safeValue(item.name()), Map.of(
+                    "AI_TOOL", "AWS_AGENTCORE_BROWSER", safeValue(item.name()), Map.of(
                     "status", safeValue(item.statusAsString()), "browserId", safeValue(item.browserId()))));
             token = page.nextToken();
         } while (hasText(token));
@@ -1097,7 +1237,7 @@ public class AwsBedrockDiscoveryService {
         do {
             var page = client.listCodeInterpreters(ListCodeInterpretersRequest.builder().nextToken(token).build());
             for (var item : page.codeInterpreterSummaries()) artifacts.add(new ArtifactObservation(item.codeInterpreterArn(),
-                    "OTHER_AI_ARTIFACT", "AWS_AGENTCORE_CODE_INTERPRETER", safeValue(item.name()), Map.of(
+                    "AI_TOOL", "AWS_AGENTCORE_CODE_INTERPRETER", safeValue(item.name()), Map.of(
                     "status", safeValue(item.statusAsString()), "codeInterpreterId", safeValue(item.codeInterpreterId()))));
             token = page.nextToken();
         } while (hasText(token));
@@ -1110,7 +1250,7 @@ public class AwsBedrockDiscoveryService {
         do {
             var page = client.listMemories(ListMemoriesRequest.builder().nextToken(token).build());
             for (var item : page.memories()) artifacts.add(new ArtifactObservation(item.arn(),
-                    "OTHER_AI_ARTIFACT", "AWS_AGENTCORE_MEMORY", item.id(), Map.of(
+                    "AI_COMPONENT", "AWS_AGENTCORE_MEMORY", item.id(), Map.of(
                     "status", safeValue(item.statusAsString()), "memoryId", safeValue(item.id()))));
             token = page.nextToken();
         } while (hasText(token));
@@ -1160,7 +1300,7 @@ public class AwsBedrockDiscoveryService {
                             : detail.contentPolicy().filters());
                     minimumStrength.put(summary.id(), strength);
                     artifacts.add(new ArtifactObservation(
-                            summary.arn(), "OTHER_AI_ARTIFACT", "AWS_BEDROCK_GUARDRAIL", summary.name(),
+                            summary.arn(), "AI_GUARDRAIL", "AWS_BEDROCK_GUARDRAIL", summary.name(),
                             guardrailAttributes(detail, strength)));
                 }
                 token = response.nextToken();
@@ -1227,7 +1367,7 @@ public class AwsBedrockDiscoveryService {
         return arns;
     }
 
-    private boolean hasWildcardActions(IamClient iam, String roleArn) {
+    private Map<String, Object> rolePolicyFacts(IamClient iam, String roleArn, String accountId) {
         String roleName = roleArn.substring(roleArn.lastIndexOf('/') + 1);
         List<String> documents = new ArrayList<>();
         String token = null;
@@ -1256,14 +1396,32 @@ public class AwsBedrockDiscoveryService {
                 break;
             }
         } while (hasText(inlineToken));
-        return documents.stream().anyMatch(this::documentHasWildcardAction);
+        PolicyFlags flags = new PolicyFlags();
+        documents.forEach(document -> analyzePermissionDocument(document, flags));
+        var role = iam.getRole(GetRoleRequest.builder().roleName(roleName).build()).role();
+        analyzeTrustDocument(role.assumeRolePolicyDocument(), accountId, flags);
+        Map<String, Object> facts = new LinkedHashMap<>();
+        facts.put("roleArn", roleArn);
+        facts.put("iamWildcardActions", flags.wildcardActions);
+        facts.put("iamWildcardResources", flags.wildcardResources);
+        facts.put("iamPassRole", flags.passRole);
+        facts.put("iamNotAction", flags.notAction);
+        facts.put("iamNotResource", flags.notResource);
+        boolean boundaryPresent = role.permissionsBoundary() != null;
+        facts.put("permissionBoundaryAttached", boundaryPresent);
+        facts.put("permissionBoundaryState", boundaryPresent ? "PRESENT" : "ABSENT");
+        facts.put("effectiveAccessEvidenceComplete", true);
+        facts.put("crossAccountTrust", flags.crossAccountTrust);
+        facts.put("trustConditionsPresent", flags.trustConditionsPresent);
+        facts.put("evidenceSource", "IAM role, trust, policy and policy-version APIs");
+        return facts;
     }
 
     private boolean attachedHasMore(IamClient iam, String roleName, String marker) {
         return hasText(marker);
     }
 
-    private boolean documentHasWildcardAction(String encoded) {
+    private void analyzePermissionDocument(String encoded, PolicyFlags flags) {
         try {
             JsonNode document = objectMapper.readTree(URLDecoder.decode(encoded, StandardCharsets.UTF_8));
             JsonNode statements = document.path("Statement");
@@ -1274,18 +1432,54 @@ public class AwsBedrockDiscoveryService {
                 if (!"Allow".equalsIgnoreCase(statement.path("Effect").asText())) {
                     continue;
                 }
+                flags.notAction |= statement.has("NotAction");
+                flags.notResource |= statement.has("NotResource");
                 JsonNode actions = statement.path("Action");
                 for (JsonNode action : actions.isArray() ? toList(actions) : List.of(actions)) {
                     String value = action.asText();
                     if ("*".equals(value) || value.endsWith(":*")) {
-                        return true;
+                        flags.wildcardActions = true;
                     }
+                    if ("iam:PassRole".equalsIgnoreCase(value) || "iam:*".equalsIgnoreCase(value)
+                            || "*".equals(value)) flags.passRole = true;
                 }
+                JsonNode resources = statement.path("Resource");
+                for (JsonNode resource : resources.isArray() ? toList(resources) : List.of(resources))
+                    if ("*".equals(resource.asText())) flags.wildcardResources = true;
             }
-            return false;
         } catch (Exception ex) {
             throw new IllegalStateException("Unable to resolve IAM policy evidence", ex);
         }
+    }
+
+    private void analyzeTrustDocument(String encoded, String accountId, PolicyFlags flags) {
+        try {
+            JsonNode document = objectMapper.readTree(URLDecoder.decode(encoded, StandardCharsets.UTF_8));
+            JsonNode statements = document.path("Statement");
+            for (JsonNode statement : statements.isArray() ? toList(statements) : List.of(statements)) {
+                flags.trustConditionsPresent |= statement.has("Condition") && !statement.path("Condition").isEmpty();
+                JsonNode aws = statement.path("Principal").path("AWS");
+                for (JsonNode principal : aws.isArray() ? toList(aws) : List.of(aws)) {
+                    String value = principal.asText();
+                    if (hasText(value) && ("*".equals(value)
+                            || (value.startsWith("arn:aws:iam::") && !value.contains("::" + accountId + ":")))) {
+                        flags.crossAccountTrust = true;
+                    }
+                }
+            }
+        } catch (Exception ex) {
+            throw new IllegalStateException("Unable to resolve IAM trust evidence", ex);
+        }
+    }
+
+    private static final class PolicyFlags {
+        private boolean wildcardActions;
+        private boolean wildcardResources;
+        private boolean passRole;
+        private boolean notAction;
+        private boolean notResource;
+        private boolean crossAccountTrust;
+        private boolean trustConditionsPresent;
     }
 
     private boolean isBucketPublic(S3Client s3, String bucketName) {
@@ -1457,6 +1651,12 @@ public class AwsBedrockDiscoveryService {
         return new ScopePayload(family, false, ScopeStatus.COMPLETE, artifacts, relationships, List.of());
     }
 
+    private ScopePayload disabled(String family, boolean global) {
+        return new ScopePayload(family, global, ScopeStatus.DISABLED, List.of(), List.of(), List.of(
+                new Diagnostic("FEATURE_DISABLED", "AWS AI discovery is disabled for this resource family",
+                        false, List.of(), family)));
+    }
+
     private ScopePayload completeGlobal(String family, List<ArtifactObservation> artifacts) {
         return new ScopePayload(family, true, ScopeStatus.COMPLETE, artifacts, List.of(), List.of());
     }
@@ -1476,8 +1676,10 @@ public class AwsBedrockDiscoveryService {
 
     private ScopePayload failed(String family, boolean global, Exception ex, List<String> permissions) {
         String code = diagnosticCode(ex);
+        ScopeStatus status = "ACCESS_DENIED".equals(code) ? ScopeStatus.UNAUTHORIZED
+                : "PROVIDER_CALL_BUDGET_EXHAUSTED".equals(code) ? ScopeStatus.PARTIAL : ScopeStatus.ERROR;
         return new ScopePayload(
-                family, global, ScopeStatus.FAILED, List.of(), List.of(),
+                family, global, status, List.of(), List.of(),
                 List.of(new Diagnostic(
                         code,
                         safeMessage(code),
@@ -1487,6 +1689,9 @@ public class AwsBedrockDiscoveryService {
     }
 
     private String diagnosticCode(Exception ex) {
+        if (ex instanceof AiGridProviderCallCounter.ProviderCallBudgetExceededException) {
+            return "PROVIDER_CALL_BUDGET_EXHAUSTED";
+        }
         if (ex instanceof AwsServiceException aws) {
             String code = aws.awsErrorDetails() == null ? "" : aws.awsErrorDetails().errorCode();
             if ("AccessDenied".equalsIgnoreCase(code) || "AccessDeniedException".equalsIgnoreCase(code)) {
@@ -1507,6 +1712,7 @@ public class AwsBedrockDiscoveryService {
             case "ACCESS_DENIED" -> "AWS permissions are insufficient for this discovery scope";
             case "THROTTLED" -> "AWS temporarily throttled this discovery scope";
             case "TIMEOUT" -> "AWS did not respond before the discovery timeout";
+            case "PROVIDER_CALL_BUDGET_EXHAUSTED" -> "The in-run provider-call ceiling was exhausted for this scope";
             default -> "AWS discovery could not complete this scope";
         };
     }

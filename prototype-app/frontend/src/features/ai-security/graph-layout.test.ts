@@ -29,6 +29,8 @@ function buildNode(overrides: Partial<AiSecurityArtifact> = {}): AiSecurityArtif
     piiInfoTypes: [],
     piiFindingCount: 0,
     piiLastScannedAt: null,
+    attachmentState: 'ROOT',
+    systemIds: [],
     ...overrides,
   };
 }
@@ -36,7 +38,7 @@ function buildNode(overrides: Partial<AiSecurityArtifact> = {}): AiSecurityArtif
 function buildEdge(overrides: Partial<AiSecurityRelationship> = {}): AiSecurityRelationship {
   return {
     id: 'edge-1',
-    relationshipType: 'INVOKES_LAMBDA',
+    relationshipType: 'IMPLEMENTED_BY',
     sourceArtifactId: 'artifact-1',
     sourceName: 'depth-agent',
     targetArtifactId: 'artifact-2',
@@ -68,14 +70,14 @@ describe('layoutDependencyGraph', () => {
   it('formats relationship types into readable edge labels', () => {
     const graph: AiSecurityGraph = {
       nodes: [buildNode(), buildNode({ id: 'artifact-2', name: 'depth-fn' })],
-      edges: [buildEdge({ relationshipType: 'INVOKES_LAMBDA' })],
+      edges: [buildEdge({ relationshipType: 'IMPLEMENTED_BY' })],
       truncated: false,
     };
 
     const { edges } = layoutDependencyGraph(graph);
 
     expect(edges).toEqual([
-      expect.objectContaining({ id: 'edge-1', source: 'artifact-1', target: 'artifact-2', label: 'INVOKES LAMBDA' }),
+      expect.objectContaining({ id: 'edge-1', source: 'artifact-1', target: 'artifact-2', label: 'IMPLEMENTED BY' }),
     ]);
   });
 
