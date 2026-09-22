@@ -13,9 +13,9 @@ public final class AiSecurityContracts {
         COMPLETE,
         DISABLED,
         UNAUTHORIZED,
+        UNSUPPORTED_API,
         PARTIAL,
-        FAILED,
-        UNSUPPORTED
+        ERROR
     }
 
     public enum EvaluationOutcome {

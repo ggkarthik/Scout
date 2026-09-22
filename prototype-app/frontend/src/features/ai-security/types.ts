@@ -1,4 +1,4 @@
-export type AiArtifactType = 'AI_AGENT' | 'AI_AGENT_VERSION' | 'AI_PROMPT' | 'AI_TOOL' | 'AI_COMPONENT' | 'AI_MODEL' | 'AI_GUARDRAIL' | 'MCP_GATEWAY' | 'MCP_TARGET' | 'MCP_SERVER' | 'KNOWLEDGE_BASE' | 'DATA_SOURCE' | 'DATA_STORE' | 'SEARCH_INDEX' | 'OTHER_AI_ARTIFACT';
+export type AiArtifactType = 'AI_AGENT' | 'AI_AGENT_VERSION' | 'AI_PROMPT' | 'AI_TOOL' | 'AI_COMPONENT' | 'AI_MODEL' | 'AI_GUARDRAIL' | 'MCP_GATEWAY' | 'MCP_TARGET' | 'MCP_SERVER' | 'KNOWLEDGE_BASE' | 'DATA_SOURCE' | 'DATA_STORE' | 'SEARCH_INDEX' | 'SUPPORTING_RESOURCE' | 'OTHER_AI_ARTIFACT';
 export type AiProvider = 'AWS' | 'AZURE' | 'MICROSOFT_COPILOT';
 
 export type AiSecuritySummary = {
@@ -69,7 +69,7 @@ export type AiTopRiskArtifact = {
 
 export type AiGridCoverageDimension = {
   coverageEpochId: string;
-  dimension: 'TECHNOLOGY' | 'PROVIDER' | 'FAMILY' | 'ACCOUNT' | 'ENVIRONMENT' | 'OWNER' | 'POLICY' | 'FRAMEWORK';
+  dimension: 'TECHNOLOGY' | 'PROVIDER' | 'FAMILY' | 'ACCOUNT' | 'ENVIRONMENT' | 'OWNER' | 'POLICY' | 'FRAMEWORK' | 'ASSOCIATION';
   value: string;
   expected: number;
   recorded: number;
@@ -282,35 +282,6 @@ export type AiGridPhase1CorpusCertification = {
   blockedEnvironments: string[];
 };
 
-export type AiGridPhase1MigrationAction = {
-  legacyDetectorId: string;
-  disposition: string;
-  closureReason: string | null;
-  sourceSelection: AiGridPolicySelection;
-  selectionCopies: Array<{ policyId: string; selection: AiGridPolicySelection }>;
-  manualConfigurationReview: boolean;
-  openFindingsToClose: number;
-  removeLegacyConfiguration: boolean;
-  reconcileToPolicyId: string | null;
-  openFindingsToReconcile: number;
-};
-
-export type AiGridPhase1MigrationPreview = {
-  tenantId: string;
-  legacySelections: number;
-  selectionCopies: number;
-  retirements: number;
-  scopeCopies: number;
-  overrideCopies: number;
-  parameterManualReviews: number;
-  openFindingsToClose: number;
-  openFindingsReconciled: number;
-  blockers: string[];
-  actions: AiGridPhase1MigrationAction[];
-};
-
-export type AiGridPhase1MigrationResult = Omit<AiGridPhase1MigrationPreview, 'blockers'>;
-
 export type AiGridPhase1PreviewGate = {
   gateKey: string;
   status: 'PENDING' | 'PASSED' | 'FAILED' | string;
@@ -361,26 +332,6 @@ export type AiGridPolicyRetirementStatus = {
   unmappedRecordCount: number;
 };
 
-export type AiGridOwaspCoverage = { owaspId: string; publishedPolicyCount: number };
-export type AiGridCoverageStatus =
-  | 'AUTOMATED'
-  | 'CONDITIONAL_AUTOMATED'
-  | 'PREVENTIVE_ONLY'
-  | 'REQUIRES_RUNTIME_OR_TEST'
-  | 'NOT_COVERED';
-export type AiGridPolicyControlMapping = {
-  policyId: string;
-  provider: string;
-  mappingType: string;
-  rationale: string;
-  conditional: boolean;
-  baseEvidenceTiersJson: string;
-};
-export type AiGridControlCoverage = {
-  controlId: string;
-  coverageStatus: AiGridCoverageStatus;
-  policies: AiGridPolicyControlMapping[];
-};
 export type AiGridPolicyCandidate = { id: string; title: string; sourceType: string; status: string; technologyId: string | null; rationale: string; riskScore: number; reachScore: number; evidenceMaturity: number; remediationClarity: number; owner: string | null; priorityScore: number };
 
 export type AiGridOwner = {
@@ -450,6 +401,8 @@ export type AiSecurityArtifact = {
   piiInfoTypes: string[];
   piiFindingCount: number;
   piiLastScannedAt: string | null;
+  attachmentState: 'ROOT' | 'ATTACHED' | 'UNATTACHED_REQUIRED' | 'STANDALONE_OPTIONAL';
+  systemIds: string[];
 };
 
 export type AiArtifactSummary = {
@@ -464,6 +417,19 @@ export type AiArtifactSummary = {
   totalFindings: number;
   policiesFailed: number;
   policiesTotal: number;
+};
+
+export type AiActivityEvidence = {
+  factKey: string;
+  valueJson: string;
+  state: string;
+  evidenceReference: string;
+  observedAt: string;
+  validFrom: string;
+  validUntil: string | null;
+  confidence: number | null;
+  producerId: string;
+  expired: boolean;
 };
 
 export type AiSecurityPage<T> = {
@@ -694,6 +660,53 @@ export type AiSecurityConnectionTest = {
   message: string;
   retryable: boolean;
   missingPermissions: string[];
+  identity: AiSecurityAwsIdentity | null;
+  preflight: AiSecurityAwsPreflight | null;
+};
+
+export type AiSecurityAwsIdentity = {
+  accountId: string;
+  arn: string;
+  principalId: string;
+};
+
+export type AiSecurityAwsActionVerification = {
+  action: string;
+  status: 'VERIFIED_ALLOWED' | 'VERIFIED_EMPTY' | 'NOT_VERIFIED_EMPTY' | 'UNAUTHORIZED' | 'UNSUPPORTED_API' | 'ERROR' | 'DISABLED';
+  detail: string;
+};
+
+export type AiSecurityAwsFamilyPreflight = {
+  resourceFamily: string;
+  region: string;
+  status: 'COMPLETE' | 'DISABLED' | 'UNAUTHORIZED' | 'UNSUPPORTED_API' | 'PARTIAL' | 'ERROR';
+  actions: AiSecurityAwsActionVerification[];
+  customerRemediation: string;
+};
+
+export type AiSecurityAwsPreflight = {
+  identity: AiSecurityAwsIdentity | null;
+  resourceFamilies: AiSecurityAwsFamilyPreflight[];
+  providerApiCalls: number;
+  explicitlyRequested: boolean;
+};
+
+export type AiSecurityAwsFamilyRequirement = {
+  resourceFamily: string;
+  scope: 'REGIONAL' | 'GLOBAL';
+  requiredActions: string[];
+  optionalEnrichmentActions: string[];
+  verificationProbe: string;
+  capabilities: string[];
+  policies: string[];
+  customerRemediation: string;
+};
+
+export type AiSecurityAwsRequirements = {
+  matrixVersion: number;
+  provider: 'AWS';
+  resourceFamilies: AiSecurityAwsFamilyRequirement[];
+  prohibitedMutationActions: string[];
 };
 
 export type AiSecurityAzureCredentialProfile = {
@@ -849,7 +862,7 @@ export type AiGridExposurePage = { items: AiGridExposureSummary[]; nextCursor: s
 export type AiExposurePriority = {
   id: string; title: string; severity: string; priority: number;
   severityPoints: number; confidencePoints: number; publicExposurePoints: number;
-  criticalityPoints: number; recencyPoints: number; confidence: number;
+  criticalityPoints: number; recencyPoints: number; activityPoints: number; confidence: number;
   rootCauseArtifactId: string; breakpoint: string; owner: string; provider: string;
   accountId: string; lastObservedAt: string;
 };

@@ -19,6 +19,7 @@ import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ObservationE
 import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ScopeStatus;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityConnectorFeatureFlagService;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityObservationService;
+import com.prototype.vulnwatch.aisecurity.service.AiGridCapabilityService;
 import com.prototype.vulnwatch.aisecurity.service.AiSecuritySyncRunFacade;
 import com.prototype.vulnwatch.domain.SyncRun;
 import com.prototype.vulnwatch.domain.Tenant;
@@ -37,9 +38,10 @@ class CopilotStudioDiscoveryServiceTest {
         CopilotStudioDataverseClient dataverse = mock(CopilotStudioDataverseClient.class);
         AiSecurityObservationService observations = mock(AiSecurityObservationService.class);
         AiSecuritySyncRunFacade runs = mock(AiSecuritySyncRunFacade.class);
+        AiGridCapabilityService capabilities = mock(AiGridCapabilityService.class);
         AiSecurityConnectorFeatureFlagService featureFlags = mock(AiSecurityConnectorFeatureFlagService.class);
         CopilotStudioDiscoveryService service = new CopilotStudioDiscoveryService(
-                configs, credentials, dataverse, observations, runs, featureFlags, true);
+                configs, credentials, dataverse, observations, runs, capabilities, featureFlags, true);
 
         Tenant tenant = new Tenant();
         tenant.setId(UUID.randomUUID());

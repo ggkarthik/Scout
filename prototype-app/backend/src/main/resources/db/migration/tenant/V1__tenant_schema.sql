@@ -8865,3 +8865,322 @@ BEGIN
     END LOOP;
 END $$;
 --
+-- Tenant-side policy state records the platform baseline separately from tenant overrides.
+ALTER TABLE ${tenantSchema}.ai_grid_policy_selections
+    ADD COLUMN IF NOT EXISTS platform_policy_version varchar(32),
+    ADD COLUMN IF NOT EXISTS platform_default_selection varchar(32),
+    ADD COLUMN IF NOT EXISTS configuration_source varchar(32) NOT NULL DEFAULT 'PLATFORM_DEFAULT',
+    ADD COLUMN IF NOT EXISTS tenant_configured_at timestamp with time zone;
+
+ALTER TABLE ${tenantSchema}.ai_grid_policy_selections
+    ADD CONSTRAINT ai_grid_policy_selection_source_check
+    CHECK (configuration_source IN ('PLATFORM_DEFAULT', 'TENANT_OVERRIDE'));
+
+COMMENT ON COLUMN ${tenantSchema}.ai_grid_policy_selections.configuration_source IS 'Platform default or an explicit tenant override; platform policy metadata remains read-only here.';
+
+-- Microsoft connector gap-closure plumbing. Behaviour remains disabled until source gates pass.
+CREATE TABLE ${tenantSchema}.ai_agent_executions (
+    id uuid PRIMARY KEY,
+    tenant_id uuid NOT NULL REFERENCES platform.tenants(id),
+    provider varchar(64) NOT NULL,
+    provider_execution_id varchar(512) NOT NULL,
+    agent_artifact_id uuid REFERENCES ${tenantSchema}.ai_security_artifacts(id),
+    source varchar(64) NOT NULL,
+    started_at timestamptz,
+    completed_at timestamptz,
+    status varchar(32) NOT NULL,
+    outcome_category varchar(64),
+    approval_state varchar(64),
+    policy_state varchar(64),
+    classification varchar(64),
+    api_version varchar(64),
+    token_count bigint,
+    latency_ms bigint,
+    retry_count integer,
+    spend_micros bigint,
+    evidence_time timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (tenant_id, provider, provider_execution_id)
+);
+CREATE INDEX idx_ai_agent_executions_agent_time ON ${tenantSchema}.ai_agent_executions(agent_artifact_id, evidence_time DESC);
+
+CREATE TABLE ${tenantSchema}.ai_agent_execution_events (
+    id uuid PRIMARY KEY,
+    tenant_id uuid NOT NULL REFERENCES platform.tenants(id),
+    execution_id uuid NOT NULL REFERENCES ${tenantSchema}.ai_agent_executions(id) ON DELETE CASCADE,
+    sequence bigint NOT NULL,
+    event_time timestamptz NOT NULL,
+    event_type varchar(64) NOT NULL,
+    status varchar(32),
+    classification varchar(64),
+    evidence_time timestamptz NOT NULL,
+    UNIQUE (tenant_id, execution_id, sequence)
+);
+
+CREATE TABLE ${tenantSchema}.ai_agent_execution_cursors (
+    id uuid PRIMARY KEY,
+    tenant_id uuid NOT NULL REFERENCES platform.tenants(id),
+    connector_id uuid NOT NULL,
+    source varchar(64) NOT NULL,
+    scope_key varchar(512) NOT NULL,
+    provider_timestamp timestamptz,
+    provider_stable_id varchar(512),
+    lookback_days integer NOT NULL DEFAULT 30,
+    overlap_days integer NOT NULL DEFAULT 3,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (tenant_id, connector_id, source, scope_key)
+);
+
+CREATE TABLE ${tenantSchema}.ai_agent_execution_receipts (
+    id uuid PRIMARY KEY,
+    tenant_id uuid NOT NULL REFERENCES platform.tenants(id),
+    connector_id uuid NOT NULL,
+    source varchar(64) NOT NULL,
+    scope_key varchar(512) NOT NULL,
+    idempotency_key varchar(512) NOT NULL,
+    content_hash varchar(128) NOT NULL,
+    accepted_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (tenant_id, idempotency_key)
+);
+
+CREATE TABLE ${tenantSchema}.ai_security_connector_feature_flags (
+    tenant_id uuid NOT NULL REFERENCES platform.tenants(id),
+    feature_key varchar(128) NOT NULL,
+    enabled boolean NOT NULL DEFAULT false,
+    kill_switch boolean NOT NULL DEFAULT false,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, feature_key)
+);
+
+ALTER TABLE ${tenantSchema}.ai_agent_executions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ${tenantSchema}.ai_agent_execution_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ${tenantSchema}.ai_agent_execution_cursors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ${tenantSchema}.ai_agent_execution_receipts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ${tenantSchema}.ai_security_connector_feature_flags ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ${tenantSchema}.ai_agent_executions FORCE ROW LEVEL SECURITY;
+ALTER TABLE ${tenantSchema}.ai_agent_execution_events FORCE ROW LEVEL SECURITY;
+ALTER TABLE ${tenantSchema}.ai_agent_execution_cursors FORCE ROW LEVEL SECURITY;
+ALTER TABLE ${tenantSchema}.ai_agent_execution_receipts FORCE ROW LEVEL SECURITY;
+ALTER TABLE ${tenantSchema}.ai_security_connector_feature_flags FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_agent_executions
+    USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)))
+    WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_agent_execution_events
+    USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)))
+    WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_agent_execution_cursors
+    USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)))
+    WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_agent_execution_receipts
+    USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)))
+    WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_security_connector_feature_flags
+    USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)))
+    WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)));
+-- Runtime execution identifiers are tenant-scoped HMAC digests, never provider plaintext.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM ${tenantSchema}.ai_agent_executions)
+       OR EXISTS (SELECT 1 FROM ${tenantSchema}.ai_agent_execution_cursors)
+       OR EXISTS (SELECT 1 FROM ${tenantSchema}.ai_agent_execution_receipts) THEN
+        RAISE EXCEPTION 'runtime metadata tables must be empty before the HMAC identity boundary is installed';
+    END IF;
+END $$;
+
+ALTER TABLE ${tenantSchema}.ai_agent_executions
+    RENAME COLUMN provider_execution_id TO provider_execution_digest;
+
+ALTER TABLE ${tenantSchema}.ai_agent_execution_cursors
+    RENAME COLUMN provider_stable_id TO provider_stable_digest;
+
+ALTER TABLE ${tenantSchema}.ai_agent_executions
+    ADD COLUMN IF NOT EXISTS digest_key_version varchar(64) NOT NULL DEFAULT 'v1';
+
+ALTER TABLE ${tenantSchema}.ai_agent_executions
+    DROP CONSTRAINT IF EXISTS ai_agent_executions_tenant_id_provider_provider_execution_id_key;
+
+ALTER TABLE ${tenantSchema}.ai_agent_executions
+    ADD CONSTRAINT ai_agent_executions_tenant_provider_execution_digest_key
+        UNIQUE (tenant_id, provider, provider_execution_digest, digest_key_version);
+
+CREATE INDEX IF NOT EXISTS idx_ai_agent_executions_source_time
+    ON ${tenantSchema}.ai_agent_executions(source, evidence_time DESC);
+CREATE TABLE ${tenantSchema}.ai_security_copilot_studio_configs (
+    id uuid PRIMARY KEY,
+    tenant_id uuid NOT NULL REFERENCES platform.tenants(id),
+    organization_url varchar(512) NOT NULL,
+    credential_profile_id uuid NOT NULL REFERENCES ${tenantSchema}.ai_security_azure_credential_profiles(id),
+    discovery_enabled boolean NOT NULL DEFAULT false,
+    execution_enabled boolean NOT NULL DEFAULT false,
+    kill_switch boolean NOT NULL DEFAULT false,
+    schedule_cron varchar(128) NOT NULL DEFAULT '0 0 * * * *',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (tenant_id, organization_url)
+);
+ALTER TABLE ${tenantSchema}.ai_security_copilot_studio_configs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ${tenantSchema}.ai_security_copilot_studio_configs FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_security_copilot_studio_configs
+    USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)))
+    WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)));
+-- Append-only closure for AI runtime correlation, digest approvals, and connector rollout controls.
+CREATE TABLE ${tenantSchema}.ai_security_artifact_digest_baselines (
+    id uuid PRIMARY KEY,
+    tenant_id uuid NOT NULL REFERENCES platform.tenants(id),
+    artifact_id uuid NOT NULL REFERENCES ${tenantSchema}.ai_security_artifacts(id) ON DELETE CASCADE,
+    digest_kind varchar(64) NOT NULL,
+    algorithm varchar(64) NOT NULL,
+    key_version varchar(64) NOT NULL,
+    approved_digest varchar(256) NOT NULL,
+    approval_status varchar(32) NOT NULL,
+    approved_by varchar(255),
+    approved_at timestamptz,
+    revoked_by varchar(255),
+    revoked_at timestamptz,
+    source_run_id uuid,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT ai_security_digest_baseline_kind_check
+        CHECK (digest_kind IN ('PROMPT', 'TOOL_DEFINITION')),
+    CONSTRAINT ai_security_digest_baseline_status_check
+        CHECK (approval_status IN ('APPROVED', 'REVOKED')),
+    UNIQUE (tenant_id, artifact_id, digest_kind)
+);
+
+ALTER TABLE ${tenantSchema}.ai_security_artifact_digest_baselines ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ${tenantSchema}.ai_security_artifact_digest_baselines FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_security_artifact_digest_baselines
+    USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
+
+CREATE TABLE ${tenantSchema}.ai_security_artifact_digest_observations (
+    tenant_id uuid NOT NULL REFERENCES platform.tenants(id),
+    artifact_id uuid NOT NULL REFERENCES ${tenantSchema}.ai_security_artifacts(id) ON DELETE CASCADE,
+    digest_kind varchar(64) NOT NULL,
+    algorithm varchar(64) NOT NULL,
+    key_version varchar(64) NOT NULL,
+    observed_digest varchar(256) NOT NULL,
+    comparison_outcome varchar(64) NOT NULL,
+    source_run_id uuid NOT NULL,
+    observed_at timestamptz NOT NULL,
+    PRIMARY KEY (tenant_id, artifact_id, digest_kind),
+    CHECK (digest_kind IN ('PROMPT', 'TOOL_DEFINITION')),
+    CHECK (comparison_outcome IN ('UNAPPROVED', 'UNCHANGED', 'CHANGED_AFTER_APPROVAL',
+                                  'BASELINE_UNKNOWN_REAPPROVAL_REQUIRED'))
+);
+ALTER TABLE ${tenantSchema}.ai_security_artifact_digest_observations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ${tenantSchema}.ai_security_artifact_digest_observations FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_security_artifact_digest_observations
+    USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
+
+ALTER TABLE ${tenantSchema}.ai_agent_executions
+    ADD COLUMN agent_version_artifact_id uuid REFERENCES ${tenantSchema}.ai_security_artifacts(id),
+    ADD COLUMN provider_agent_digest varchar(256),
+    ADD COLUMN provider_agent_version_digest varchar(256),
+    ADD COLUMN correlation_status varchar(32) NOT NULL DEFAULT 'UNRESOLVED',
+    ADD COLUMN correlation_diagnostic varchar(128),
+    ADD CONSTRAINT ai_agent_execution_correlation_status_check
+        CHECK (correlation_status IN ('RESOLVED', 'UNRESOLVED', 'NOT_APPLICABLE'));
+
+ALTER TABLE ${tenantSchema}.ai_agent_execution_receipts
+    ADD COLUMN execution_id uuid REFERENCES ${tenantSchema}.ai_agent_executions(id) ON DELETE CASCADE;
+
+CREATE TABLE ${tenantSchema}.ai_agent_execution_participants (
+    id uuid PRIMARY KEY,
+    tenant_id uuid NOT NULL REFERENCES platform.tenants(id),
+    execution_id uuid NOT NULL REFERENCES ${tenantSchema}.ai_agent_executions(id) ON DELETE CASCADE,
+    artifact_id uuid NOT NULL REFERENCES ${tenantSchema}.ai_security_artifacts(id) ON DELETE CASCADE,
+    participant_role varchar(32) NOT NULL,
+    evidence_time timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT ai_agent_execution_participant_role_check
+        CHECK (participant_role IN ('MODEL', 'TOOL', 'PROMPT', 'COMPONENT')),
+    UNIQUE (tenant_id, execution_id, artifact_id, participant_role)
+);
+
+ALTER TABLE ${tenantSchema}.ai_agent_execution_participants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ${tenantSchema}.ai_agent_execution_participants FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_agent_execution_participants
+    USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
+CREATE INDEX idx_ai_agent_execution_participants_execution
+    ON ${tenantSchema}.ai_agent_execution_participants(execution_id, participant_role);
+
+ALTER TABLE ${tenantSchema}.ai_security_connector_feature_flags
+    ADD COLUMN updated_by varchar(255),
+    ADD COLUMN created_at timestamptz NOT NULL DEFAULT now();
+
+ALTER TABLE ${tenantSchema}.ai_security_copilot_studio_configs
+    ADD COLUMN allowed_dataverse_hosts_json jsonb NOT NULL DEFAULT '[]'::jsonb;
+
+CREATE INDEX idx_ai_security_digest_baselines_artifact
+    ON ${tenantSchema}.ai_security_artifact_digest_baselines(artifact_id, approval_status);
+-- Performance-only indexes for the virtual runtime graph overlay. V7 remains functionally compatible.
+CREATE INDEX idx_ai_agent_executions_tenant_agent_evidence
+    ON ${tenantSchema}.ai_agent_executions(tenant_id, agent_artifact_id, evidence_time DESC);
+
+CREATE INDEX idx_ai_agent_executions_tenant_version_evidence
+    ON ${tenantSchema}.ai_agent_executions(tenant_id, agent_version_artifact_id, evidence_time DESC)
+    WHERE agent_version_artifact_id IS NOT NULL;
+
+CREATE INDEX idx_ai_agent_execution_participants_artifact_evidence
+    ON ${tenantSchema}.ai_agent_execution_participants(tenant_id, artifact_id, evidence_time DESC, execution_id);
+-- migration-guard: tenant-only
+ALTER TABLE ${tenantSchema}.ai_grid_capability_observations
+    ADD COLUMN IF NOT EXISTS reason_code character varying(64),
+    ADD COLUMN IF NOT EXISTS evidence_scopes_json jsonb NOT NULL DEFAULT '[]'::jsonb;
+
+COMMENT ON COLUMN ${tenantSchema}.ai_grid_capability_observations.reason_code IS
+    'Stable connector outcome reason; not an inferred provider capability.';
+COMMENT ON COLUMN ${tenantSchema}.ai_grid_capability_observations.evidence_scopes_json IS
+    'Scope keys that directly produced this capability observation.';
+-- migration-guard: tenant-only
+CREATE TABLE IF NOT EXISTS ${tenantSchema}.ai_security_artifact_attribute_ownership (
+    tenant_id uuid NOT NULL,
+    artifact_id uuid NOT NULL,
+    scope_key character varying(255) NOT NULL,
+    attribute_key character varying(255) NOT NULL,
+    observed_at timestamp with time zone NOT NULL,
+    CONSTRAINT ai_security_artifact_attribute_ownership_pkey
+        PRIMARY KEY (tenant_id, artifact_id, scope_key, attribute_key),
+    CONSTRAINT ai_security_artifact_attribute_ownership_artifact_fkey
+        FOREIGN KEY (artifact_id) REFERENCES ${tenantSchema}.ai_security_artifacts(id) ON DELETE CASCADE
+);
+
+ALTER TABLE ${tenantSchema}.ai_security_artifact_attribute_ownership ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ${tenantSchema}.ai_security_artifact_attribute_ownership FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation
+    ON ${tenantSchema}.ai_security_artifact_attribute_ownership
+    USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
+
+CREATE TABLE ${tenantSchema}.ai_grid_capability_manifests (
+    id uuid PRIMARY KEY,
+    tenant_id uuid NOT NULL REFERENCES platform.tenants(id),
+    run_id uuid NOT NULL,
+    provider varchar(32) NOT NULL,
+    connector_id uuid NOT NULL,
+    account_id varchar(255) NOT NULL,
+    region varchar(128) NOT NULL,
+    capability_id varchar(128) NOT NULL,
+    required_scope_keys_json jsonb NOT NULL,
+    status varchar(32) NOT NULL DEFAULT 'REGISTERED',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    finalized_at timestamptz,
+    CONSTRAINT ai_grid_capability_manifests_status_check
+        CHECK (status IN ('REGISTERED','FINALIZED')),
+    CONSTRAINT ai_grid_capability_manifests_run_capability_region_key
+        UNIQUE (tenant_id, run_id, provider, account_id, region, capability_id)
+);
+
+CREATE INDEX idx_ai_grid_capability_manifests_unfinished
+    ON ${tenantSchema}.ai_grid_capability_manifests (created_at)
+    WHERE status = 'REGISTERED';
+
+ALTER TABLE ${tenantSchema}.ai_grid_capability_manifests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ${tenantSchema}.ai_grid_capability_manifests FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_grid_capability_manifests
+    USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
+    WITH CHECK (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);

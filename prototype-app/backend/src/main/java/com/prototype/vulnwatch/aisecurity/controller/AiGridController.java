@@ -148,17 +148,9 @@ public class AiGridController {
         return api.executeSelectedPolicies(tenant(), request.policyIds());
     }
     @GetMapping("/ai-policies") public List<AiGridApiService.PolicyView> policies() { return api.policies(tenant()); }
-    /** Rich tenant policy view retained while the UI moves to the governed route. */
-    @GetMapping("/ai-policies/details")
-    public List<AiSecurityApiService.PolicyResponse> policyDetails() {
-        Tenant tenant = tenant();
-        return policyCompatibility.getObject().policies(tenant);
-    }
-    @org.springframework.web.bind.annotation.PatchMapping("/ai-policies/{id}/enabled")
-    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
-    public AiSecurityApiService.PolicyResponse updatePolicy(@PathVariable String id, @RequestBody PolicyStateRequest request) {
-        Tenant tenant = tenant();
-        return policyCompatibility.getObject().updatePolicy(tenant, id, request.enabled(), actors.currentActor().userId());
+    @GetMapping("/ai-policies/{id}")
+    public AiSecurityApiService.PolicyResponse policyDetail(@PathVariable String id) {
+        return policyCompatibility.getObject().policy(tenant(), id);
     }
     @GetMapping("/ai-policies/{id}/versions")
     public List<AiGridApiService.PolicyView> policyVersions(@PathVariable String id) {
@@ -228,7 +220,6 @@ public class AiGridController {
     }
     public record SelectionRequest(String selection, String reason) {}
     public record ExecutePoliciesRequest(Set<String> policyIds) {}
-    public record PolicyStateRequest(boolean enabled) {}
     public record ScopeUpdateRequest(String mode, String conditionLogic, List<PolicyScopeConditionResponse> conditions) {}
     public record ExceptionRequest(UUID artifactId, String override, String reason) {}
     public record ExceptionRuleRequest(String conditionLogic, List<PolicyScopeConditionResponse> conditions, String override, String reason) {}

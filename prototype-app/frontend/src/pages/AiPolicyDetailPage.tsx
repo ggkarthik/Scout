@@ -244,8 +244,8 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
   const [findingsStatusFilter, setFindingsStatusFilter] = React.useState('OPEN');
 
   const policiesQuery = useQuery({
-    queryKey: ['ai-security-policies'],
-    queryFn: api.listAiGridPolicyDetails,
+    queryKey: ['ai-security-policy', policyId],
+    queryFn: () => api.getAiGridPolicyDetail(policyId),
   });
   const policyMetadataQuery = useQuery({
     queryKey: ['ai-grid-policies'],
@@ -265,7 +265,7 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
 
   const policyMetadata: AiGridPolicy | null = policyMetadataQuery.data?.find((item) => item.policyId === policyId) ?? null;
   const nativeKinds = inferredNativeKinds(policyMetadata);
-  const legacyPolicy = policiesQuery.data?.find((item) => item.id === policyId) ?? null;
+  const legacyPolicy = policiesQuery.data ?? null;
   const policy: AiSecurityPolicy | null = legacyPolicy ?? (policyMetadata ? {
     id: policyMetadata.policyId,
     version: policyMetadata.version,

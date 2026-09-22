@@ -30,18 +30,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class AiSecurityObservationService {
 
     public static final String CONTRACT_VERSION = "1.0";
-    private static final Set<String> RELATIONSHIP_TYPES = Set.of(
-            "USES_MODEL", "USES_GUARDRAIL", "USES_KNOWLEDGE_BASE", "USES_DATA_SOURCE",
-            "BACKED_BY_DATA_STORE", "USES_SEARCH_INDEX", "EXPOSES_MCP", "CONNECTS_TO_MCP",
-            "CONTAINS_MCP_TARGET", "ROUTES_TO", "INVOKES_LAMBDA", "ASSUMES_ROLE", "READS_FROM_S3", "LOGS_TO", "SUPERVISES_AGENT",
-            "CONTAINS_PROJECT", "DEPLOYS_MODEL", "USES_TOOL",
-            "VERSION_OF", "ACTIVE_VERSION", "USES_PROMPT", "HAS_COMPONENT",
-            "USES_MANAGED_IDENTITY", "HAS_PRIVATE_ENDPOINT", "USES_KEY_VAULT_KEY",
-            "CONTAINS_RESOURCE", "HAS_DEPLOYMENT", "RUNS_PIPELINE", "HAS_CHANNEL",
-            "HAS_ROLE_ASSIGNMENT", "CONTAINS", "USES_EXECUTION_ROLE", "USES_NETWORK",
-            "USES_ENDPOINT_CONFIGURATION", "PRODUCES_MODEL", "USES_DATA_CONNECTION",
-            "READS_FROM_STORAGE_ACCOUNT");
-
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final TenantSchemaExecutionService tenantExecution;
@@ -49,7 +37,6 @@ public class AiSecurityObservationService {
     private final AiSecuritySyncRunFacade syncRunFacade;
     private final AiSecurityMetadataSanitizer metadataSanitizer;
     private AiGridPipelineService aiGridPipelineService;
-    private AiGridCapabilityService aiGridCapabilityService;
     private AiSecurityDigestBaselineService digestBaselines;
 
     public AiSecurityObservationService(
@@ -71,11 +58,6 @@ public class AiSecurityObservationService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setAiGridPipelineService(AiGridPipelineService aiGridPipelineService) {
         this.aiGridPipelineService = aiGridPipelineService;
-    }
-
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    public void setAiGridCapabilityService(AiGridCapabilityService aiGridCapabilityService) {
-        this.aiGridCapabilityService = aiGridCapabilityService;
     }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -151,7 +133,7 @@ public class AiSecurityObservationService {
         combinedDiagnostics.addAll(metadataDiagnostics.stream().limit(1).toList());
         boolean unknownRelationship = false;
         for (RelationshipObservation relationship : safe(envelope.relationships())) {
-            if (!RELATIONSHIP_TYPES.contains(relationship.relationshipType())) {
+            if (!AiGridRelationshipSemantics.ALLOWED_RELATIONSHIPS.contains(relationship.relationshipType())) {
                 unknownRelationship = true;
                 combinedDiagnostics.add(new Diagnostic(
                         "UNKNOWN_RELATIONSHIP_TYPE",
@@ -175,7 +157,6 @@ public class AiSecurityObservationService {
                     ? ScopeStatus.PARTIAL
                     : envelope.completionStatus();
             finishScope(envelope, finalStatus, accepted, combinedDiagnostics);
-            if (aiGridCapabilityService != null) aiGridCapabilityService.recordScope(tenant, envelope, finalStatus);
             if (finalStatus == ScopeStatus.COMPLETE) {
                 reconcileCompleteScope(envelope);
                 if (aiGridPipelineService != null) {
@@ -305,15 +286,22 @@ public class AiSecurityObservationService {
     private UUID upsertArtifact(Tenant tenant, ObservationEnvelopeV1 envelope, ArtifactObservation artifact,
                                 Map<String, Object> attributes) {
         UUID id = UUID.randomUUID();
-        List<String> previouslyOwnedAttributes = jdbc.query("""
+        boolean replaceOwnedAttributes = envelope.completionStatus() == ScopeStatus.COMPLETE
+                && envelope.expectedChunks() == 1;
+        List<String> previouslyOwnedAttributes = replaceOwnedAttributes ? jdbc.query("""
                 select o.attribute_key
                   from ai_security_artifact_attribute_ownership o
                   join ai_security_artifacts a on a.id=o.artifact_id and a.tenant_id=o.tenant_id
                  where o.tenant_id=:tenantId and a.provider=:provider
                    and a.provider_resource_id=:providerResourceId and o.scope_key=:scopeKey
+                   and not exists (
+                       select 1 from ai_security_artifact_attribute_ownership other
+                        where other.tenant_id=o.tenant_id and other.artifact_id=o.artifact_id
+                          and other.attribute_key=o.attribute_key and other.scope_key<>o.scope_key
+                   )
                 """, new MapSqlParameterSource().addValue("tenantId", tenant.getId())
                 .addValue("provider", envelope.provider()).addValue("providerResourceId", artifact.providerResourceId())
-                .addValue("scopeKey", envelope.scopeKey()), (rs, rowNum) -> rs.getString(1));
+                .addValue("scopeKey", envelope.scopeKey()), (rs, rowNum) -> rs.getString(1)) : List.of();
         MapSqlParameterSource params = base(envelope)
                 .addValue("id", id)
                 .addValue("tenantId", tenant.getId())
@@ -360,10 +348,12 @@ public class AiSecurityObservationService {
                         pii_last_scanned_at = excluded.pii_last_scanned_at
                 returning id
                 """, params, UUID.class);
-        jdbc.update("""
-                delete from ai_security_artifact_attribute_ownership
-                 where tenant_id=:tenantId and artifact_id=:artifactId and scope_key=:scopeKey
-                """, Map.of("tenantId", tenant.getId(), "artifactId", artifactId, "scopeKey", envelope.scopeKey()));
+        if (replaceOwnedAttributes) {
+            jdbc.update("""
+                    delete from ai_security_artifact_attribute_ownership
+                     where tenant_id=:tenantId and artifact_id=:artifactId and scope_key=:scopeKey
+                    """, Map.of("tenantId", tenant.getId(), "artifactId", artifactId, "scopeKey", envelope.scopeKey()));
+        }
         if (!attributes.isEmpty()) {
             jdbc.update("""
                     insert into ai_security_artifact_attribute_ownership

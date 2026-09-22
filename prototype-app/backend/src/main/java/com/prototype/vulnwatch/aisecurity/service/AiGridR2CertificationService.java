@@ -130,9 +130,9 @@ public class AiGridR2CertificationService {
                 select count(*) from platform.ai_grid_release_manifest_items
                  where release_id='R2' and subject_type='CORRELATION'
                 """, Map.of(), Integer.class);
-        if (manifestCount == null || manifestCount != 3 || correlations.size() < 3) return new Gate("TEMPLATE_PRECISION", "BLOCKED",
-                "R2 requires its immutable three-correlation release manifest");
-        return blocked.isEmpty() ? new Gate("TEMPLATE_PRECISION", "PASS", "All three templates passed approved thresholds")
+        if (manifestCount == null || manifestCount != 6 || correlations.size() != 6) return new Gate("TEMPLATE_PRECISION", "BLOCKED",
+                "R2 requires its immutable six-correlation release manifest");
+        return blocked.isEmpty() ? new Gate("TEMPLATE_PRECISION", "PASS", "All six templates passed approved thresholds")
                 : new Gate("TEMPLATE_PRECISION", "BLOCKED", "Missing current precision approval: " + blocked);
     }
 
@@ -228,7 +228,7 @@ public class AiGridR2CertificationService {
     }
 
     private List<Tenant> measurableTenants() {
-        List<UUID> ids = jdbc.query("select tenant_id from platform.tenant_schema_versions where status='CURRENT' and current_version>=56",
+        List<UUID> ids = jdbc.query("select tenant_id from platform.tenant_schema_versions where status='CURRENT' and current_version>=1",
                 (rs, n) -> rs.getObject(1, UUID.class));
         return ids.stream().map(tenants::findById).flatMap(java.util.Optional::stream).toList();
     }

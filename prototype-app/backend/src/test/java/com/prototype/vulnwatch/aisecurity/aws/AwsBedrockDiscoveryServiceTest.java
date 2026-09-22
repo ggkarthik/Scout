@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.prototype.vulnwatch.aisecurity.service.AiSecurityDigestService;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -40,7 +41,9 @@ import software.amazon.awssdk.services.bedrock.model.GuardrailWordPolicy;
 class AwsBedrockDiscoveryServiceTest {
 
     private final AwsBedrockDiscoveryService service = new AwsBedrockDiscoveryService(
-            null, null, null, new ObjectMapper(), null, null, null, null, null, false);
+            null, null, null, new ObjectMapper(), null, null, null, null, null, null,
+            new AiSecurityDigestService("01234567890123456789012345678901", "v1", "", ""),
+            false, 10_000);
 
     @Test
     void capturesBoundedStructuralGuardrailConfigurationWithoutFreeFormMessages() {

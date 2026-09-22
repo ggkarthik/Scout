@@ -6,9 +6,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
-import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ObservationEnvelopeV1;
-import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ScopeStatus;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.service.TenantSchemaExecutionService;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -19,6 +18,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class AiGridCapabilityService {
     private static final List<String> DECISIVE = List.of("COMPLETE");
+    private static final Set<String> AWS_GLOBAL_FAMILIES = Set.of("IAM_GLOBAL");
     private final NamedParameterJdbcTemplate jdbc;
     private final TenantSchemaExecutionService tenantExecution;
 
@@ -85,39 +85,136 @@ public class AiGridCapabilityService {
         return jdbc.query("""
                 select distinct on (o.provider,o.capability_id,o.account_id,o.region)
                        o.provider,o.capability_id,o.connector,o.account_id,o.region,o.resource_family,
-                       o.status,o.observed_at,o.expires_at,o.detail,d.optional,d.remediation
+                       o.status,o.observed_at,o.expires_at,o.reason_code,o.evidence_scopes_json::text,
+                       o.detail,d.optional,d.remediation
                   from ai_grid_capability_observations o
                   join platform.ai_grid_capability_definitions d on d.capability_id=o.capability_id
                  order by o.provider,o.capability_id,o.account_id,o.region,o.observed_at desc,o.id desc
                 """, (rs, n) -> new CapabilityView(rs.getString(1), rs.getString(2), rs.getString(3),
                 rs.getString(4), rs.getString(5), rs.getString(6), rs.getString(7), rs.getTimestamp(8).toInstant(),
-                timestamp(rs.getTimestamp(9)), rs.getString(10), rs.getBoolean(11), rs.getString(12)));
+                timestamp(rs.getTimestamp(9)), rs.getString(10), rs.getString(11), rs.getString(12),
+                rs.getBoolean(13), rs.getString(14)));
     }
 
-    /** Persist one observation per capability represented by a completed collector scope. */
-    public void recordScope(Tenant tenant, ObservationEnvelopeV1 envelope, ScopeStatus scopeStatus) {
-        for (String capability : capabilitiesFor(envelope.provider(), envelope.resourceFamily())) {
-            jdbc.update("""
-                    insert into ai_grid_capability_observations
-                        (id,tenant_id,run_id,provider,capability_id,connector,account_id,region,resource_family,
-                         observed_at,expires_at,status,reason_code,evidence_scopes_json,detail)
-                    values (:id,:tenantId,:runId,:provider,:capability,:connector,:accountId,:region,:family,
-                            :observedAt,:expiresAt,:status,:reasonCode,cast(:evidenceScopes as jsonb),:detail)
-                    on conflict (tenant_id,run_id,provider,capability_id,account_id,region) do update set
-                        observed_at=excluded.observed_at,expires_at=excluded.expires_at,status=excluded.status,
-                        detail=excluded.detail,resource_family=excluded.resource_family,
-                        reason_code=excluded.reason_code,evidence_scopes_json=excluded.evidence_scopes_json
-                    """, new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("tenantId", tenant.getId())
-                    .addValue("runId", envelope.runId()).addValue("provider", envelope.provider().toUpperCase())
-                    .addValue("capability", capability).addValue("connector", envelope.connectorId().toString())
-                    .addValue("accountId", envelope.accountId()).addValue("region", envelope.region())
-                    .addValue("family", envelope.resourceFamily()).addValue("observedAt", Timestamp.from(envelope.observedAt()))
-                    .addValue("expiresAt", Timestamp.from(envelope.observedAt().plusSeconds(86400)))
-                    .addValue("status", capabilityStatus(scopeStatus))
-                    .addValue("reasonCode", reasonCode(scopeStatus))
-                    .addValue("evidenceScopes", "[\"" + escapeJson(envelope.scopeKey()) + "\"]")
-                    .addValue("detail", "collector scope " + envelope.scopeKey()));
-        }
+    public void registerRun(Tenant tenant, UUID runId, String provider, UUID connectorId, String accountId,
+                            List<String> regions, List<String> enabledFamilies) {
+        reconcileAbandonedRuns(tenant);
+        tenantExecution.run(tenant, () -> {
+            Map<String, List<String>> familiesByCapability = new LinkedHashMap<>();
+            for (String family : enabledFamilies) {
+                for (String capability : declaredCapabilities(provider, family)) {
+                    familiesByCapability.computeIfAbsent(capability, ignored -> new ArrayList<>()).add(family);
+                }
+            }
+            if (familiesByCapability.isEmpty()) return null;
+            Integer known = jdbc.queryForObject("""
+                    select count(*) from platform.ai_grid_capability_definitions
+                     where capability_id in (:ids) and lifecycle='ACTIVE'
+                    """, Map.of("ids", familiesByCapability.keySet()), Integer.class);
+            if (known == null || known != familiesByCapability.size()) {
+                throw new IllegalStateException("Collector declares an unknown or inactive capability");
+            }
+            List<String> effectiveRegions = regions == null || regions.isEmpty() ? List.of("GLOBAL") : regions;
+            for (Map.Entry<String, List<String>> entry : familiesByCapability.entrySet()) {
+                boolean global = "AWS".equalsIgnoreCase(provider)
+                        && entry.getValue().stream().allMatch(AWS_GLOBAL_FAMILIES::contains);
+                for (String region : global ? List.of("GLOBAL") : effectiveRegions) {
+                    List<String> scopeKeys = entry.getValue().stream().map(family -> scopeKey(
+                            provider, accountId,
+                            "AWS".equalsIgnoreCase(provider) && AWS_GLOBAL_FAMILIES.contains(family)
+                                    ? "GLOBAL" : region,
+                            family)).distinct().sorted().toList();
+                    jdbc.update("""
+                            insert into ai_grid_capability_manifests
+                                (id,tenant_id,run_id,provider,connector_id,account_id,region,capability_id,
+                                 required_scope_keys_json,status)
+                            values (:id,:tenantId,:runId,:provider,:connectorId,:accountId,:region,:capability,
+                                    cast(:scopeKeys as jsonb),'REGISTERED')
+                            on conflict (tenant_id,run_id,provider,account_id,region,capability_id) do nothing
+                            """, new MapSqlParameterSource().addValue("id", UUID.randomUUID())
+                            .addValue("tenantId", tenant.getId()).addValue("runId", runId)
+                            .addValue("provider", provider.toUpperCase()).addValue("connectorId", connectorId)
+                            .addValue("accountId", accountId).addValue("region", region)
+                            .addValue("capability", entry.getKey()).addValue("scopeKeys", jsonArray(scopeKeys)));
+                }
+            }
+            return null;
+        });
+    }
+
+    /** Finalizes orphaned manifests after a process restart so stale COMPLETE evidence cannot survive silently. */
+    public int reconcileAbandonedRuns(Tenant tenant) {
+        List<UUID> abandoned = tenantExecution.run(tenant, () -> jdbc.query("""
+                select distinct run_id from ai_grid_capability_manifests
+                 where status='REGISTERED' and created_at < now() - interval '1 hour'
+                 order by run_id
+                """, (rs, row) -> rs.getObject(1, UUID.class)));
+        abandoned.forEach(runId -> finalizeRun(tenant, runId));
+        return abandoned.size();
+    }
+
+    public void finalizeRun(Tenant tenant, UUID runId) {
+        tenantExecution.run(tenant, () -> {
+            List<CapabilityManifest> manifests = jdbc.query("""
+                    select id,provider,connector_id,account_id,region,capability_id
+                      from ai_grid_capability_manifests
+                     where run_id=:runId and status='REGISTERED'
+                     order by provider,account_id,region,capability_id
+                    """, Map.of("runId", runId), (rs, row) -> new CapabilityManifest(
+                    rs.getObject(1, UUID.class), rs.getString(2), rs.getObject(3, UUID.class),
+                    rs.getString(4), rs.getString(5), rs.getString(6)));
+            for (CapabilityManifest manifest : manifests) {
+                List<ScopeEvidence> evidence = jdbc.query("""
+                        select expected.scope_key,scope.resource_family,scope.status
+                          from ai_grid_capability_manifests manifest
+                          cross join lateral jsonb_array_elements_text(manifest.required_scope_keys_json)
+                               expected(scope_key)
+                          left join ai_security_snapshot_scopes scope
+                            on scope.run_id=manifest.run_id and scope.scope_key=expected.scope_key
+                         where manifest.id=:id order by expected.scope_key
+                        """, Map.of("id", manifest.id()), (rs, row) -> new ScopeEvidence(
+                        rs.getString(2), rs.getString(3), rs.getString(1)));
+                List<String> missing = evidence.stream().filter(item -> item.status() == null)
+                        .map(ScopeEvidence::scopeKey).toList();
+                String status = missing.isEmpty()
+                        ? aggregateStatus(evidence.stream().map(ScopeEvidence::status).toList()) : "PARTIAL";
+                String reason = missing.isEmpty() ? reasonCode(status) : "MISSING_EVIDENCE_SCOPE";
+                String detail = missing.isEmpty() ? "Finalized from all registered evidence scopes"
+                        : "missing required collector scopes: " + String.join(",", missing);
+                jdbc.update("""
+                        insert into ai_grid_capability_observations
+                            (id,tenant_id,run_id,provider,capability_id,connector,account_id,region,resource_family,
+                             observed_at,expires_at,status,reason_code,evidence_scopes_json,detail)
+                        values (:id,:tenantId,:runId,:provider,:capability,:connector,:accountId,:region,'RUN_MANIFEST',
+                                :observedAt,:expiresAt,:status,:reasonCode,cast(:evidenceScopes as jsonb),:detail)
+                        on conflict (tenant_id,run_id,provider,capability_id,account_id,region) do update set
+                            observed_at=excluded.observed_at,expires_at=excluded.expires_at,status=excluded.status,
+                            reason_code=excluded.reason_code,evidence_scopes_json=excluded.evidence_scopes_json,
+                            detail=excluded.detail,resource_family=excluded.resource_family
+                        """, new MapSqlParameterSource().addValue("id", UUID.randomUUID())
+                        .addValue("tenantId", tenant.getId()).addValue("runId", runId)
+                        .addValue("provider", manifest.provider()).addValue("capability", manifest.capabilityId())
+                        .addValue("connector", manifest.connectorId().toString()).addValue("accountId", manifest.accountId())
+                        .addValue("region", manifest.region()).addValue("observedAt", Timestamp.from(Instant.now()))
+                        .addValue("expiresAt", Timestamp.from(Instant.now().plusSeconds(86400)))
+                        .addValue("status", status).addValue("reasonCode", reason)
+                        .addValue("evidenceScopes", jsonArray(evidence.stream().filter(item -> item.status() != null)
+                                .map(ScopeEvidence::scopeKey).toList())).addValue("detail", detail));
+                jdbc.update("update ai_grid_capability_manifests set status='FINALIZED',finalized_at=now() where id=:id",
+                        Map.of("id", manifest.id()));
+            }
+            return null;
+        });
+    }
+
+    private String scopeKey(String provider, String accountId, String region, String family) {
+        return provider.toUpperCase() + ":" + accountId + ":" + region + ":" + family;
+    }
+
+    private String aggregateStatus(List<String> statuses) {
+        for (String status : List.of("UNAUTHORIZED", "ERROR", "UNSUPPORTED_API", "DISABLED", "PARTIAL"))
+            if (statuses.contains(status)) return status;
+        return statuses.stream().allMatch("COMPLETE"::equals) ? "COMPLETE" : "PARTIAL";
     }
 
     public Map<CapabilityKey, CapabilityState> latestIndex() {
@@ -135,7 +232,7 @@ public class AiGridCapabilityService {
         return Map.copyOf(result);
     }
 
-    private List<String> capabilitiesFor(String provider, String resourceFamily) {
+    public static List<String> declaredCapabilities(String provider, String resourceFamily) {
         String family = resourceFamily == null ? "" : resourceFamily.toUpperCase();
         if ("AWS".equalsIgnoreCase(provider)) {
             return switch (family) {
@@ -148,10 +245,11 @@ public class AiGridCapabilityService {
                 case "BEDROCK_GUARDRAILS" -> List.of("BEDROCK_GUARDRAILS");
                 case "BEDROCK_KNOWLEDGE_BASES", "BEDROCK_DATA_SOURCES", "BEDROCK_DATA_STORES" -> List.of("BEDROCK_KNOWLEDGE_BASES");
                 case "BEDROCK_DEPLOYABLE_MODELS", "BEDROCK_INFERENCE_PROFILES", "BEDROCK_MODEL_CUSTOMIZATION_JOBS" -> List.of("BEDROCK_MODELS_JOBS");
-                case "BEDROCK_PROMPTS", "BEDROCK_FLOWS" -> List.of("BEDROCK_PROMPTS_TOOLS");
+                case "BEDROCK_PROMPTS", "BEDROCK_FLOWS", "BEDROCK_AGENT_DEFINITIONS" -> List.of("BEDROCK_PROMPTS_TOOLS");
                 case "BEDROCK_INVOCATION_LOGGING" -> List.of("BEDROCK_INVOCATION_LOGGING");
-                case "IAM_GLOBAL" -> List.of("IAM_ROLE_POLICIES");
+                case "IAM_GLOBAL" -> List.of("IAM_ROLE_POLICIES", "AWS_EFFECTIVE_ACCESS");
                 case "LAMBDA_URLS" -> List.of("LAMBDA_URLS");
+                case "S3_EXPOSURE" -> List.of("AWS_LINKED_DATA_STORES");
                 case "AWS_AGENTCORE_RUNTIME", "AWS_AGENTCORE_RUNTIMES", "AWS_AGENTCORE_BROWSERS",
                         "AWS_AGENTCORE_CODE_INTERPRETERS", "AWS_AGENTCORE_MEMORIES" -> List.of("AGENTCORE_RUNTIME_TOOLS");
                 case "AWS_AGENTCORE_GATEWAYS", "AWS_AGENTCORE_GATEWAY_TARGETS" -> List.of("AGENTCORE_GATEWAYS_TARGETS");
@@ -179,29 +277,26 @@ public class AiGridCapabilityService {
             if (family.startsWith("AZURE_RBAC")) return List.of("RBAC_ASSIGNMENTS");
             if (family.startsWith("AZURE_PURVIEW")) return List.of("PURVIEW_CLASSIFICATION");
         }
+        if ("MICROSOFT_COPILOT".equalsIgnoreCase(provider) && "COPILOT_STUDIO".equals(family)) {
+            return List.of("COPILOT_STUDIO_METADATA");
+        }
         return List.of();
     }
 
-    private String capabilityStatus(ScopeStatus status) {
+    private String reasonCode(String status) {
         return switch (status) {
-            case COMPLETE -> "COMPLETE";
-            case DISABLED -> "DISABLED";
-            case UNAUTHORIZED -> "UNAUTHORIZED";
-            case PARTIAL -> "PARTIAL";
-            case FAILED -> "ERROR";
-            case UNSUPPORTED -> "UNSUPPORTED_API";
+            case "COMPLETE" -> "OBSERVED";
+            case "DISABLED" -> "CONNECTOR_DISABLED";
+            case "UNAUTHORIZED" -> "MISSING_PERMISSION";
+            case "UNSUPPORTED_API" -> "UNSUPPORTED_API";
+            case "ERROR" -> "COLLECTOR_ERROR";
+            default -> "PARTIAL_EVIDENCE";
         };
     }
 
-    private String reasonCode(ScopeStatus status) {
-        return switch (status) {
-            case COMPLETE -> "OBSERVED";
-            case DISABLED -> "CONNECTOR_DISABLED";
-            case UNAUTHORIZED -> "MISSING_PERMISSION";
-            case PARTIAL -> "PARTIAL_EVIDENCE";
-            case FAILED -> "COLLECTOR_ERROR";
-            case UNSUPPORTED -> "UNSUPPORTED_API";
-        };
+    private String jsonArray(List<String> values) {
+        return values.stream().map(value -> "\"" + escapeJson(value) + "\"")
+                .collect(java.util.stream.Collectors.joining(",", "[", "]"));
     }
 
     private String escapeJson(String value) {
@@ -213,5 +308,9 @@ public class AiGridCapabilityService {
     public record CapabilityState(String status, Instant observedAt, Instant expiresAt) {}
     public record CapabilityView(String provider, String capabilityId, String connector, String accountId, String region,
                                  String resourceFamily, String status, Instant observedAt, Instant expiresAt,
-                                 String detail, boolean optional, String remediation) {}
+                                 String reasonCode, String evidenceScopesJson, String detail,
+                                 boolean optional, String remediation) {}
+    private record ScopeEvidence(String family, String status, String scopeKey) {}
+    private record CapabilityManifest(UUID id, String provider, UUID connectorId, String accountId,
+                                      String region, String capabilityId) {}
 }

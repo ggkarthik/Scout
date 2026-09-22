@@ -18,6 +18,7 @@ import com.prototype.vulnwatch.aisecurity.service.AiSecurityConnectorFeatureFlag
 import com.prototype.vulnwatch.aisecurity.service.AiAgentExecutionIngestionService;
 import com.prototype.vulnwatch.aisecurity.service.AiSecuritySyncRunFacade;
 import com.prototype.vulnwatch.aisecurity.service.AiGridBudgetService;
+import com.prototype.vulnwatch.aisecurity.service.AiGridCapabilityService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridProviderCallCounter;
 import com.prototype.vulnwatch.aisecurity.service.AiGridRunMetricsService;
 import com.prototype.vulnwatch.domain.SyncRun;
@@ -63,6 +64,7 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
     private final AiGridBudgetService budgets;
     private final AiGridProviderCallCounter providerCalls;
     private final AiGridRunMetricsService runMetrics;
+    private final AiGridCapabilityService capabilities;
     private final ObjectMapper objectMapper;
     private final boolean enabled;
     private final boolean foundryAgentsEnabled;
@@ -70,6 +72,7 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
     private final boolean searchDataPlaneEnabled;
     private final boolean purviewPiiEnabled;
     private final boolean runtimeEnabled;
+    private final long providerCallCeiling;
     private final AzurePurviewClassificationClient purview;
     private final AiAgentExecutionIngestionService runtimeIngestion;
     private final AiSecurityConnectorFeatureFlagService featureFlags;
@@ -87,6 +90,7 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
             AiGridBudgetService budgets,
             AiGridProviderCallCounter providerCalls,
             AiGridRunMetricsService runMetrics,
+            AiGridCapabilityService capabilities,
             ObjectMapper objectMapper,
             AzurePurviewClassificationClient purview,
             AiAgentExecutionIngestionService runtimeIngestion,
@@ -96,7 +100,8 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
             @Value("${app.ai-security.azure.classic-foundry-agents.enabled:false}") boolean classicFoundryAgentsEnabled,
             @Value("${app.ai-security.azure.search-data-plane.enabled:false}") boolean searchDataPlaneEnabled,
             @Value("${app.ai-security.azure.purview-pii.enabled:false}") boolean purviewPiiEnabled,
-            @Value("${app.ai-security.runtime.enabled:false}") boolean runtimeEnabled
+            @Value("${app.ai-security.runtime.enabled:false}") boolean runtimeEnabled,
+            @Value("${app.ai-security.provider-call-ceiling:10000}") long providerCallCeiling
     ) {
         this.connectors = connectors;
         this.credentials = credentials;
@@ -110,6 +115,7 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         this.budgets = budgets;
         this.providerCalls = providerCalls;
         this.runMetrics = runMetrics;
+        this.capabilities = capabilities;
         this.objectMapper = objectMapper;
         this.purview = purview;
         this.runtimeIngestion = runtimeIngestion;
@@ -120,6 +126,7 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         this.searchDataPlaneEnabled = searchDataPlaneEnabled;
         this.purviewPiiEnabled = purviewPiiEnabled;
         this.runtimeEnabled = runtimeEnabled;
+        this.providerCallCeiling = providerCallCeiling;
     }
 
     @Override
@@ -162,7 +169,9 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         Instant startedAt = Instant.now();
         int observed = 0;
         int incomplete = 0;
-        try (var measurement = providerCalls.begin()) {
+        capabilities.registerRun(tenant, run.getId(), "AZURE", connector.id(), connector.subscriptionId(),
+                connector.regions(), families);
+        try (var measurement = providerCalls.begin(providerCallCeiling)) {
             try {
                 budgets.admit(tenant, run.getId(), "AZURE", families, "*", "*");
                 try (var permit = admission.acquire(connector.subscriptionId())) {
@@ -195,6 +204,7 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
                     }
                 }
                 int persistedArtifacts = observations.countPersistedArtifacts(tenant, run.getId());
+                capabilities.finalizeRun(tenant, run.getId());
                 runMetrics.recordProviderCalls(tenant, run.getId(), "AZURE", measurement.count());
                 budgets.reconcile(tenant, run.getId(), "AZURE");
                 runs.complete(tenant.getId(), run.getId(), persistedArtifacts, incomplete, json(Map.of(
@@ -206,6 +216,7 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
                 metrics.recordRun("completed");
                 return new DiscoveryResult(run.getId(), persistedArtifacts, incomplete);
             } catch (Exception exception) {
+                capabilities.finalizeRun(tenant, run.getId());
                 runMetrics.recordProviderCalls(tenant, run.getId(), "AZURE", measurement.count());
                 budgets.reconcile(tenant, run.getId(), "AZURE");
                 runs.fail(tenant.getId(), run.getId(), "Azure AI Security discovery failed: "
@@ -408,8 +419,8 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
             return new ScopePayload(family, region, ScopeStatus.COMPLETE, artifacts, relationships, List.of());
         }
         ScopeStatus status = "UNSUPPORTED_API_VERSION".equals(failure.code())
-                ? ScopeStatus.UNSUPPORTED
-                : failure.retryable() ? ScopeStatus.FAILED : ScopeStatus.PARTIAL;
+                ? ScopeStatus.UNSUPPORTED_API
+                : failure.retryable() ? ScopeStatus.ERROR : ScopeStatus.PARTIAL;
         return new ScopePayload(family, region, status, artifacts, relationships, List.of(
                 diagnostic(failure.code(), failure.message(), failure.retryable(), family)));
     }
@@ -1201,7 +1212,7 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         return new ScopePayload(
                 family,
                 region,
-                ScopeStatus.UNSUPPORTED,
+                ScopeStatus.UNSUPPORTED_API,
                 List.of(),
                 List.of(),
                 List.of(diagnostic(code, message, false, family)));

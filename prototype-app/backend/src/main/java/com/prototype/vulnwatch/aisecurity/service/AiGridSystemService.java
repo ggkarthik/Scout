@@ -25,12 +25,8 @@ import org.springframework.stereotype.Service;
 public class AiGridSystemService {
     static final int MAX_DEPTH = 6;
     static final int MAX_FAN_OUT = 100;
-    private static final Set<String> MEMBERSHIP_EDGES = Set.of(
-            "USES_GUARDRAIL", "USES_KNOWLEDGE_BASE", "USES_MODEL", "USES_DATA_SOURCE",
-            "INVOKES_LAMBDA", "ASSUMES_ROLE", "READS_FROM_S3", "SUPERVISES_AGENT",
-            "CONTAINS_PROJECT", "DEPLOYS_MODEL", "USES_TOOL", "USES_SEARCH_INDEX",
-            "USES_MANAGED_IDENTITY", "USES_KEY_VAULT_KEY", "CONTAINS_RESOURCE",
-            "HAS_DEPLOYMENT", "RUNS_PIPELINE", "HAS_CHANNEL", "HAS_ROLE_ASSIGNMENT");
+    private static final Set<String> MEMBERSHIP_EDGES =
+            AiGridRelationshipSemantics.SYSTEM_MEMBERSHIP_RELATIONSHIPS;
 
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
@@ -46,13 +42,9 @@ public class AiGridSystemService {
                   from ai_security_artifacts a
                   join ai_security_artifact_sources s on s.artifact_id = a.id
                  where s.run_id = :runId and a.active = true
-                   and (a.artifact_type in ('AI_AGENT','AI_MODEL','KNOWLEDGE_BASE','OTHER_AI_ARTIFACT')
-                        or (a.artifact_type='AI_TOOL' and exists (
-                            select 1 from ai_grid_systems legacy where legacy.root_artifact_id=a.id)))
-                   and (a.artifact_type='AI_AGENT' or not exists (
-                       select 1 from ai_grid_relationship_snapshots incoming
-                        where incoming.run_id=:runId and incoming.target_artifact_id=a.id
-                          and incoming.relationship_type in (:membershipEdges)))
+                   and (a.artifact_type='AI_AGENT' or (
+                        a.native_kind='AWS_AGENTCORE_RUNTIME'
+                        and a.attributes_json ->> 'agentCoreRootQualified' = 'true'))
                 """, new MapSqlParameterSource().addValue("runId", runId)
                 .addValue("membershipEdges", MEMBERSHIP_EDGES), (rs, n) -> new Agent(rs.getObject("id", UUID.class),
                 rs.getString("provider"), rs.getString("provider_resource_id"), rs.getString("name")));
@@ -87,17 +79,9 @@ public class AiGridSystemService {
                 select a.id,a.provider,a.provider_resource_id,a.name
                   from ai_grid_current_coverage_artifacts c join ai_security_artifacts a on a.id=c.artifact_id
                  where c.epoch_id=:epochId and a.active=true
-                   and (a.artifact_type in ('AI_AGENT','AI_MODEL','KNOWLEDGE_BASE','OTHER_AI_ARTIFACT')
-                        or (a.artifact_type='AI_TOOL' and exists (
-                            select 1 from ai_grid_systems legacy where legacy.root_artifact_id=a.id)))
-                   and (a.artifact_type='AI_AGENT' or not exists (
-                       select 1 from ai_grid_relationship_snapshots rel
-                       join ai_grid_current_coverage_artifacts src on src.artifact_id=rel.source_artifact_id
-                            and src.source_run_id=rel.run_id and src.epoch_id=:epochId
-                       join ai_grid_current_coverage_artifacts dst on dst.artifact_id=rel.target_artifact_id
-                            and dst.epoch_id=:epochId
-                        where rel.target_artifact_id=a.id and rel.relationship_type in (:membershipEdges)
-                          and rel.valid_from<=:asOf and (rel.valid_until is null or rel.valid_until>=:asOf)))
+                   and (a.artifact_type='AI_AGENT' or (
+                        a.native_kind='AWS_AGENTCORE_RUNTIME'
+                        and a.attributes_json ->> 'agentCoreRootQualified' = 'true'))
                  order by a.id
                 """, new MapSqlParameterSource().addValue("epochId", epochId).addValue("asOf", java.sql.Timestamp.from(asOf))
                 .addValue("membershipEdges", MEMBERSHIP_EDGES), (rs, n) -> new Agent(rs.getObject(1, UUID.class),

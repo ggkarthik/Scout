@@ -331,10 +331,49 @@ AI Grid is the sole policy and findings generation. It evaluates governed, versi
 
 `AiSecurityJobWorkerService` polls `ingestion_jobs` for `AI_SECURITY_AWS_BEDROCK` / `AI_SECURITY_AZURE_DISCOVERY` job types (every 3s by default) and dispatches to a provider:
 
-- **AWS** (`AwsBedrockDiscoveryService`) — via AWS SDK v2, discovers Bedrock agents/action-groups/knowledge bases/guardrails/models/inference profiles/prompts/flows, AgentCore gateways/targets, and SageMaker domains/endpoints/pipelines; checks IAM policies for wildcard actions, Lambda function-URL auth, and S3 bucket public-access status. Optionally reads *existing* AWS Macie PII classification findings for referenced S3 buckets (`AwsMaciePiiLookupService` — never triggers a new Macie scan). Gated by `AiSecurityAwsAdmissionService` (per account/region semaphores) and the budget service below.
+- **AWS** (`AwsBedrockDiscoveryService`) — via AWS SDK v2, discovers Bedrock agents/action-groups/knowledge bases/guardrails/models/inference profiles/prompts/flows, AgentCore gateways/targets, and SageMaker domains/endpoints/pipelines; checks IAM policies for wildcard actions, Lambda function-URL auth, and S3 bucket public-access status. Optionally reads *existing* AWS Macie PII classification findings for referenced S3 buckets (`AwsMaciePiiLookupService` — never triggers a new Macie scan). Gated by `AiSecurityAwsAdmissionService` (per account/region semaphores) and the budget service below. A set of default-off flags additionally builds a version-rooted definition graph, an IAM identity graph and AgentCore execution-surface inventory — see [AWS deployed-agent graph](#aws-deployed-agent-graph) below.
 - **Azure** (`AzureAiDiscoveryService` / `AzureAiManagementClient`) — raw ARM API calls discovering Cognitive Services/AI accounts, Foundry projects/deployments/RAI policies/agents, ML workspaces/endpoints, AI Search services/indexers/knowledge sources, Bot Service, diagnostic settings, RBAC assignments, Storage accounts. `AzureRaiPolicyAnalyzer` conservatively parses RAI content-filter configs. Optionally reads *existing* Microsoft Purview Data Map classification results for Storage accounts (`AzurePurviewClassificationClient` — read-only). Gated by `AiSecurityAzureAdmissionService` and a config-driven kill switch (`AiSecurityAzureKillSwitchService`).
 
-Both connectors emit `ObservationEnvelopeV1` chunks (validated, allow-listed-field-only via `AiSecurityMetadataSanitizer` — no prompt bodies, secrets, or free-text PII) which `AiSecurityObservationService` persists idempotently by receipt and, once a scan scope completes, hands to the AI Grid pipeline.
+A third provider, **Microsoft Copilot Studio** (`CopilotStudioDiscoveryService` / `CopilotStudioDataverseClient`), is wired differently: `CopilotStudioConnectorController`'s `POST /{connectorId}/run` calls `discovery.run()` synchronously in the request thread rather than enqueueing an `ingestion_jobs` row for the poller above. It calls the Dataverse API for the configured organization to enumerate bots/topics/prompt components (metadata only), starts and completes its own `SyncRun` (`AI_SECURITY_COPILOT_STUDIO`) inline, and still emits an `ObservationEnvelopeV1` (`provider = MICROSOFT_COPILOT`) into `AiSecurityObservationService` so it feeds the same AI Grid pipeline below — it just never appears as a QUEUED/RUNNING `ingestion_jobs` row the way AWS/Azure discovery does.
+
+Both async connectors emit `ObservationEnvelopeV1` chunks (validated, allow-listed-field-only via `AiSecurityMetadataSanitizer` — no prompt bodies, secrets, or free-text PII) which `AiSecurityObservationService` persists idempotently by receipt and, once a scan scope completes, hands to the AI Grid pipeline.
+
+#### AWS deployed-agent graph
+
+AWS posture is derived from the canonical deployed definition graph. Discovery is bounded by the shared provider-call ceiling; connector enablement, kill switches, budgets, concurrency, retries, and separately costed integrations remain operational controls.
+
+```text
+AI_AGENT
+  ├── HAS_COMPONENT ──> AWS_BEDROCK_AGENT_ALIAS (AI_COMPONENT)
+  │                        └── SERVES_VERSION ──> AI_AGENT_VERSION
+
+AI_AGENT_VERSION (AWS_BEDROCK_AGENT_VERSION)
+  ├── VERSION_OF ──> AI_AGENT
+  ├── USES_MODEL ──> AI_MODEL
+  ├── USES_PROMPT ──> AI_PROMPT            (digest only, never the body)
+  ├── USES_TOOL ──> AI_TOOL                (AWS_BEDROCK_ACTION_GROUP)
+  ├── USES_KNOWLEDGE_BASE ──> KNOWLEDGE_BASE
+  ├── USES_GUARDRAIL ──> AI_GUARDRAIL      (exact guardrail version)
+  └── ASSUMES_ROLE ──> AWS_IAM_ROLE
+
+AI_TOOL ── IMPLEMENTED_BY ──> AWS_LAMBDA_FUNCTION
+```
+
+Semantics worth knowing before extending this:
+
+- **Alias routing is the authority on what is served.** `DRAFT` is collected as a version like any other, but a version counts as deployed only because some alias's `routingConfiguration` points at it. Multiple aliases and multiple served versions per agent are supported — there is no single "active version".
+- **Four distinct evidence states** are modelled and must not be conflated in UI or policy copy: *configured* (attached to the definition), *reachable* (an evidence-backed graph path exists), *activity observed* (a governed external source reported activity), *confirmed* (an exposure template's evidence contract is satisfied).
+- **Retyping, not re-keying.** AWS prompts, guardrails, action groups, AgentCore runtimes/browsers/code-interpreters/memories and IAM roles moved off `OTHER_AI_ARTIFACT` onto canonical types (`AI_PROMPT`, `AI_GUARDRAIL`, `AI_TOOL`, `AI_COMPONENT`, `SUPPORTING_RESOURCE`) while keeping their provider ARN as `provider_resource_id`, so artifact identity and history survive the change. Provider-native-kind scoping remains authoritative for policy applicability — canonical types were *not* bulk-added to AWS policy packages.
+- **No compatibility edges or copied posture facts.** Knowledge bases and roles attach to the served version, and tool implementations attach through `IMPLEMENTED_BY`; agent-level copies and `INVOKES_LAMBDA` are not emitted.
+- **No inferred AgentCore edges.** AgentCore runtimes, browsers, code interpreters and memories are inventoried, but no `CONNECTS_TO_MCP` or agent→runtime edge is emitted, because no authoritative control-plane field links a classic Bedrock agent to an AgentCore runtime. Unattached AgentCore resources are meant to surface as coverage/ownership work, not as a guessed relationship.
+- **Per-role IAM isolation.** One malformed or unreadable role degrades that role only (`IAM_GLOBAL` → `PARTIAL`, diagnostic `IAM_ROLE_EVIDENCE_PARTIAL`, role ARN hashed); it does not void global IAM evidence.
+- **Disabled ≠ empty.** A disabled connector or separately controlled integration emits `DISABLED`; an authoritatively empty list probe emits verified-empty evidence instead of permission remediation.
+
+#### Curated AWS activity evidence
+
+The first release intentionally excludes continuous CloudWatch log ingestion, log normalization, per-run AWS execution timelines, and any external write to `ai_agent_executions`. Activity is instead expressed as governed, **metadata-only** host-context facts from a trusted producer `SCOUT_AWS_ACTIVITY`, posted to the existing `POST /api/internal/ai-grid/evidence/{producerId}` port (`ROLE_SERVICE_ACCOUNT`, principal must equal the producer id) and gated by `AWS_ACTIVITY_EVIDENCE`. Intended sources are customer SIEM/SOAR detections, CloudWatch alarms or customer-managed summaries, and agent gateway/runtime-control decisions — never raw prompts, responses, conversations, tool arguments, results, secrets, or personal identifiers.
+
+Seven fact keys are authorized (`activity.agent_invocation_observed`, `.tool_use_observed`, `.identity_use_observed`, `.external_action_observed`, `.sensitive_data_access_observed`, `.invocation_count_observed`, `.agent_last_observed_at`). The `_observed` suffix is load-bearing: these keys are **non-validating** and cannot promote an exposure to `VALIDATED_EXPOSURE`. They do two things only — drive the "activity observed" state on agent/version detail, and add a bounded `activityPoints` component to `AiExposureIntelligenceService`'s exposure priority. Facts require `validUntil`, bucket `observedAt` to the UTC day so a repeated push for the same window updates in place, and stop contributing once expired (the row stays for audit). **Absence of activity evidence is not evidence of non-use** and the UI says "No activity evidence available", never "Not used".
 
 ### AI Grid Pipeline (per completed scope)
 

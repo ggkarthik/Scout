@@ -30,9 +30,12 @@ public class AiGridExposureService {
     private static final int HARD_MAX_DEPTH = 6;
     private static final int HARD_MAX_FAN_OUT = 100;
     private static final int HARD_MAX_PATHS = 10_000;
-    private static final Set<String> DATA_EDGES = Set.of("USES_KNOWLEDGE_BASE", "USES_DATA_SOURCE", "READS_FROM_S3", "USES_SEARCH_INDEX");
-    private static final Set<String> TOOL_EDGES = Set.of("USES_TOOL", "INVOKES_LAMBDA", "ASSUMES_ROLE", "HAS_ROLE_ASSIGNMENT", "USES_KEY_VAULT_KEY");
-    private static final Set<String> MCP_EDGES = Set.of("EXPOSES_MCP", "CONNECTS_TO_MCP", "CONTAINS_MCP_TARGET");
+    private static final Set<String> DATA_EDGES = AiGridRelationshipSemantics.DATA_ACCESS_RELATIONSHIPS;
+    private static final Set<String> TOOL_EDGES = java.util.stream.Stream.concat(
+                    AiGridRelationshipSemantics.TOOL_IMPLEMENTATION_RELATIONSHIPS.stream(),
+                    AiGridRelationshipSemantics.IDENTITY_ACCESS_RELATIONSHIPS.stream())
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    private static final Set<String> MCP_EDGES = AiGridRelationshipSemantics.MCP_CONSEQUENCE_RELATIONSHIPS;
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final AiGridExposureFindingService findingService;
@@ -499,7 +502,7 @@ public class AiGridExposureService {
             }
             case "R2_EXCESSIVE_TOOL_PRIVILEGE" -> {
                 boolean toolEnabledAgent = "AI_AGENT".equals(artifacts.get(path.nodes().get(0)).type())
-                        && hasEdge(path, Set.of("USES_TOOL", "INVOKES_LAMBDA"));
+                        && hasEdge(path, AiGridRelationshipSemantics.TOOL_IMPLEMENTATION_RELATIONSHIPS);
                 validated = toolEnabledAgent && hasDerivedTrue(path, facts, "identity.effective_excessive_privilege_derived", factRules, asOf)
                         && exactTrueOn(path.nodes().get(path.nodes().size() - 1), facts,
                         "impact.secret_or_consequential_access_confirmed", factRules, asOf);

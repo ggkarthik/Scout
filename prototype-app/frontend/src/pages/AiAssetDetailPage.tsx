@@ -32,6 +32,18 @@ function formatTimestamp(value?: string | null): string {
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
 }
 
+function isPositiveActivityEvidence(item: { factKey: string; valueJson: string; state: string; expired: boolean }): boolean {
+  if (item.expired || item.state !== 'KNOWN') return false;
+  try {
+    const value: unknown = JSON.parse(item.valueJson);
+    if (value === true) return true;
+    if (item.factKey === 'activity.invocation_count_observed') return typeof value === 'number' && value > 0;
+    return item.factKey === 'activity.agent_last_observed_at' && typeof value === 'string' && value.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 function formatFactItem(item: unknown): string {
   if (item == null) return '—';
   if (typeof item !== 'object') return String(item);
@@ -136,8 +148,14 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
     queryFn: () => api.getAiAssetPosture(artifactId),
     enabled: tab === 'overview',
   });
+  const activityEvidenceQuery = useQuery({
+    queryKey: ['ai-activity-evidence', artifactId],
+    queryFn: () => api.getAiActivityEvidence(artifactId),
+    enabled: tab === 'overview',
+  });
   const policyMutation = useMutation({
-    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => api.updateAiGridPolicyEnabled(id, enabled),
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+      api.updateAiGridPolicySelection(id, enabled ? 'ENABLED' : 'DISABLED'),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['ai-security-policies'] }),
   });
 
@@ -145,15 +163,27 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
   const agentDefinitionBindings = React.useMemo(() => {
     if (!artifact || artifact.artifactType !== 'AI_AGENT' || !graphQuery.data) return null;
     const nodes = new Map(graphQuery.data.nodes.map(node => [node.id, node]));
-    const activeVersionId = graphQuery.data.edges.find(edge => edge.sourceArtifactId === artifact.id && edge.relationshipType === 'ACTIVE_VERSION')?.targetArtifactId;
+    const aliasIds = new Set(graphQuery.data.edges
+      .filter(edge => edge.sourceArtifactId === artifact.id && edge.relationshipType === 'HAS_COMPONENT'
+        && nodes.get(edge.targetArtifactId)?.nativeKind === 'AWS_BEDROCK_AGENT_ALIAS')
+      .map(edge => edge.targetArtifactId));
+    const activeVersionIds = new Set([
+      ...graphQuery.data.edges
+        .filter(edge => edge.sourceArtifactId === artifact.id && edge.relationshipType === 'ACTIVE_VERSION')
+        .map(edge => edge.targetArtifactId),
+      ...graphQuery.data.edges
+        .filter(edge => aliasIds.has(edge.sourceArtifactId) && edge.relationshipType === 'SERVES_VERSION')
+        .map(edge => edge.targetArtifactId),
+    ]);
     const versions = graphQuery.data.edges
       .filter(edge => edge.targetArtifactId === artifact.id && edge.relationshipType === 'VERSION_OF')
       .map(edge => nodes.get(edge.sourceArtifactId)?.name ?? edge.sourceName);
-    const activeEdges = graphQuery.data.edges.filter(edge => edge.sourceArtifactId === artifact.id || edge.sourceArtifactId === activeVersionId);
+    const activeEdges = graphQuery.data.edges.filter(edge => edge.sourceArtifactId === artifact.id
+      || activeVersionIds.has(edge.sourceArtifactId));
     const names = (type: string) => activeEdges.filter(edge => edge.relationshipType === type)
       .map(edge => nodes.get(edge.targetArtifactId)?.name ?? edge.targetName)
       .filter((value, index, all) => all.indexOf(value) === index);
-    return { versions, activeVersion: activeVersionId ? nodes.get(activeVersionId)?.name : undefined,
+    return { versions, activeVersions: [...activeVersionIds].map(id => nodes.get(id)?.name).filter(Boolean),
       models: names('USES_MODEL'), prompts: names('USES_PROMPT'), tools: names('USES_TOOL') };
   }, [artifact, graphQuery.data]);
   const policiesById = React.useMemo(
@@ -188,6 +218,8 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
       { label: 'Account', value: artifact.accountId },
       { label: 'Region', value: artifact.region },
       { label: 'Provider ID', value: <span className="mono">{artifact.providerResourceId}</span> },
+      { label: 'System attachment', value: formatLabel(artifact.attachmentState) },
+      { label: 'Systems', value: artifact.systemIds.length ? artifact.systemIds.join(', ') : 'None' },
       { label: 'First observed', value: formatTimestamp(artifact.firstObservedAt) },
       { label: 'Last observed', value: formatTimestamp(artifact.lastObservedAt) },
       { label: 'Owner', value: artifact.ownerName ?? 'Unowned' },
@@ -349,11 +381,26 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
             {typeSpecificFields.length > 0 && <section className="fd3-panel"><div className="fd3-panel-title">{artifact.artifactType.startsWith('MCP_') ? 'MCP configuration' : 'Knowledge and data configuration'}</div><InventoryOverviewPanel primaryFields={typeSpecificFields} /></section>}
             {agentDefinitionBindings && <section className="fd3-panel"><div className="fd3-panel-title">Agent definition</div><InventoryOverviewPanel primaryTitle="Definition lineage" primaryFields={[
               { label: 'Versions', value: agentDefinitionBindings.versions.length ? agentDefinitionBindings.versions.join(', ') : 'Not observed' },
-              { label: 'Active version', value: agentDefinitionBindings.activeVersion ?? 'Not observed' },
+              { label: 'Served versions', value: agentDefinitionBindings.activeVersions.length ? agentDefinitionBindings.activeVersions.join(', ') : 'Not observed' },
               { label: 'Active models', value: agentDefinitionBindings.models.length ? agentDefinitionBindings.models.join(', ') : 'Not observed' },
               { label: 'Active prompts', value: agentDefinitionBindings.prompts.length ? agentDefinitionBindings.prompts.join(', ') : 'Not observed' },
               { label: 'Active tools', value: agentDefinitionBindings.tools.length ? agentDefinitionBindings.tools.join(', ') : 'Not observed' },
             ]} /></section>}
+            <section className="fd3-panel">
+              <div className="fd3-panel-title">Activity evidence</div>
+              <InventoryOverviewPanel primaryTitle="Evidence states" primaryFields={[
+                { label: 'Configured', value: artifact.active ? 'Observed in current configuration' : 'Not currently active' },
+                { label: 'Reachable', value: (graphQuery.data?.edges.length ?? 0) > 0 ? 'Graph relationships observed' : 'No reachability evidence available' },
+                { label: 'Activity observed', value: (activityEvidenceQuery.data ?? []).some(isPositiveActivityEvidence) ? 'Yes — current evidence available' : 'No activity evidence available' },
+                { label: 'Confirmed exposure', value: (postureQuery.data?.exposures.length ?? 0) > 0 ? 'Yes — validated exposure exists' : 'Not confirmed' },
+              ]} />
+              {activityEvidenceQuery.isLoading ? <p className="panel-caption">Loading activity evidence…</p>
+                : activityEvidenceQuery.isError ? <p className="notice error">Activity evidence could not be loaded.</p>
+                  : (activityEvidenceQuery.data?.length ?? 0) === 0 ? <p className="panel-caption">No activity evidence available. This does not mean the agent is unused.</p>
+                    : <table className="data-table"><thead><tr><th>Signal</th><th>Value</th><th>Observed</th><th>Confidence</th><th>Freshness</th></tr></thead><tbody>
+                      {activityEvidenceQuery.data?.map((item) => <tr key={`${item.factKey}-${item.observedAt}`}><td>{formatLabel(item.factKey.replace('activity.', ''))}</td><td>{item.valueJson}</td><td>{formatTimestamp(item.observedAt)}</td><td>{item.confidence == null ? '—' : `${Math.round(item.confidence * 100)}%`}</td><td>{item.expired ? 'Expired' : item.validUntil ? `Valid until ${formatTimestamp(item.validUntil)}` : 'Current'}</td></tr>)}
+                    </tbody></table>}
+            </section>
             <section className="fd3-panel">
               <div className="fd3-panel-title">Control posture</div>
               {postureQuery.isLoading ? <p className="panel-caption">Loading evaluated controls…</p> : postureQuery.isError ? <p className="notice error">Control posture could not be loaded.</p> : (postureQuery.data?.controls.length ?? 0) === 0 ? <p className="panel-caption">No current policy evidence covers this asset.</p> : <table className="data-table"><thead><tr><th>Control</th><th>Evidence</th><th>Decision</th></tr></thead><tbody>

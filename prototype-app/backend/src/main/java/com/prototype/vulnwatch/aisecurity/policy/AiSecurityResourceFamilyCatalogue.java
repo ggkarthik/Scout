@@ -9,15 +9,21 @@ import org.springframework.stereotype.Component;
 @Component
 public class AiSecurityResourceFamilyCatalogue {
 
-    public static final String VERSION = "1.6";
+    public static final String VERSION = "1.7";
 
     private static final Map<String, ScopeSemantics> FAMILIES = Map.ofEntries(
             Map.entry("BEDROCK_AGENTS", ScopeSemantics.REGIONAL),
+            Map.entry("BEDROCK_AGENT_VERSIONS", ScopeSemantics.REGIONAL),
+            Map.entry("BEDROCK_AGENT_DEFINITIONS", ScopeSemantics.REGIONAL),
             Map.entry("BEDROCK_KNOWLEDGE_BASES", ScopeSemantics.REGIONAL),
             Map.entry("BEDROCK_DATA_SOURCES", ScopeSemantics.REGIONAL),
             Map.entry("BEDROCK_DATA_STORES", ScopeSemantics.REGIONAL),
             Map.entry("AWS_AGENTCORE_GATEWAYS", ScopeSemantics.REGIONAL),
             Map.entry("AWS_AGENTCORE_GATEWAY_TARGETS", ScopeSemantics.REGIONAL),
+            Map.entry("AWS_AGENTCORE_RUNTIMES", ScopeSemantics.REGIONAL),
+            Map.entry("AWS_AGENTCORE_BROWSERS", ScopeSemantics.REGIONAL),
+            Map.entry("AWS_AGENTCORE_CODE_INTERPRETERS", ScopeSemantics.REGIONAL),
+            Map.entry("AWS_AGENTCORE_MEMORIES", ScopeSemantics.REGIONAL),
             Map.entry("BEDROCK_GUARDRAILS", ScopeSemantics.REGIONAL),
             Map.entry("BEDROCK_INVOCATION_LOGGING", ScopeSemantics.REGIONAL),
             Map.entry("BEDROCK_DEPLOYABLE_MODELS", ScopeSemantics.REGIONAL),

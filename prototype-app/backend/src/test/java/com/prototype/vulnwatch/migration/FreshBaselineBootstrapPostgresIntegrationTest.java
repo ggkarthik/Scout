@@ -14,11 +14,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
 @EnabledIfSystemProperty(named = "run.postgres.it", matches = "true")
-class SchemaUpgradePathPostgresIntegrationTest {
+class FreshBaselineBootstrapPostgresIntegrationTest {
 
-    private static final String CURRENT_SCHEMA_VERSION = "104";
+    private static final String CURRENT_SCHEMA_VERSION = "1";
     private static final LocalPostgresTestDatabase.DatabaseConfig DATABASE =
-            LocalPostgresTestDatabase.provision("schema_upgrade_path");
+            LocalPostgresTestDatabase.provision("fresh_baseline_bootstrap");
 
     @Test
     void canApplyResetBaselineWithoutHistoricalMigrations() throws Exception {
@@ -30,18 +30,23 @@ class SchemaUpgradePathPostgresIntegrationTest {
         assertEquals(0, flyway.info().pending().length);
         assertEquals(0, failedCount());
         assertEquals(1, historyCount("1"));
-        assertEquals(1, historyCount("2"));
-        assertEquals(1, historyCount("3"));
-        assertEquals(1, historyCount("4"));
-        assertEquals(1, historyCount("5"));
-        assertEquals(1, historyCount("6"));
-        assertEquals(1, historyCount("100"));
-        assertEquals(1, historyCount("101"));
-        assertEquals(1, historyCount("102"));
-        assertEquals(1, historyCount("103"));
-        assertEquals(1, historyCount("104"));
-        assertEquals(180, queryForInt(DATABASE, "select count(*) from platform.ai_grid_policy_versions"));
+        org.junit.jupiter.api.Assertions.assertTrue(queryForInt(DATABASE, "select count(*) from platform.ai_grid_policy_versions") > 0);
         assertEquals(1, queryForInt(DATABASE, "select count(*) from information_schema.schemata where schema_name='tenant_default'"));
+        assertEquals(6, queryForInt(DATABASE, """
+                select count(*) from platform.ai_grid_release_manifest_items
+                 where release_id='R2' and subject_type='CORRELATION' and subject_version='2.0.0'
+                """));
+        assertEquals(0, queryForInt(DATABASE, """
+                select count(*) from platform.ai_grid_release_manifest_items
+                 where release_id='R2' and subject_type='CORRELATION' and subject_version='1.0.0'
+                """));
+        assertEquals(0, queryForInt(DATABASE, "select count(*) from platform.ai_grid_policy_versions where policy_id='AWS_BEDROCK_WEAK_GUARDRAIL'"));
+        assertEquals(1, queryForInt(DATABASE, "select count(*) from platform.ai_grid_capability_definitions where capability_id='COPILOT_STUDIO_METADATA'"));
+        assertEquals(0, queryForInt(DATABASE, """
+                select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace
+                 where n.nspname='platform' and c.relname in
+                       ('ai_grid_policy_migration_ledger','ai_grid_phase_1_tenant_migration_audit')
+                """));
     }
 
     @Test
@@ -58,7 +63,7 @@ class SchemaUpgradePathPostgresIntegrationTest {
                 .outOfOrder(false)
                 .load();
         tenant.migrate();
-        assertEquals("10", tenant.info().current().getVersion().getVersion());
+        assertEquals("1", tenant.info().current().getVersion().getVersion());
     }
 
     private Flyway configuredFlyway() {

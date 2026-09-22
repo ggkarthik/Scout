@@ -110,14 +110,14 @@ A scheduled poller/drain over a **per-tenant** table (`ingestion_jobs`, `finding
 
 There are **two independent Flyway migration lines**, each restarted at a fresh `V1` baseline by a one-time migration-history reset — do not mix them up:
 
-- **Platform/`public` schema:** `src/main/resources/db/migration/postgres_reset/`. Flyway is configured to use this location (`spring.flyway.locations: classpath:db/migration/postgres_reset`) and it runs on application startup against `public` only. Every file must start with a `-- migration-guard: platform-only` comment — `PostgresResetMigrationGuardTest` enforces this so per-tenant DDL can't leak in here. Current latest: `V1__platform_schema.sql` (69 tables) — it already starts with the guard comment, so the pre-reset carve-out for a demo-request DML anomaly no longer has anything to attach to.
-- **Per-tenant schema:** `src/main/resources/db/migration/tenant/`, its own `<schema>.tenant_schema_history` table per tenant, applied once per tenant schema by `TenantSchemaMigrationService` (dev/test) or the standalone `ProductionBootstrapCli` (production) — **not** by the application's startup Flyway run. Files may use the `${tenantId}`/`${tenantSchema}` placeholders. Current latest: `V1__tenant_schema.sql` (113 tables). RLS enforcement (backfilled `tenant_id` + `FORCE ROW LEVEL SECURITY`) is baked directly into this baseline rather than a later numbered migration — see `docs/database.md#tenant-schema-control-plane` for the rollout mechanics (advisory lock, structural-fingerprint drift check, template → canary → batches of 10).
+- **Platform/`public` schema:** `src/main/resources/db/migration/postgres_reset/`. Flyway is configured to use this location (`spring.flyway.locations: classpath:db/migration/postgres_reset`) and it runs on application startup against `public` only. Every file must start with a `-- migration-guard: platform-only` comment — `PostgresResetMigrationGuardTest` enforces this so per-tenant DDL can't leak in here. **Current head: `V1__platform_schema.sql`**, the complete clean-start baseline including AWS connector maturity, R2 v2, and governed `activity.*` facts.
+- **Per-tenant schema:** `src/main/resources/db/migration/tenant/`, its own `<schema>.tenant_schema_history` table per tenant, applied once per tenant schema by `TenantSchemaMigrationService` (dev/test) or the standalone `ProductionBootstrapCli` (production) — **not** by the application's startup Flyway run. Files may use the `${tenantId}`/`${tenantSchema}` placeholders. **Current head: `V1__tenant_schema.sql`**, the complete clean-start tenant baseline including RLS, capability manifests, and scope-owned artifact attributes.
 
 - `postgres_reset/V1__platform_schema.sql` and `tenant/V1__tenant_schema.sql` are large, independent, pg_dump-generated baselines — the reset consolidated the entire prior numbered history (including all AI Security / AI Grid schema, which used to start at platform `V47`/tenant `V45`) into these two files, so neither looks like a "day one" schema. AI Grid tables still have no JPA entity or repository — they're accessed via `JdbcTemplate` directly from `com.prototype.vulnwatch.aisecurity.service` classes; see `docs/database.md#ai-security--ai-grid-tables` for the table-level breakdown.
 - `baseline-on-migrate` is `false` in `application.yml` and has no override in any other profile (there is no `application-local.yml` — only the gitignored `application-local.example.yml` template).
 - All statements use `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`, making every migration idempotent to replay.
 - If `platform.app_user_global_roles` or other platform tables are missing, run the V1 SQL directly via psql: it will only create what is absent.
-- **Possible latent inconsistency, not just a doc issue:** `app.tenancy.minimum-compatible-schema-version` defaults to `53` (`application.yml`, `application-prod.yml`, `TenantSchemaService`), but every tenant schema migrated after the reset lands on `target_version = 1` (from `PackagedMigrationCatalog.latest()`). A freshly-provisioned tenant would report as below the minimum-compatible version, which would presumably trip `TenantSchemaReadinessHealthIndicator` and/or `ProductionSafetyValidator`'s "tenant schemas are current" check. Verify against a fresh dev DB before assuming this is fine; if it reproduces, it's a bug to fix in code, not something to paper over here.
+- `app.tenancy.minimum-compatible-schema-version` is `1`, matching the packaged tenant baseline and `PackagedMigrationCatalog` target.
 - Never edit an already-applied migration. (Before the reset, a narrow exception existed for two files that needed a schema-qualification fix — that fix is now simply part of the `V1` baselines, so no live exception currently applies.)
 
 ## Key env vars for local dev
@@ -138,6 +138,8 @@ Set in `application-local.yml` or as env vars:
 | `GITHUB_API_TOKEN` | GitHub token for SBOM/GHSA | resolved from `backend/secrets/github-api-token` |
 
 `OPENAI_API_KEY`/`OPENAI_ENABLED` gate VulnWatch's own AI-assist features (EOL slug suggestion, CVE investigation summaries) — unrelated to the AI Security / AI Grid module, which discovers *other systems'* AI resources and is gated per-tenant by the `ai.security` entitlement, not an env var.
+
+AWS AI discovery uses one bounded provider-call ceiling (`APP_AI_SECURITY_PROVIDER_CALL_CEILING`) plus connector enablement, provider kill switch, retries, semaphores, and scan budgets. The former per-layer AWS maturity flags were removed; Macie remains separately opt-in because it is cost-sensitive. A real `APP_AI_SECURITY_IDENTITY_HMAC_KEY` remains required in production because prompt evidence is stored only as tenant-keyed digests.
 
 ## Postgres integration test scaffolding
 
@@ -189,7 +191,7 @@ com.prototype.vulnwatch.aisecurity/   # separate top-level package, NOT under th
   service/     # 48 services — snapshot/facts/ownership/systems/policy-assessment/exposure-
                # correlation pipeline + platform governance (answer-key, release certification,
                # policy rollout/deprecation)
-  model/, policy/, aws/, azure/  # contracts, predicate engine, AWS/Azure discovery clients
+  model/, policy/, aws/, azure/, copilot/  # contracts, predicate engine, AWS/Azure/Copilot Studio discovery clients
 ```
 
 `aisecurity/**` tables have **no JPA entity or Spring Data repository** — every read/write goes through `JdbcTemplate`/`NamedParameterJdbcTemplate` directly in the service classes. Full module map: `docs/business-logic-guide.md#ai-security--ai-grid-pipeline`, schema: `docs/database.md#ai-security--ai-grid-tables`.
