@@ -5978,6 +5978,7 @@ INSERT INTO platform.ai_grid_relationship_definitions
 VALUES
     ('VERSION_OF', 'OBSERVATION_V1', true, 'ACTIVE', 'Version belongs to an AI agent.'),
     ('ACTIVE_VERSION', 'OBSERVATION_V1', true, 'ACTIVE', 'Agent designates the active version.'),
+    ('SERVES_VERSION', 'OBSERVATION_V1', true, 'ACTIVE', 'Agent alias or endpoint serves an agent version.'),
     ('USES_PROMPT', 'OBSERVATION_V1', true, 'ACTIVE', 'Active agent version uses a prompt definition.'),
     ('HAS_COMPONENT', 'OBSERVATION_V1', true, 'ACTIVE', 'Agent version contains a component.'),
     ('EXECUTED_AS', 'OBSERVATION_V1', true, 'ACTIVE', 'Execution is associated with an agent artifact.'),
@@ -6098,7 +6099,9 @@ ON CONFLICT (capability_id) DO UPDATE SET
 -- platform.ai_grid_policy_migration_ledger and must remain an exact set match.
 DO $$
 DECLARE
-    legacy_ids text[] := ARRAY['AWS_BEDROCK_WEAK_GUARDRAIL'];
+    -- The V1 baseline is already clean: legacy detector rows are part of the
+    -- compatibility catalog and must remain available to existing tenants.
+    legacy_ids text[] := ARRAY[]::text[];
 BEGIN
     IF EXISTS (
         SELECT 1 FROM platform.ai_grid_policy_rollout_tasks t
@@ -6146,6 +6149,23 @@ BEGIN
     DROP TABLE platform.ai_grid_phase_1_tenant_migration_audit;
     DROP TABLE platform.ai_grid_policy_migration_ledger;
 END $$;
+
+-- Preserve pre-governed posture policies in the clean baseline.  They do not
+-- have package digests, so the digest-bound shipment block above cannot create
+-- their general-availability distribution records.
+UPDATE platform.ai_grid_policy_versions
+   SET lifecycle = 'PUBLISHED', published_at = coalesce(published_at, now())
+ WHERE release_family IS NULL
+   AND lifecycle = 'VALIDATED';
+
+INSERT INTO platform.ai_grid_policy_distribution
+    (policy_id, available, default_selection, rollout_stage, canary_tenant_ids_json, updated_by)
+SELECT policy_id, true, default_selection, 'GENERAL_AVAILABILITY', '[]'::jsonb,
+       'ai-grid-v1-compatibility'
+  FROM platform.ai_grid_policy_versions
+ WHERE release_family IS NULL
+   AND lifecycle = 'PUBLISHED'
+ON CONFLICT (policy_id) DO NOTHING;
 
 -- Metadata-only activity evidence is contextual and may never validate an exposure by itself.
 INSERT INTO platform.ai_grid_fact_definitions
