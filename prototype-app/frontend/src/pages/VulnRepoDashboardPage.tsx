@@ -497,7 +497,7 @@ function TenantDashboard() {
                       label: 'Remediation CVEs',
                       value: dashboard.summaryCards.remediationCveCount,
                       percent: percentOf(dashboard.summaryCards.remediationCveCount, dashboard.summaryCards.trackedCount),
-                      path: vulnRepoTrackedVulnerabilityPath({ applicable: true, hasFindings: true }),
+                      path: vulnRepoTrackedVulnerabilityPath({ hasFindings: true }),
                     },
                   ].map((item) => (
                     <button key={item.label} type="button" className="vuln-repo-dashboard-funnel-row" onClick={() => navigate(item.path)}>

@@ -25,3 +25,13 @@ export function useGridExposureQuery() {
     refetchInterval: DASHBOARD_REFRESH_INTERVAL_MS
   });
 }
+
+export function useExposureSummaryQuery() {
+  return useQuery({
+    queryKey: ['exposure-summary'],
+    queryFn: api.getExposureSummary,
+    staleTime: DASHBOARD_REFRESH_INTERVAL_MS,
+    gcTime: DASHBOARD_REFRESH_INTERVAL_MS,
+    refetchInterval: DASHBOARD_REFRESH_INTERVAL_MS,
+  });
+}

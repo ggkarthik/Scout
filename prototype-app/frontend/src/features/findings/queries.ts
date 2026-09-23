@@ -1,4 +1,4 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
 import type { FindingQueueDefinition, FindingsFilterModel } from './types';
 
@@ -68,4 +68,11 @@ export function useRebuildFindingProjectionMutation() {
       ].forEach((queryKey) => queryClient.invalidateQueries({ queryKey }));
     }
   });
+}
+
+export function useFindingGroupsQueries(fields: string[], params: FindingsFilterModel) {
+  return useQueries({ queries: fields.map(field => ({
+    queryKey: ['finding-groups', field, params],
+    queryFn: () => api.getFindingGroups(field, params),
+  })) });
 }

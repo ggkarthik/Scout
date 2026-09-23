@@ -122,6 +122,26 @@ class CustomerDemoDatasetPostgresIntegrationTest {
                     .count());
             assertEquals(40, count("inventory_components"));
             assertEquals(26, count("findings"));
+            assertEquals(26, jdbcTemplate.queryForObject("""
+                    SELECT count(*)
+                      FROM findings f
+                      JOIN component_vulnerability_states cvs
+                        ON cvs.tenant_id = f.tenant_id
+                       AND cvs.component_id = f.component_id
+                       AND cvs.vulnerability_id = f.vulnerability_id
+                     WHERE f.tenant_id = ?
+                       AND f.evidence->>'source' IN ('customer-demo', 'customer-demo-host-inventory')
+                    """, Integer.class, tenant.getId()));
+            assertTrue(jdbcTemplate.queryForObject("""
+                    SELECT EXISTS (
+                        SELECT 1
+                          FROM component_vulnerability_states cvs
+                          JOIN org_cve_records o ON o.vulnerability_id = cvs.vulnerability_id
+                         WHERE cvs.tenant_id = ?
+                           AND o.external_id = 'CVE-2021-44228'
+                           AND cvs.applicability_state = 'APPLICABLE'
+                    )
+                    """, Boolean.class, tenant.getId()));
             assertEquals(26, count("finding_events"));
             assertEquals(26, count("finding_comments"));
             assertEquals(4, count("cis"));

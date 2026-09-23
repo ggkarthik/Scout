@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { pathForConnectView } from '../app/routes';
 import { api, clearStoredAuthToken, getStoredAuthToken, setStoredAuthToken } from '../api/client';
 import { getAuthContextQueryKey } from '../features/auth/queries';
-import { canManageRiskPolicy } from '../features/auth/roles';
+import { canManageInventorySources, canManageRiskPolicy } from '../features/auth/roles';
 import type { ActorContext } from '../features/auth/types';
 const TEST_PERSONAS_ENABLED = import.meta.env.VITE_ENABLE_TEST_PERSONAS === 'true';
 const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY?.trim()
@@ -1187,7 +1187,12 @@ export function LoginPage() {
     enabled: TEST_PERSONAS_ENABLED
   });
 
+  const nextPath = searchParams.get('next');
   const navigateAfterAuth = React.useCallback((actor: ActorContext) => {
+    if (nextPath?.startsWith('/') && !nextPath.startsWith('//') && !nextPath.includes('\\') && !nextPath.startsWith('/login')) {
+      navigate(nextPath, { replace: true });
+      return;
+    }
     if (actor.roles.some((role) => role.replace(/^ROLE_/, '') === 'PLATFORM_OWNER') && actor.platformScope) {
       navigate('/platform/tenants', { replace: true });
       return;
@@ -1196,18 +1201,19 @@ export function LoginPage() {
       navigate('/configurations', { replace: true });
       return;
     }
-    if (actor.demo === true) {
+    if (actor.demo === true && canManageInventorySources(actor)) {
       navigate(pathForConnectView('sources'), { replace: true });
       return;
     }
     navigate('/exposure', { replace: true });
-  }, [navigate]);
+  }, [navigate, nextPath]);
 
   React.useEffect(() => {
     setEmail(loginEmailParam);
   }, [loginEmailParam]);
 
   const applyToken = React.useCallback(async (token: string) => {
+    queryClient.clear();
     setStoredAuthToken(token);
     const actor = await api.getAuthContext();
     queryClient.setQueryData(getAuthContextQueryKey(token), actor);

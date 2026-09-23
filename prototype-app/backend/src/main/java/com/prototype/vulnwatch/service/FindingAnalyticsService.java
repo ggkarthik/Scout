@@ -29,6 +29,10 @@ public class FindingAnalyticsService {
         this.findingListProjectionService = findingListProjectionService;
     }
 
+    public List<FindingCountBucketResponse> groupCounts(Tenant tenant, FindingsFilter filter, String field) {
+        return findingListProjectionService.groupCounts(tenant, filter, field);
+    }
+
     @Transactional(readOnly = true)
     public FindingSummaryResponse getSummary(Tenant tenant, FindingsFilter filter) {
         List<FindingListProjectionService.ProjectionRecord> rows = findingListProjectionService.loadRows(tenant, filter);

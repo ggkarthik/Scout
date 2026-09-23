@@ -58,6 +58,7 @@ public record FindingResponse(
         Instant closedAt,
         String closedBy,
         FindingCloseReason closedReason,
-        UUID closedRuleId
+        UUID closedRuleId,
+        java.util.Map<String, String> ownership
 ) {
 }

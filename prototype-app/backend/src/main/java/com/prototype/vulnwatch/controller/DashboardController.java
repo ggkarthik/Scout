@@ -31,6 +31,11 @@ public class DashboardController {
         return dashboardService.get(tenant);
     }
 
+    @GetMapping("/exposure-summary")
+    public com.prototype.vulnwatch.dto.ExposureSummaryResponse getExposureSummary() {
+        return dashboardService.getExposureSummary(workspaceService.getWorkspace());
+    }
+
     @GetMapping("/applicable-software")
     public ApplicableSoftwarePageResponse listApplicableSoftware(
             @RequestParam(defaultValue = "0") int page,

@@ -61,6 +61,35 @@ describe('App test persona switcher', () => {
     expect(screen.queryByText('Loading page...')).not.toBeInTheDocument();
   });
 
+  it('keeps the session on a temporary verification failure and retries', async () => {
+    const auth = await import('./features/auth/api');
+    const client = await import('./api/client');
+    client.setStoredAuthToken('valid-session');
+    vi.spyOn(auth.authApi, 'getActorContext').mockRejectedValueOnce(new client.ApiError('Service unavailable', 503)).mockResolvedValue(TENANT_ADMIN);
+    const { default: App } = await import('./App');
+    renderWithProviders(<App />, { route: '/exposure' });
+    expect(await screen.findByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(client.getStoredAuthToken()).toBe('valid-session');
+    expect(screen.queryByRole('button', { name: 'Sign in' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByRole('button', { name: 'Open account menu' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open account menu' }));
+    expect(await screen.findByRole('menuitem', { name: 'Log out' })).toBeInTheDocument();
+    expect(screen.getByText('admin-a@example.test')).toBeInTheDocument();
+  });
+
+  it('clears an expired session before showing login', async () => {
+    const auth = await import('./features/auth/api');
+    const client = await import('./api/client');
+    client.setStoredAuthToken('expired-session');
+    vi.spyOn(auth.authApi, 'getActorContext').mockRejectedValue(new client.ApiError('Unauthorized', 401));
+    const { default: App } = await import('./App');
+    renderWithProviders(<App />, { route: '/exposure' });
+    expect(await screen.findByRole('button', { name: 'Sign in' })).toBeInTheDocument();
+    expect(client.getStoredAuthToken()).toBe('');
+    expect(screen.queryByRole('button', { name: 'Log out' })).not.toBeInTheDocument();
+  });
+
   it('shows non-production personas from the gear menu and supports UI preview mode', async () => {
     vi.stubEnv('VITE_ENABLE_TEST_PERSONAS', 'true');
     const auth = await import('./features/auth/api');

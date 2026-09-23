@@ -67,6 +67,8 @@ export type FindingPage = {
 };
 
 export type FindingsFilterModel = {
+  groupField?: string;
+  groupValue?: string;
   page?: number;
   size?: number;
   cursor?: string;

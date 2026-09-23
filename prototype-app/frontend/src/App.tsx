@@ -24,7 +24,7 @@ import {
   pathForVulnRepoView,
   titleForTab
 } from './app/routes';
-import { api, clearStoredAuthToken, getStoredAuthToken, setStoredAuthToken, type TestPersona } from './api/client';
+import { api, ApiError, clearStoredAuthToken, getStoredAuthToken, setStoredAuthToken, type TestPersona } from './api/client';
 import { ActorContextState, useActor } from './features/auth/context';
 import { useActorQuery } from './features/auth/queries';
 import { canUseEntitlement } from './features/auth/entitlements';
@@ -717,11 +717,19 @@ function AuthSessionBoundary({ children }: { children: React.ReactNode }) {
     return routeLoadingFallback();
   }
 
-  if (actorQuery.isError || !actorQuery.data) {
+  if (actorQuery.error instanceof ApiError && actorQuery.error.status === 401) {
+    clearStoredAuthToken();
+    return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
+  }
+
+  if (!actorQuery.data) {
     if (location.pathname === '/') {
       return <PublicLandingRoute />;
     }
-    return <Navigate to="/login" replace />;
+    return <div className="panel" role="alert">
+      <p>Unable to verify your session. Please try again.</p>
+      <button type="button" className="btn btn-primary" onClick={() => void actorQuery.refetch()}>Retry</button>
+    </div>;
   }
 
   return (
@@ -1076,10 +1084,12 @@ function AppShell() {
               <h1>{pageTitle}</h1>
             </div>
             <div className="topbar-actions">
-              <div className="tenant-context-pill" title={`${actorLabel} · ${displayRole}`}>
+              <button type="button" className="tenant-context-pill" title={`${actorLabel} · ${displayRole}`}
+                aria-label="Open account menu" aria-expanded={settingsMenuOpen}
+                onClick={() => setSettingsMenuOpen((open) => !open)}>
                 <span>{tenantLabel}</span>
                 <small>{displayRole}</small>
-              </div>
+              </button>
               {activePersonaLabel && (
                 <div className={`tenant-context-pill test-persona-pill ${testPersonas.activePersona?.mode === 'preview' ? 'preview' : ''}`}>
                   <span>{activePersonaLabel}</span>
@@ -1112,6 +1122,7 @@ function AppShell() {
                     <div className="settings-menu-header">
                       <div className="brand-mark settings-menu-mark">S</div>
                       <strong>Settings</strong>
+                      <span>{actorLabel}</span>
                     </div>
                     {testPersonas.enabled && (
                       <button

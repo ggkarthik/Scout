@@ -156,6 +156,32 @@ class FindingWorkspaceProjectionPostgresIntegrationTest {
     }
 
     @Test
+    void groupCountsCoverTheWholeWorkspaceAndGroupSelectionFiltersTheList() {
+        var noFilter = new com.prototype.vulnwatch.dto.FindingsFilter(
+                null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null
+        );
+
+        var severityGroups = findingAnalyticsService.groupCounts(tenant, noFilter, "severity");
+        assertEquals(expectedFindingCount, severityGroups.stream().mapToLong(group -> group.count()).sum());
+        assertTrue(severityGroups.stream().anyMatch(group -> "CRITICAL".equals(group.key()) && group.count() >= 90));
+        var ownerGroups = findingAnalyticsService.groupCounts(tenant, noFilter, "owner");
+        assertEquals(expectedFindingCount, ownerGroups.stream().mapToLong(group -> group.count()).sum());
+        assertTrue(ownerGroups.stream().anyMatch(group -> "Unassigned".equals(group.key()) && group.count() >= 90));
+
+        var criticalGroup = new com.prototype.vulnwatch.dto.FindingsFilter(
+                null, null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null,
+                null, null, null, null, null, null, null,
+                "severity", "CRITICAL"
+        );
+        var page = findingListProjectionService.queryPage(tenant, criticalGroup, null, 25);
+        assertTrue(page.totalItems() >= 90);
+        assertEquals(25, page.findingIds().size());
+    }
+
+    @Test
     void scaleSeedSupportsRepeatableWorkspaceTimingMeasurements() {
         FindingWorkspaceSeedSupport seedSupport = new FindingWorkspaceSeedSupport(
                 assetRepository,

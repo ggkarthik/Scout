@@ -99,6 +99,20 @@ public class DashboardService {
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
     }
 
+    // The exposure page does not consume the detailed correlation/VEX analytics.
+    public com.prototype.vulnwatch.dto.ExposureSummaryResponse getExposureSummary(Tenant tenant) {
+        return tenantSchemaExecutionService.run(tenant, () -> new com.prototype.vulnwatch.dto.ExposureSummaryResponse(
+                findingQueryService.countOpen(tenant),
+                findingQueryService.countCritical(tenant),
+                findingRepository.countByStatusAndSeverity(FindingStatus.OPEN, "CRITICAL"),
+                findingRepository.countByStatusAndSeverity(FindingStatus.OPEN, "HIGH"),
+                findingRepository.countByStatusAndSeverity(FindingStatus.OPEN, "MEDIUM"),
+                findingRepository.countByStatusAndSeverity(FindingStatus.OPEN, "LOW"),
+                findingRepository.averageRiskScoreByTenantAndStatus(tenant, FindingStatus.OPEN),
+                findingRepository.findTopAssetsByTenantAndStatus(tenant, FindingStatus.OPEN, PageRequest.of(0, 5))
+        ));
+    }
+
     @Cacheable(value = "dashboard", key = "#tenant.id")
     public DashboardResponse get(Tenant tenant) {
         long assets = tenantSchemaExecutionService.run(tenant, () -> assetRepository.count());

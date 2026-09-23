@@ -5,7 +5,6 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { pathForFindingDetail, pathForConnectView } from '../app/routes';
 import type {
   Finding,
-  FindingProjectionStatus,
   FindingBulkWorkflowRequest,
   FindingQueueDefinition,
   FindingQueueUpsertRequest,
@@ -19,7 +18,7 @@ import {
   useFindingBacklogHealthQuery,
   useFindingDistributionsQuery,
   useFindingFiltersQuery,
-  useFindingProjectionStatusQuery,
+  useFindingGroupsQueries,
   useFindingQueuesQuery,
   useFindingsQuery,
   useFindingSummaryQuery
@@ -158,27 +157,6 @@ function ownershipSupportGroup(row: Finding): string {
   return row.ownership?.supportGroup || '';
 }
 
-function formatProjectionStatus(status?: FindingProjectionStatus | null): string {
-  if (!status) {
-    return 'Projection status unavailable.';
-  }
-  const freshness = status.stale ? 'Projection delayed' : 'Projection healthy';
-  const drift = status.driftCount > 0 ? ` · ${status.driftCount.toLocaleString()} drifted row${status.driftCount === 1 ? '' : 's'}` : '';
-  const computed = status.lastComputedAt ? ` · computed ${new Date(status.lastComputedAt).toLocaleString()}` : '';
-  return `${freshness} · ${status.findingCount.toLocaleString()} findings materialized${drift}${computed}`;
-}
-
-function groupValue(r: Finding, key: string): string {
-  if (key === 'severity')        return r.severity || 'UNKNOWN';
-  if (key === 'status')          return r.status;
-  if (key === 'creationSource')  return r.creationSource;
-  if (key === 'owner')           return ownershipDisplayName(r);
-  if (key === 'assetName')       return r.assetName;
-  if (key === 'packageName')     return r.packageName;
-  if (key === 'vulnerabilityId') return r.vulnerabilityId;
-  return 'unknown';
-}
-
 function applyColFilters(rows: Finding[], f: ColFilters, dueDateBand: DueDateBand): Finding[] {
   const now = Date.now();
   const sevenDays = 7 * 24 * 3600 * 1000;
@@ -237,6 +215,9 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   const [visibleCols, setVisibleCols] = React.useState<Set<ColKey>>(loadVis);
   const [showColVis, setShowColVis] = React.useState(false);
   const colVisRef = React.useRef<HTMLDivElement | null>(null);
+  const [groupFilter, setGroupFilter] = React.useState<{ field: string; value: string } | null>(null);
+  const [unassignedOnly, setUnassignedOnly] = React.useState(false);
+  const [incidentLinked, setIncidentLinked] = React.useState(false);
   const [groupBy, setGroupBy] = React.useState<string[]>([]);
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set());
   const [actionModal, setActionModal] = React.useState<ActionType | null>(null);
@@ -272,6 +253,9 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   const filterValues = filtersQuery.data;
 
   const adHocFilterModel = React.useMemo<FindingsFilterModel>(() => ({
+    groupField: groupFilter?.field,
+    groupValue: groupFilter?.value,
+    unassignedOnly: unassignedOnly || undefined,
     severity: colFilters.severity.length > 0 ? colFilters.severity : undefined,
     status: colFilters.status.length > 0 ? colFilters.status : undefined,
     creationSource: colFilters.creationSource.length > 0 ? colFilters.creationSource : undefined,
@@ -281,9 +265,9 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     dueDateBand: dueDateBand ?? undefined,
     assetName: colFilters.asset.trim() || undefined,
     supportGroup: colFilters.supportGroup.trim() || undefined,
-    incidentLinked: colFilters.incidentId.trim().length > 0 ? true : undefined,
+    incidentLinked: incidentLinked || colFilters.incidentId.trim().length > 0 || undefined,
     assetType: assetTypeFilter.length > 0 ? assetTypeFilter : undefined,
-  }), [colFilters, dueDateBand, assetTypeFilter]);
+  }), [colFilters, dueDateBand, assetTypeFilter, groupFilter, unassignedOnly, incidentLinked]);
 
   const availableQueues = queuesQuery.data ?? [];
   const {
@@ -309,10 +293,11 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   const findingsQuery = useFindingsQuery({
     ...effectiveServerFilterModel,
   });
-  const summaryQuery = useFindingSummaryQuery(effectiveServerFilterModel);
-  const distributionsQuery = useFindingDistributionsQuery(effectiveServerFilterModel);
-  const backlogHealthQuery = useFindingBacklogHealthQuery(effectiveServerFilterModel);
-  const projectionStatusQuery = useFindingProjectionStatusQuery();
+  // Widgets describe the selected queue; list drill-downs must not erase its totals.
+  const widgetFilters = React.useMemo(() => ({ queueKey: activeQueryContext.queueKey }), [activeQueryContext.queueKey]);
+  const summaryQuery = useFindingSummaryQuery(widgetFilters);
+  const distributionsQuery = useFindingDistributionsQuery(widgetFilters);
+  const backlogHealthQuery = useFindingBacklogHealthQuery(widgetFilters);
 
   const allRows  = React.useMemo(() => findingsQuery.data?.items ?? [], [findingsQuery.data]);
   const totalItems = findingsQuery.data?.totalItems ?? 0;
@@ -326,28 +311,18 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     summaryQuery.dataUpdatedAt,
     distributionsQuery.dataUpdatedAt,
     backlogHealthQuery.dataUpdatedAt,
-    projectionStatusQuery.data?.lastComputedAt,
   ]);
-  const delayedProjectionMessage = projectionStatusQuery.data?.stale
-    ? 'Data may be delayed while the findings projection catches up to recent changes.'
-    : null;
-
   const rows = React.useMemo(
     () => applyColFilters(allRows, colFilters, dueDateBand),
     [allRows, colFilters, dueDateBand]
   );
 
-  // group breakdown
-  const groupCards = React.useMemo(() =>
-    groupBy.map(key => {
-      const opt = GROUP_OPTIONS.find(o => o.key === key);
-      if (!opt) return null;
-      const counts = new Map<string, number>();
-      rows.forEach(r => { const v = groupValue(r, key); counts.set(v, (counts.get(v) ?? 0) + 1); });
-      const items = Array.from(counts.entries()).sort((a,b)=>b[1]-a[1]).slice(0,5);
-      return { key, label: opt.label, items };
-    }).filter((c): c is { key:string; label:string; items:[string,number][] } => c != null),
-  [groupBy, rows]);
+  const groupQueries = useFindingGroupsQueries(groupBy, widgetFilters);
+  const groupCards = groupBy.map((key, index) => ({
+    key,
+    label: GROUP_OPTIONS.find(option => option.key === key)?.label ?? key,
+    items: groupQueries[index]?.data ?? [],
+  }));
 
   // ── widget data computations ───────────────────────────────────────────────
 
@@ -384,7 +359,6 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
     : distributionsQuery.error instanceof Error ? distributionsQuery.error
     : backlogHealthQuery.error instanceof Error ? backlogHealthQuery.error
     : null;
-  const projectionError = projectionStatusQuery.error instanceof Error ? projectionStatusQuery.error : null;
 
   // ── outside click ──────────────────────────────────────────────────────────
   React.useEffect(() => {
@@ -616,12 +590,19 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
   }
   function clearAllFilters() {
     setColFilters(DEFAULT_COL_FILTERS);
+    setGroupFilter(null);
+    setUnassignedOnly(false);
+    setIncidentLinked(false);
+    setAssetTypeFilter([]);
     setDueDateBand(null);
     setPage(0);
   }
 
   // active filter chips (server-side only for now)
   const activeChips: Array<{ label: string; onRemove: ()=>void }> = [];
+  if (groupFilter) activeChips.push({ label: `${GROUP_OPTIONS.find(option => option.key === groupFilter.field)?.label}: ${groupFilter.value}`, onRemove: () => setGroupFilter(null) });
+  if (unassignedOnly) activeChips.push({ label: 'Unassigned remediation', onRemove: () => setUnassignedOnly(false) });
+  if (incidentLinked) activeChips.push({ label: 'Linked incident', onRemove: () => setIncidentLinked(false) });
   if (colFilters.severity.length>0) activeChips.push({ label:`Severity: ${colFilters.severity.join(', ')}`, onRemove:()=>setColFilter('severity',[]) });
   if (colFilters.status.length>0)   activeChips.push({ label:`Status: ${colFilters.status.map(fmt).join(', ')}`, onRemove:()=>setColFilter('status',[]) });
   if (colFilters.creationSource.length>0) activeChips.push({ label:`Created By: ${colFilters.creationSource.map(fmt).join(', ')}`, onRemove:()=>setColFilter('creationSource',[]) });
@@ -1059,7 +1040,6 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
       <PageFreshnessStatus
         updatedAt={latestDataUpdate}
         isRefreshing={refreshingResults}
-        delayedMessage={delayedProjectionMessage}
         refreshLabel="Refreshing findings while keeping current results visible…"
       />
       {actionNotice && (
@@ -1077,15 +1057,6 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
           {queueActionError}
         </div>
       )}
-      {projectionError ? (
-        <div className="panel-caption" style={{ marginBottom: 12, color: 'var(--warning,#b45309)' }}>
-          Projection status unavailable: {projectionError.message}
-        </div>
-      ) : projectionStatusQuery.data ? (
-        <div className="panel-caption" style={{ marginBottom: 12 }}>
-          {formatProjectionStatus(projectionStatusQuery.data)}
-        </div>
-      ) : null}
       {/* ── toolbar ────────────────────────────────────────────────────── */}
       <div className="fpl-toolbar">
         <div className="fpl-toolbar-left">
@@ -1146,8 +1117,8 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
         onFilterByAsset={filterByAsset}
         onFilterByDueBand={filterByDueBand}
         onCriticalOpenClick={() => { setColFilters((p) => ({ ...p, severity: ['CRITICAL'], status: ['OPEN'] })); setDueDateBand(null); setPage(0); }}
-        onUnassignedClick={() => { setColFilters((p) => ({ ...p, severity: [], status: ['OPEN'], assignedTo: '' })); setDueDateBand('no-sla'); setPage(0); }}
-        onWithIncidentsClick={() => { setColFilters((p) => ({ ...p, severity: [], status: [] })); setDueDateBand(null); setPage(0); setColFilter('incidentId', 'INC'); }}
+        onUnassignedClick={() => { clearAllFilters(); setColFilters({ ...DEFAULT_COL_FILTERS, status: ['OPEN'] }); setUnassignedOnly(true); }}
+        onWithIncidentsClick={() => { clearAllFilters(); setIncidentLinked(true); }}
       />
 
       {/* ── group breakdown ──────────────────────────────────────────────── */}
@@ -1156,8 +1127,12 @@ export function FindingsPage({ onOpenCveWorkbench }: FindingsPageProps = {}) {
           {groupCards.map(g=>(
             <div className="fpl-group-card" key={g.key}>
               <div className="fpl-group-title">{g.label}</div>
-              {g.items.map(([v,c])=>(
-                <div className="fpl-group-item" key={v}><span>{v}</span><strong>{c}</strong></div>
+              {g.items.map(({ key: v, count: c })=>(
+                <button type="button" className="fpl-group-item" key={v}
+                  aria-pressed={groupFilter?.field === g.key && groupFilter.value === v}
+                  onClick={() => { clearAllFilters(); setGroupFilter({ field: g.key, value: v }); }}>
+                  <span>{v}</span><strong>{c}</strong>
+                </button>
               ))}
             </div>
           ))}

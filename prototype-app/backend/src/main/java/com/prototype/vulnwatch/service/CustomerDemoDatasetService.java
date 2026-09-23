@@ -18,7 +18,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class CustomerDemoDatasetService {
 
-    public static final String DATASET_VERSION = "customer-demo-v2";
+    public static final String DATASET_VERSION = "customer-demo-v3";
     private static final String ID_NAMESPACE = "customer-demo-v1";
 
     private static final List<DemoVulnerability> VULNERABILITIES = List.of(
@@ -95,6 +95,13 @@ public class CustomerDemoDatasetService {
                      WHERE tenant_id = ?
                        AND workflow_status = 'IN_PROGRESS'
                     UNION ALL
+                    SELECT 1 FROM findings f
+                     WHERE f.tenant_id = ?
+                       AND f.evidence->>'source' IN ('customer-demo', 'customer-demo-host-inventory')
+                       AND NOT EXISTS (SELECT 1 FROM component_vulnerability_states cvs
+                           WHERE cvs.tenant_id = f.tenant_id AND cvs.component_id = f.component_id
+                             AND cvs.vulnerability_id = f.vulnerability_id)
+                    UNION ALL
                     SELECT 1
                      WHERE (
                          SELECT count(*)
@@ -103,7 +110,7 @@ public class CustomerDemoDatasetService {
                             AND type = 'HOST'
                      ) < ?
                 )
-                """, Boolean.class, tenant.getId(), tenant.getId(), tenant.getId(), HOSTS.size())));
+                """, Boolean.class, tenant.getId(), tenant.getId(), tenant.getId(), tenant.getId(), HOSTS.size())));
     }
 
     private DemoDatasetSummary seedInTenantSchema(Tenant tenant) {
@@ -200,6 +207,7 @@ public class CustomerDemoDatasetService {
         }
 
         HostDatasetSummary hostSummary = seedHosts(tenantId, vulnerabilityIds, softwareIds, now);
+        repairDemoCorrelationStates(tenantId);
         seedOrgCves(tenantId, vulnerabilityIds, now);
         seedOperatingRecords(tenantId, vulnerabilityIds, now);
         BomDatasetSummary bomSummary = seedAiAndCryptoBoms(tenantId, assetIds, vulnerabilityIds, now);
@@ -207,6 +215,27 @@ public class CustomerDemoDatasetService {
                 componentIds.size() + hostSummary.components(), findingIds.size() + hostSummary.findings(),
                 VULNERABILITIES.size(), 2, bomSummary.aiBoms(), bomSummary.aiComponents(),
                 bomSummary.aiFindings(), bomSummary.cboms(), bomSummary.cbomComponents(), bomSummary.cbomFindings());
+    }
+
+    private void repairDemoCorrelationStates(UUID tenantId) {
+        // Seeded findings need the same component evidence used by CVE affected-entity views.
+        // Only fill missing demo evidence; preserve subsequent analyst decisions.
+        jdbcTemplate.update("""
+                INSERT INTO component_vulnerability_states
+                    (id, tenant_id, component_id, vulnerability_id, applicability_state,
+                     applicability_reason, impact_state, impact_reason, eligible_for_finding,
+                     matched_by, confidence_score, created_at, updated_at, last_evaluated_at, state_changed_at)
+                SELECT f.id, f.tenant_id, f.component_id, f.vulnerability_id, 'APPLICABLE',
+                       'customer_demo_inventory_match',
+                       CASE f.decision_state WHEN 'FIXED' THEN 'FIXED' WHEN 'NOT_AFFECTED' THEN 'NOT_IMPACTED'
+                            WHEN 'UNDER_INVESTIGATION' THEN 'UNDER_INVESTIGATION' ELSE 'IMPACTED' END,
+                       'customer_demo_finding_evidence', f.status = 'OPEN' AND f.decision_state = 'AFFECTED',
+                       f.matched_by, f.confidence_score, f.created_at, f.updated_at, f.updated_at, f.updated_at
+                  FROM findings f
+                 WHERE f.tenant_id = ? AND f.component_id IS NOT NULL
+                   AND f.evidence->>'source' IN ('customer-demo', 'customer-demo-host-inventory')
+                ON CONFLICT (tenant_id, component_id, vulnerability_id) DO NOTHING
+                """, tenantId);
     }
 
     private HostDatasetSummary seedHosts(

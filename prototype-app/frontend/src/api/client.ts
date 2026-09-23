@@ -648,6 +648,13 @@ function formatApiError(payload: ApiErrorPayload, fallback: string): string {
   return `${codePrefix}${baseMessage} (${fieldDetails})`;
 }
 
+export class ApiError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 async function parseApiError(response: Response): Promise<Error> {
   const fallback = `Request failed (${response.status})`;
   const contentType = response.headers.get('content-type') ?? '';
@@ -657,9 +664,9 @@ async function parseApiError(response: Response): Promise<Error> {
       if (isJwtAuthFailure(response.status, payload)) {
         handleJwtAuthFailure();
       }
-      return new Error(formatApiError(payload, fallback));
+      return new ApiError(formatApiError(payload, fallback), response.status);
     } catch {
-      return new Error(fallback);
+      return new ApiError(fallback, response.status);
     }
   }
 
@@ -667,7 +674,7 @@ async function parseApiError(response: Response): Promise<Error> {
   if (isJwtAuthFailure(response.status, undefined, text)) {
     handleJwtAuthFailure();
   }
-  return new Error(text || fallback);
+  return new ApiError(text || fallback, response.status);
 }
 
 export function getStoredAuthToken(): string {
@@ -884,6 +891,8 @@ async function publicRequest<T>(path: string, options?: RequestInit): Promise<T>
 
 function buildFindingsSearchParams(params?: FindingsFilterModel): URLSearchParams {
   const searchParams = new URLSearchParams();
+  if (params?.groupField) searchParams.set('groupField', params.groupField);
+  if (params?.groupValue != null) searchParams.set('groupValue', params.groupValue);
   if (params?.page != null) searchParams.set('page', String(params.page));
   if (params?.size != null) searchParams.set('size', String(params.size));
   if (params?.cursor && params.cursor.trim().length > 0) searchParams.set('cursor', params.cursor.trim());
@@ -945,6 +954,7 @@ export const api = {
   issueDemoSetupLink: (requestId: string) => request<DemoSetupLink>(`/platform/demo-requests/${requestId}/issue-setup-link`, { method: 'POST' }),
   deleteDemoRequest: (requestId: string) => request<void>(`/platform/demo-requests/${requestId}`, { method: 'DELETE' }),
   getDashboard: () => request<Dashboard>('/dashboard'),
+  getExposureSummary: () => request<Pick<Dashboard, 'openFindings' | 'criticalFindings' | 'openCritical' | 'openHigh' | 'openMedium' | 'openLow' | 'averageOpenRiskScore' | 'topAssetsAtRisk'>>('/dashboard/exposure-summary'),
   getVulnRepoDashboard: () => request<VulnRepoDashboard>('/vuln-repo/dashboard'),
   getPlatformVulnRepoDashboard: () => request<VulnRepoDashboard>('/platform/vuln-repo/dashboard'),
   getPlatformVulnSourceStats: () => request<PlatformVulnSourceStats>('/platform/vuln-repo/source-stats'),
@@ -971,6 +981,11 @@ export const api = {
     return request<FindingPage>(`/findings${suffix}`);
   },
   getFinding: (findingId: string) => request<Finding>(`/findings/${encodeURIComponent(findingId)}`),
+  getFindingGroups: (field: string, params?: FindingsFilterModel) => {
+    const search = buildFindingsSearchParams(params);
+    search.set('field', field);
+    return request<Array<{ key: string; count: number }>>(`/findings/groups?${search.toString()}`);
+  },
   getFindingSummary: (params?: FindingsFilterModel) => {
     const searchParams = buildFindingsSearchParams(params);
     const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';

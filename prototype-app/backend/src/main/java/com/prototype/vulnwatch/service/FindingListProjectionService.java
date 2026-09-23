@@ -41,6 +41,10 @@ public class FindingListProjectionService {
         return findingProjectionQueryService.loadRows(tenant, filter);
     }
 
+    public List<com.prototype.vulnwatch.dto.FindingCountBucketResponse> groupCounts(Tenant tenant, FindingsFilter filter, String field) {
+        return findingProjectionQueryService.groupCounts(tenant, filter, field);
+    }
+
     public ProjectionStatus getProjectionStatus(Tenant tenant) {
         return findingProjectionStatusService.getProjectionStatus(tenant);
     }

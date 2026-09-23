@@ -125,7 +125,7 @@ export function FindingsSummaryWidgets({
         <div className="fpl-kpi-grid">
           {[
             { label: 'Critical Open', value: summary?.criticalOpenCount ?? 0, color: '#ef4444', onClick: onCriticalOpenClick },
-            { label: 'Unassigned', value: summary?.unassignedOpenCount ?? 0, color: '#f97316', onClick: onUnassignedClick },
+            { label: 'Unassigned remediation', value: summary?.unassignedOpenCount ?? 0, color: '#f97316', onClick: onUnassignedClick },
             { label: 'With Incidents', value: summary?.withIncidentCount ?? 0, color: '#3b82f6', onClick: onWithIncidentsClick },
             { label: 'Overdue', value: dueDateCounts.overdue, color: '#b91c1c', onClick: () => onFilterByDueBand('overdue') },
           ].map((kpi) => (
