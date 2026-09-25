@@ -102,6 +102,32 @@ Equivalently, wrap the call at the background call site in `tenantSchemaExecutio
 
 A scheduled poller/drain over a **per-tenant** table (`ingestion_jobs`, `finding_delta_queue`, etc.) must iterate `tenantService.listTenants()` and run each tenant's claim+process inside `run(tenant, …)` — the scheduler thread carries no context, so a bare drain only ever touches `tenant_default`.
 
+### AI Grid reporting boundaries
+
+`GET /api/ai-frameworks` reads global platform reference data and deliberately does not resolve a tenant, so a platform owner can use framework labels and filters before entering a workspace. `GET /api/ai-framework-coverage`, `/api/ai-runtime-telemetry-readiness`, and `/api/ai-assessment-states/latest` are tenant-bound and must route through `AiGridController.tenant()`.
+
+The customer-facing assessment vocabulary is derived centrally by `AiGridFindingService.AssessmentResult.deriveAssessmentState`: `PASS`/`FAIL` remain direct; `OUT_OF_SCOPE`, `CAPABILITY_UNAVAILABLE`, and `NOT_APPLICABLE` become `NOT_ASSESSED`; evidence collection errors and incomplete/stale evidence become `UNKNOWN`. `AiGridApiService.latestAssessmentStates()` applies that same derivation to each policy version's latest run and returns per-state totals—do not duplicate the mapping in SQL or another controller.
+
+The Program 2 entry gate is server-owned in `AiGridRuntimeTelemetryReadinessService`: a rolling 14-day window, at least 100 executions per provider, at least 95% populated approval, policy and outcome state **measured over consequential events** (`action_category` in `WRITE`/`DELETE`/`SEND`/`EXECUTE`/`ADMIN`/`PAYMENT`/`PUBLISH`), at least 90% agent correlation, and at least 80% version correlation over a version-applicable sample of at least 50 executions. Execution-scoped fill rates are still reported but no longer gate release — an execution-level decision can be 100% populated while no consequential action carries one. Sources are enumerated from `ai_runtime_source_configurations` plus registered telemetry-adapter producers; the gate itself requires two passing `PROVIDER_CONNECTOR` sources, and adapter rows are reported and certified separately.
+
+### Runtime policy evaluation
+
+`AiGridRuntimeEvaluationService` evaluates execution-subject policies. They are deliberately excluded from `AiGridAssessmentService`'s artifact loop (`AiGridAssessmentService.isRuntimeMode`) because their subject is an execution and they read the runtime metadata tables rather than snapshot facts. Three bounded modes:
+
+| Mode | Subject | Binds | Violation shape |
+|---|---|---|---|
+| `RUNTIME_FACTS` | one execution | execution-scoped conditions (conjunction, ≤16) | every condition holds |
+| `RUNTIME_SEQUENCE` | one execution | ordered event-scoped steps | all steps match in order within `maximumDurationSeconds` |
+| `RUNTIME_AGGREGATE` | anchoring execution of a group | registered metric over a UUID execution grouping key | metric breaches the threshold |
+
+Field references must be fully qualified against `platform.ai_grid_runtime_field_definitions` and are scope-checked at package import: sequence steps must be event-scoped, fact conditions execution-scoped, and aggregate grouping keys a UUID execution column. Absence never becomes `PASS` — an unpopulated governed field settles as `UNKNOWN` (`RUNTIME_FIELD_UNPOPULATED`, `RUNTIME_METRIC_UNPOPULATED`), a breached bound as `UNKNOWN` (`EVALUATION_BOUND_EXCEEDED`), and an unsupported evidence scope or a stale required capability as `NOT_ASSESSED` (`DECISION_SCOPE_UNSUPPORTED`, `CAPABILITY_UNAVAILABLE`) recorded once against the policy rather than per execution. Runtime failures reconcile onto `finding_kind = AI_RUNTIME` / `workflow_class = RUNTIME_FINDING`, keyed by the sequence deduplication value or the aggregate group so repeated violations collapse onto one finding.
+
+Runtime packages live under `policy-packages/agcf/AGCF-RT-*`, governed by `policy-packages/agcf/runtime-wave-contract.json` and checked by `node scripts/validate-ai-grid-runtime-catalog.mjs`. They ship `PREVIEW`/`PAUSED`: `AiGridTenantPolicyDefaultsService` preserves the platform default verbatim, so only an explicit tenant override enables them. The underlying execution foundation is already metadata-only: Azure Foundry, Azure ML, and Copilot collectors write through `AiAgentExecutionIngestionService`, which HMACs provider identifiers, applies size/event bounds, overlap-aware cursors, and idempotent receipts. Do not expand this boundary to raw/high-volume logs, prompts, responses, or tool payloads.
+
+### Governed runtime telemetry adapter
+
+`AiGridRuntimeIngestionController` (`POST /api/internal/ai-grid/runtime/{producerId}/v1/batches`, `ROLE_SERVICE_ACCOUNT` + principal-equals-`producerId`, same pattern as the evidence port) accepts a raw metadata-only batch and hands it to `AiGridRuntimeIngestionService.accept()`, which enforces the layered caps in order — 2 MiB body, 100 executions per batch, then the existing per-execution event/metadata limits — recursively rejects forbidden raw-content keys (prompt/response/argument/credential/document/message-body/raw-payload, matched case- and separator-insensitively), requires the producer to be an `ACTIVE` `RUNTIME_EVIDENCE_PRODUCER` registered to the resolved tenant, and only accepts a submitted evidence class of `AUTHORITATIVE` when that producer's `certification_state = 'CERTIFIED'`. Admission also checks a per-tenant backlog cap (`app.ai-security.runtime.adapter.max-backlog-per-tenant`, default 100 → `INGESTION_CAPACITY_EXHAUSTED`) and the rolling quota in `ai_runtime_quota_windows` (soft threshold at 80% of the configured window → `TENANT_QUOTA_SOFT_LIMIT`, breach → `TENANT_QUOTA_EXHAUSTED`, both `429` with `Retry-After`). An admitted batch is durably queued as an `ingestion_jobs` row (`JOB_TYPE = AI_GRID_RUNTIME_ADAPTER`) plus an `ai_runtime_ingestion_receipts` row, readable back at `GET /api/ai-security/runtime-ingestion/receipts/{receiptId}` (`AiGridRuntimeIngestionReceiptController`, ordinary tenant auth, 404 if absent). `AiGridRuntimeIngestionWorker` (`@Scheduled(fixedDelayString = "${app.ai-security.runtime.adapter.poll-interval-ms:2000}")`, every 2s by default, gated by `app.ai-security.runtime.adapter.worker-enabled`) drains one job per tenant per tick through the same `AiAgentExecutionIngestionService` boundary used by the provider collectors and marks the receipt `COMPLETED`/`FAILED`. `AiGridManifestApprovalService` is the tenant control plane behind `/ai-approved-manifests` and `/ai-component-allowlist` — approving a manifest requires the agent/version relationship and every listed component to already be active.
+
 ### Scheduled tasks
 
 `SchedulingConfig` provides the `TaskScheduler` (multi-thread pool + log-and-continue error handler). Spring's default would otherwise (a) run all `@Scheduled` methods on one thread and (b) **permanently unschedule** a periodic task that throws. Still, every `@Scheduled fixedDelay` method should guard its entire body in try/catch so a transient failure can never silently kill the task.
@@ -110,14 +136,14 @@ A scheduled poller/drain over a **per-tenant** table (`ingestion_jobs`, `finding
 
 There are **two independent Flyway migration lines**, each restarted at a fresh `V1` baseline by a one-time migration-history reset — do not mix them up:
 
-- **Platform/`public` schema:** `src/main/resources/db/migration/postgres_reset/`. Flyway is configured to use this location (`spring.flyway.locations: classpath:db/migration/postgres_reset`) and it runs on application startup against `public` only. Every file must start with a `-- migration-guard: platform-only` comment — `PostgresResetMigrationGuardTest` enforces this so per-tenant DDL can't leak in here. **Current head: `V1__platform_schema.sql`**, the complete clean-start baseline including AWS connector maturity, R2 v2, and governed `activity.*` facts.
-- **Per-tenant schema:** `src/main/resources/db/migration/tenant/`, its own `<schema>.tenant_schema_history` table per tenant, applied once per tenant schema by `TenantSchemaMigrationService` (dev/test) or the standalone `ProductionBootstrapCli` (production) — **not** by the application's startup Flyway run. Files may use the `${tenantId}`/`${tenantSchema}` placeholders. **Current head: `V1__tenant_schema.sql`**, the complete clean-start tenant baseline including RLS, capability manifests, and scope-owned artifact attributes.
+- **Platform/`public` schema:** `src/main/resources/db/migration/postgres_reset/`. Flyway is configured to use this location (`spring.flyway.locations: classpath:db/migration/postgres_reset`) and it runs on application startup against `public` only. Every file must start with a `-- migration-guard: platform-only` comment — `PostgresResetMigrationGuardTest` enforces this so per-tenant DDL can't leak in here. **Current head: `V3__ai_grid_runtime_policy_contract.sql`**; V3 adds the three bounded runtime evaluation modes (`RUNTIME_FACTS`, `RUNTIME_SEQUENCE`, `RUNTIME_AGGREGATE`), the `EXECUTION` evaluation subject, the runtime evidence families and capabilities, and the policy-addressable execution/event field registry.
+- **Per-tenant schema:** `src/main/resources/db/migration/tenant/`, its own `<schema>.tenant_schema_history` table per tenant, applied once per tenant schema by `TenantSchemaMigrationService` (dev/test) or the standalone `ProductionBootstrapCli` (production) — **not** by the application's startup Flyway run. Each file starts with `-- migration-guard: tenant-only` and may use the `${tenantId}`/`${tenantSchema}` placeholders. **Current head: `V3__ai_grid_runtime_policy_contract.sql`**; V3 adds the typed runtime contract, governed producer/source registry, ingestion receipts, rolling quota state, and the `AI_RUNTIME` finding kind.
 
 - `postgres_reset/V1__platform_schema.sql` and `tenant/V1__tenant_schema.sql` are large, independent, pg_dump-generated baselines — the reset consolidated the entire prior numbered history (including all AI Security / AI Grid schema, which used to start at platform `V47`/tenant `V45`) into these two files, so neither looks like a "day one" schema. AI Grid tables still have no JPA entity or repository — they're accessed via `JdbcTemplate` directly from `com.prototype.vulnwatch.aisecurity.service` classes; see `docs/database.md#ai-security--ai-grid-tables` for the table-level breakdown.
 - `baseline-on-migrate` is `false` in `application.yml` and has no override in any other profile (there is no `application-local.yml` — only the gitignored `application-local.example.yml` template).
-- All statements use `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`, making every migration idempotent to replay.
+- The V1 reset baselines are defensive/idempotent enough for their documented bootstrap repair path. Do not assume later migrations are safe to replay manually; V2 contains `ALTER TABLE` constraints and must be applied exactly once through Flyway.
 - If `platform.app_user_global_roles` or other platform tables are missing, run the V1 SQL directly via psql: it will only create what is absent.
-- `app.tenancy.minimum-compatible-schema-version` is `1`, matching the packaged tenant baseline and `PackagedMigrationCatalog` target.
+- `PackagedMigrationCatalog` resolves platform and tenant targets independently; both currently resolve to `3`. `app.tenancy.minimum-compatible-schema-version` remains `1` as the compatibility/readiness floor during the controlled tenant rollout. Do not describe that floor as the packaged target.
 - Never edit an already-applied migration. (Before the reset, a narrow exception existed for two files that needed a schema-qualification fix — that fix is now simply part of the `V1` baselines, so no live exception currently applies.)
 
 ## Key env vars for local dev
@@ -186,9 +212,9 @@ com.prototype.vulnwatch/
   tools/       # LegacyGithubSyncRunBackfillTool — standalone main() CLI
 
 com.prototype.vulnwatch.aisecurity/   # separate top-level package, NOT under the tree above
-  controller/  # 14 REST controllers — AI Security / AI Grid (posture management for AI/ML
+  controller/  # 19 REST controllers — AI Security / AI Grid (posture management for AI/ML
                # resources discovered in AWS Bedrock / Azure AI Foundry)
-  service/     # 48 services — snapshot/facts/ownership/systems/policy-assessment/exposure-
+  service/     # 63 services — snapshot/facts/ownership/systems/policy-assessment/exposure-
                # correlation pipeline + platform governance (answer-key, release certification,
                # policy rollout/deprecation)
   model/, policy/, aws/, azure/, copilot/  # contracts, predicate engine, AWS/Azure/Copilot Studio discovery clients

@@ -1,0 +1,163 @@
+{
+  "release": "AGCF_PHASE_2_RUNTIME",
+  "catalogVersion": 1,
+  "technicalVersion": "1.0.0",
+  "waves": [
+    {
+      "wave": "WAVE_2A",
+      "policyIds": [
+        "AGCF-RT-001",
+        "AGCF-RT-002",
+        "AGCF-RT-003",
+        "AGCF-RT-004"
+      ]
+    },
+    {
+      "wave": "WAVE_2B",
+      "policyIds": [
+        "AGCF-RT-005",
+        "AGCF-RT-006",
+        "AGCF-RT-007",
+        "AGCF-RT-008",
+        "AGCF-RT-009"
+      ]
+    }
+  ],
+  "pausedPendingEvidence": [
+    {
+      "policyId": "AGCF-RT-010",
+      "name": "Unconstrained agent-to-agent handoff",
+      "blockingCapability": "RUNTIME_HANDOFF_EVIDENCE",
+      "reasonCode": "POLICY_PAUSED_PENDING_EVIDENCE"
+    },
+    {
+      "policyId": "AGCF-RT-011",
+      "name": "Unsafe durable-memory write",
+      "blockingCapability": "RUNTIME_MEMORY_EVIDENCE",
+      "reasonCode": "POLICY_PAUSED_PENDING_EVIDENCE"
+    },
+    {
+      "policyId": "AGCF-RT-012",
+      "name": "Memory isolation or retention failure",
+      "blockingCapability": "RUNTIME_MEMORY_EVIDENCE",
+      "reasonCode": "POLICY_PAUSED_PENDING_EVIDENCE"
+    },
+    {
+      "policyId": "AGCF-RT-013",
+      "name": "Tool, plugin or MCP integrity-provenance failure",
+      "blockingCapability": "RUNTIME_PROVENANCE_EVIDENCE",
+      "reasonCode": "POLICY_PAUSED_PENDING_EVIDENCE"
+    },
+    {
+      "policyId": "AGCF-RT-014",
+      "name": "Missing stop or containment control for high-impact autonomy",
+      "blockingCapability": "RUNTIME_CONTAINMENT_EVIDENCE",
+      "reasonCode": "POLICY_PAUSED_PENDING_EVIDENCE"
+    }
+  ],
+  "certificationRequirement": {
+    "namedPolicies": [
+      "AGCF-RT-001",
+      "AGCF-RT-003"
+    ],
+    "behaviouralPolicyCandidates": [
+      "AGCF-RT-005",
+      "AGCF-RT-006",
+      "AGCF-RT-008"
+    ],
+    "minimumBehaviouralCertifications": 2,
+    "minimumTotalCertifications": 5
+  },
+  "policies": [
+    {
+      "policyId": "AGCF-RT-001",
+      "version": "1.0.0",
+      "wave": "WAVE_2A",
+      "evaluationMode": "RUNTIME_FACTS",
+      "defaultSelection": "PREVIEW",
+      "releaseFamily": "AGCF_PHASE_2",
+      "releaseStatus": "PAUSED",
+      "packageSourceRef": "policy-packages/agcf/AGCF-RT-001/1.0.0.json"
+    },
+    {
+      "policyId": "AGCF-RT-002",
+      "version": "1.0.0",
+      "wave": "WAVE_2A",
+      "evaluationMode": "RUNTIME_FACTS",
+      "defaultSelection": "PREVIEW",
+      "releaseFamily": "AGCF_PHASE_2",
+      "releaseStatus": "PAUSED",
+      "packageSourceRef": "policy-packages/agcf/AGCF-RT-002/1.0.0.json"
+    },
+    {
+      "policyId": "AGCF-RT-003",
+      "version": "1.0.0",
+      "wave": "WAVE_2A",
+      "evaluationMode": "RUNTIME_FACTS",
+      "defaultSelection": "PREVIEW",
+      "releaseFamily": "AGCF_PHASE_2",
+      "releaseStatus": "PAUSED",
+      "packageSourceRef": "policy-packages/agcf/AGCF-RT-003/1.0.0.json"
+    },
+    {
+      "policyId": "AGCF-RT-004",
+      "version": "1.0.0",
+      "wave": "WAVE_2A",
+      "evaluationMode": "RUNTIME_COVERAGE",
+      "defaultSelection": "PREVIEW",
+      "releaseFamily": "AGCF_PHASE_2",
+      "releaseStatus": "PAUSED",
+      "packageSourceRef": "policy-packages/agcf/AGCF-RT-004/1.0.0.json"
+    },
+    {
+      "policyId": "AGCF-RT-005",
+      "version": "1.0.0",
+      "wave": "WAVE_2B",
+      "evaluationMode": "RUNTIME_SEQUENCE",
+      "defaultSelection": "PREVIEW",
+      "releaseFamily": "AGCF_PHASE_2",
+      "releaseStatus": "PAUSED",
+      "packageSourceRef": "policy-packages/agcf/AGCF-RT-005/1.0.0.json"
+    },
+    {
+      "policyId": "AGCF-RT-006",
+      "version": "1.0.0",
+      "wave": "WAVE_2B",
+      "evaluationMode": "RUNTIME_SEQUENCE",
+      "defaultSelection": "PREVIEW",
+      "releaseFamily": "AGCF_PHASE_2",
+      "releaseStatus": "PAUSED",
+      "packageSourceRef": "policy-packages/agcf/AGCF-RT-006/1.0.0.json"
+    },
+    {
+      "policyId": "AGCF-RT-007",
+      "version": "1.0.0",
+      "wave": "WAVE_2B",
+      "evaluationMode": "RUNTIME_SEQUENCE",
+      "defaultSelection": "PREVIEW",
+      "releaseFamily": "AGCF_PHASE_2",
+      "releaseStatus": "PAUSED",
+      "packageSourceRef": "policy-packages/agcf/AGCF-RT-007/1.0.0.json"
+    },
+    {
+      "policyId": "AGCF-RT-008",
+      "version": "1.0.0",
+      "wave": "WAVE_2B",
+      "evaluationMode": "RUNTIME_SEQUENCE",
+      "defaultSelection": "PREVIEW",
+      "releaseFamily": "AGCF_PHASE_2",
+      "releaseStatus": "PAUSED",
+      "packageSourceRef": "policy-packages/agcf/AGCF-RT-008/1.0.0.json"
+    },
+    {
+      "policyId": "AGCF-RT-009",
+      "version": "1.0.0",
+      "wave": "WAVE_2B",
+      "evaluationMode": "RUNTIME_AGGREGATE",
+      "defaultSelection": "PREVIEW",
+      "releaseFamily": "AGCF_PHASE_2",
+      "releaseStatus": "PAUSED",
+      "packageSourceRef": "policy-packages/agcf/AGCF-RT-009/1.0.0.json"
+    }
+  ]
+}

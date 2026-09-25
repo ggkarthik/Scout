@@ -49,7 +49,7 @@ class SchemaMigrationStartupPostgresIntegrationTest {
 
         assertEquals(0, failed);
         assertEquals(1, latest);
-        assertEquals(54, jdbcTemplate.queryForObject(
+        assertEquals(59, jdbcTemplate.queryForObject(
                 "select count(*) from platform.ai_grid_resource_family_definitions where lifecycle = 'ACTIVE'", Integer.class));
         assertEquals(40, jdbcTemplate.queryForObject(
                 "select count(*) from platform.ai_grid_relationship_definitions where lifecycle = 'ACTIVE'", Integer.class));

@@ -1,0 +1,71 @@
+{
+  "policyId": "AGCF-RT-001",
+  "version": "1.0.0",
+  "name": "Execution cannot be resolved to exactly one agent version",
+  "description": "Fails when a collected execution cannot be attributed to a single agent and version, which makes every downstream runtime conclusion unattributable.",
+  "securityIntent": "Ensure every runtime observation is attributable to exactly one agent version before behavioural policies rely on it.",
+  "remediationIntent": "Repair the connector's agent and version correlation keys, then reassess once correlation is resolved.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-RT-001",
+  "provider": "MULTI_CLOUD",
+  "evaluationMode": "RUNTIME_FACTS",
+  "evaluationDefinition": {
+    "mode": "RUNTIME_FACTS",
+    "runtimeFacts": {
+      "conditions": [
+        {
+          "field": "execution.correlation_status",
+          "operator": "IN",
+          "value": [
+            "AMBIGUOUS",
+            "UNRESOLVED",
+            "CONFLICTING"
+          ]
+        }
+      ],
+      "explanationFields": [
+        "execution.correlation_status",
+        "execution.provider_agent_version_digest"
+      ]
+    }
+  },
+  "baseEvidenceTiers": [
+    "E1"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "PREVIEW",
+  "releaseFamily": "AGCF_PHASE_2",
+  "wave": "WAVE_2A",
+  "workflowClass": "RUNTIME_FINDING",
+  "evaluationSubject": "EXECUTION",
+  "artifactTypes": [],
+  "nativeKinds": [],
+  "requiredCapabilities": [
+    "RUNTIME_EXECUTION_METADATA"
+  ],
+  "requiredRelationships": [],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [],
+  "reasonCode": "AGCF_RT_001_EXECUTION_CORRELATION_UNRESOLVED",
+  "frameworkMappings": [
+    {
+      "framework": "OWASP_AGENTIC_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "ASI06",
+      "mappingType": "DIRECT",
+      "rationale": "Unattributable agent activity defeats agent traceability."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "LOG-05",
+      "mappingType": "PARTIAL",
+      "rationale": "Runtime attribution completeness is a logging and monitoring control."
+    }
+  ],
+  "parameterDefinitions": [],
+  "certificationParameterProfile": null,
+  "packageSourceRef": "policy-packages/agcf/AGCF-RT-001/1.0.0.json"
+}

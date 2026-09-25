@@ -60,6 +60,23 @@ public class AiGridCapabilityService {
         return List.copyOf(gaps);
     }
 
+    /** Runtime capability evidence is authoritative only for the provider that produced the execution. */
+    public List<String> runtimeGaps(Map<CapabilityKey, CapabilityState> index, String provider,
+                                    List<String> required) {
+        List<String> gaps = new ArrayList<>();
+        Instant now = Instant.now();
+        for (String capability : required) {
+            boolean complete = index.entrySet().stream()
+                    .filter(entry -> capability.equals(entry.getKey().capabilityId())
+                            && provider.equals(entry.getKey().provider()))
+                    .map(Map.Entry::getValue)
+                    .anyMatch(state -> DECISIVE.contains(state.status()) && state.expiresAt() != null
+                            && state.expiresAt().isAfter(now));
+            if (!complete) gaps.add("capability:" + capability + ":MISSING_OR_STALE");
+        }
+        return List.copyOf(gaps);
+    }
+
     /** Builds tenant-visible setup guidance from the governed capability catalog. */
     public String remediation(List<String> capabilityIds) {
         if (capabilityIds == null || capabilityIds.isEmpty()) return "Restore the required connector capability and run discovery.";
@@ -230,6 +247,39 @@ public class AiGridCapabilityService {
             return null;
         });
         return Map.copyOf(result);
+    }
+
+    /** Records an asynchronous runtime-source capability without coupling it to an inventory run. */
+    public void recordRuntimeCapabilities(Tenant tenant, String provider, String connector, String accountId,
+                                          String region, String status, String detail,
+                                          List<String> capabilityIds) {
+        if (capabilityIds == null || capabilityIds.isEmpty()) return;
+        tenantExecution.run(tenant, () -> {
+            UUID observationRun = UUID.randomUUID();
+            Instant observedAt = Instant.now();
+            for (String capabilityId : capabilityIds) {
+                jdbc.update("""
+                        insert into ai_grid_capability_observations
+                            (id,tenant_id,run_id,provider,capability_id,connector,account_id,region,
+                             resource_family,connector_version,observed_at,expires_at,status,reason_code,
+                             evidence_scopes_json,detail)
+                        select :id,:tenantId,:runId,:provider,d.capability_id,:connector,:accountId,:region,
+                               d.resource_family,'v1',:observedAt,:expiresAt,:status,:reason,
+                               cast(:scopes as jsonb),:detail
+                          from platform.ai_grid_capability_definitions d
+                         where d.capability_id=:capability and d.lifecycle='ACTIVE'
+                        """, new MapSqlParameterSource().addValue("id", UUID.randomUUID())
+                        .addValue("tenantId", tenant.getId()).addValue("runId", observationRun)
+                        .addValue("provider", provider).addValue("capability", capabilityId)
+                        .addValue("connector", connector).addValue("accountId", accountId)
+                        .addValue("region", region == null ? "GLOBAL" : region)
+                        .addValue("observedAt", Timestamp.from(observedAt))
+                        .addValue("expiresAt", Timestamp.from(observedAt.plusSeconds(86400)))
+                        .addValue("status", status).addValue("reason", reasonCode(status))
+                        .addValue("scopes", "[\"" + capabilityId + "\"]").addValue("detail", detail));
+            }
+            return null;
+        });
     }
 
     public static List<String> declaredCapabilities(String provider, String resourceFamily) {

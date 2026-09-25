@@ -28,8 +28,8 @@ class MigrationCatalogTest {
     void packagedCatalogResolvesPlatformAndTenantTargetsIndependently() {
         PackagedMigrationCatalog.Targets targets = PackagedMigrationCatalog.resolve();
 
-        assertEquals(1, targets.platformTarget());
-        assertEquals(1, targets.tenantTarget());
+        assertEquals(4, targets.platformTarget());
+        assertEquals(3, targets.tenantTarget());
     }
 
     @Test
@@ -83,6 +83,28 @@ class MigrationCatalogTest {
         );
         assertTrue(!migrations.isEmpty(), "Expected at least one migration in the reset catalog.");
         assertCatalogIsValid(TENANT_MIGRATION_DIR);
+    }
+
+    @Test
+    void platformV2DoesNotRewriteExistingPolicyOrDistributionRows() throws IOException {
+        String migration = Files.readString(MIGRATION_DIR.resolve("V2__ai_grid_framework_coverage.sql"), StandardCharsets.UTF_8)
+                .toLowerCase(java.util.Locale.ROOT);
+        assertTrue(!migration.contains("update platform.ai_grid_policy_versions"));
+        assertTrue(!migration.contains("delete from platform.ai_grid_policy_versions"));
+        assertTrue(!migration.contains("update platform.ai_grid_policy_distribution"));
+        assertTrue(!migration.contains("delete from platform.ai_grid_policy_distribution"));
+    }
+
+    @Test
+    void platformV4AddsVersionedCertificationMappingsWithoutEnablingPolicies() throws IOException {
+        String migration = Files.readString(MIGRATION_DIR.resolve("V4__ai_grid_phase_2_evidence_certification_wave.sql"), StandardCharsets.UTF_8)
+                .toLowerCase(java.util.Locale.ROOT);
+        assertTrue(migration.contains("insert into platform.ai_grid_policy_versions"));
+        assertTrue(migration.contains("where p.version='1.0.0'"));
+        assertTrue(!migration.contains("update platform.ai_grid_policy_versions"));
+        assertTrue(!migration.contains("update platform.ai_grid_policy_distribution"));
+        assertTrue(!migration.contains("general_availability"));
+        assertTrue(!migration.contains("canary"));
     }
 
     private static void assertCatalogIsValid(Path directory) throws IOException {

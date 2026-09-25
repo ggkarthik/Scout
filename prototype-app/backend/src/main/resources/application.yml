@@ -93,6 +93,9 @@ app:
       retention-days: ${APP_AI_SECURITY_RUNTIME_RETENTION_DAYS:90}
     copilot:
       enabled: ${APP_AI_SECURITY_COPILOT_ENABLED:true}
+      # Bounded retries apply only to transient Dataverse provider failures.
+      max-attempts: ${APP_AI_SECURITY_COPILOT_MAX_ATTEMPTS:3}
+      retry-backoff-ms: ${APP_AI_SECURITY_COPILOT_RETRY_BACKOFF_MS:250}
     grid:
       enabled: ${APP_AI_GRID_ENABLED:true}
       # Demo-only convenience: publish the source-controlled bundled catalog to all

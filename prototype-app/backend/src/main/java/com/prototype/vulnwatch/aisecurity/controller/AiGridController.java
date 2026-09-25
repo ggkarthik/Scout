@@ -2,6 +2,9 @@ package com.prototype.vulnwatch.aisecurity.controller;
 
 import com.prototype.vulnwatch.aisecurity.service.AiGridApiService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridCapabilityService;
+import com.prototype.vulnwatch.aisecurity.service.AiGridPolicyPortfolioService;
+import com.prototype.vulnwatch.aisecurity.service.AiGridManifestApprovalService;
+import com.prototype.vulnwatch.aisecurity.service.AiGridRuntimeTelemetryReadinessService;
 import com.prototype.vulnwatch.aisecurity.service.AiExposureIntelligenceService;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityAccessService;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityApiService;
@@ -10,6 +13,7 @@ import com.prototype.vulnwatch.aisecurity.service.AiSecurityApiService.PolicySco
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.WorkspaceService;
+import com.prototype.vulnwatch.security.SensitiveTenantAction;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -36,12 +40,18 @@ public class AiGridController {
     private final AiExposureIntelligenceService intelligence;
     private final ObjectProvider<AiGridCapabilityService> capabilities;
     private final ObjectProvider<AiSecurityApiService> policyCompatibility;
+    private final AiGridPolicyPortfolioService policyPortfolio;
+    private final ObjectProvider<AiGridManifestApprovalService> manifestApprovals;
+    private final ObjectProvider<AiGridRuntimeTelemetryReadinessService> runtimeTelemetryReadiness;
 
     public AiGridController(WorkspaceService workspaces, RequestActorService actors,
                             AiSecurityAccessService access, AiGridApiService api,
                             AiExposureIntelligenceService intelligence,
                             ObjectProvider<AiGridCapabilityService> capabilities,
-                            ObjectProvider<AiSecurityApiService> policyCompatibility) {
+                            ObjectProvider<AiSecurityApiService> policyCompatibility,
+                            AiGridPolicyPortfolioService policyPortfolio,
+                            ObjectProvider<AiGridManifestApprovalService> manifestApprovals,
+                            ObjectProvider<AiGridRuntimeTelemetryReadinessService> runtimeTelemetryReadiness) {
         this.workspaces = workspaces;
         this.actors = actors;
         this.access = access;
@@ -49,6 +59,9 @@ public class AiGridController {
         this.intelligence = intelligence;
         this.capabilities = capabilities;
         this.policyCompatibility = policyCompatibility;
+        this.policyPortfolio = policyPortfolio;
+        this.manifestApprovals = manifestApprovals;
+        this.runtimeTelemetryReadiness = runtimeTelemetryReadiness;
     }
 
     @GetMapping("/ai-systems")
@@ -121,9 +134,65 @@ public class AiGridController {
     public List<com.prototype.vulnwatch.aisecurity.service.AiGridCoverageService.CoverageDimension> coverageDimensions() {
         return api.coverageDimensions(tenant());
     }
+    @GetMapping("/ai-framework-coverage")
+    public AiGridPolicyPortfolioService.FrameworkCoverage frameworkCoverage(
+            @RequestParam String framework,
+            @RequestParam String version,
+            @RequestParam(required = false) UUID coverageEpochId) {
+        return policyPortfolio.frameworkCoverage(tenant(), framework, version, coverageEpochId);
+    }
+    @GetMapping("/ai-frameworks")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST','READ_ONLY_AUDITOR')")
+    public List<AiGridPolicyPortfolioService.FrameworkDefinition> frameworks() {
+        return policyPortfolio.frameworks();
+    }
+    @GetMapping("/ai-approved-manifests")
+    public List<AiGridManifestApprovalService.ApprovedManifest> approvedManifests() {
+        return manifestApprovals.getObject().manifests(tenant());
+    }
+    @PutMapping("/ai-approved-manifests/{versionArtifactId}")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    @SensitiveTenantAction("ai_grid.agent_manifest.approved")
+    public AiGridManifestApprovalService.ApprovedManifest approveManifest(
+            @PathVariable UUID versionArtifactId,
+            @RequestBody AiGridManifestApprovalService.ManifestCommand command) {
+        return manifestApprovals.getObject().approveManifest(
+                tenant(), versionArtifactId, command, actors.currentActor().userId());
+    }
+    @PostMapping("/ai-approved-manifests/{versionArtifactId}/revoke")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    @SensitiveTenantAction("ai_grid.agent_manifest.revoked")
+    public void revokeManifest(@PathVariable UUID versionArtifactId) {
+        manifestApprovals.getObject().revokeManifest(tenant(), versionArtifactId, actors.currentActor().userId());
+    }
+    @GetMapping("/ai-component-allowlist")
+    public List<AiGridManifestApprovalService.ComponentAllowlistEntry> componentAllowlist() {
+        return manifestApprovals.getObject().allowlist(tenant());
+    }
+    @PutMapping("/ai-component-allowlist")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    @SensitiveTenantAction("ai_grid.component_allowlist.approved")
+    public AiGridManifestApprovalService.ComponentAllowlistEntry approveComponent(
+            @RequestBody AiGridManifestApprovalService.ComponentCommand command) {
+        return manifestApprovals.getObject().approveComponent(tenant(), command, actors.currentActor().userId());
+    }
+    @PostMapping("/ai-component-allowlist/{entryId}/revoke")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    @SensitiveTenantAction("ai_grid.component_allowlist.revoked")
+    public void revokeComponent(@PathVariable UUID entryId) {
+        manifestApprovals.getObject().revokeComponent(tenant(), entryId, actors.currentActor().userId());
+    }
+    @GetMapping("/ai-runtime-telemetry-readiness")
+    public AiGridRuntimeTelemetryReadinessService.TelemetryReadiness runtimeTelemetryReadiness() {
+        return runtimeTelemetryReadiness.getObject().readiness(tenant());
+    }
     @GetMapping("/ai-policy-readiness")
     public List<com.prototype.vulnwatch.aisecurity.service.AiGridReadinessService.PolicyReadinessView> policyReadiness() {
         return api.policyReadiness(tenant());
+    }
+    @GetMapping("/ai-assessment-states/latest")
+    public List<AiGridApiService.PolicyAssessmentStateSummary> latestAssessmentStates() {
+        return api.latestAssessmentStates(tenant());
     }
     @GetMapping("/ai-connector-capabilities")
     public List<AiGridCapabilityService.CapabilityView> connectorCapabilities() {
@@ -162,6 +231,14 @@ public class AiGridController {
         Tenant tenant = tenant();
         api.updateSelection(tenant, id, request.selection(), actors.currentActor().userId(), request.reason());
         return api.policies(tenant);
+    }
+    @PostMapping("/ai-policies/enable-all")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    @SensitiveTenantAction("ai_grid.policies.bulk_enabled")
+    public AiGridApiService.BulkPolicySelectionResult enableAllPolicies(
+            @RequestBody BulkSelectionRequest request) {
+        return api.enableAllDistributedPolicies(
+                tenant(), actors.currentActor().userId(), request.reason());
     }
     @GetMapping("/ai-policies/{id}/configuration")
     public PolicyConfigurationResponse configuration(@PathVariable String id) {
@@ -219,6 +296,7 @@ public class AiGridController {
         return tenant;
     }
     public record SelectionRequest(String selection, String reason) {}
+    public record BulkSelectionRequest(String reason) {}
     public record ExecutePoliciesRequest(Set<String> policyIds) {}
     public record ScopeUpdateRequest(String mode, String conditionLogic, List<PolicyScopeConditionResponse> conditions) {}
     public record ExceptionRequest(UUID artifactId, String override, String reason) {}

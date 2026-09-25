@@ -537,6 +537,10 @@ import type {
   AiGridSystem,
   AiGridCoverage,
   AiGridCoverageDimension,
+  AiFrameworkCoverage,
+  AiFrameworkDefinition,
+  AiRuntimeTelemetryReadiness,
+  AiGridPolicyAssessmentStateSummary,
   AiGridPolicy,
   AiGridPolicyDistribution,
   AiGridShippingStatus,
@@ -551,6 +555,7 @@ import type {
   AiGridPhase1PreviewStatus,
   AiGridPolicyCandidate,
   AiGridPolicySelection,
+  AiGridBulkPolicySelectionResult,
   AiGridOwner,
   AiGridRunMetrics,
   AiGridPolicyExecutionResult,
@@ -1395,6 +1400,16 @@ export const api = {
   listAiGridSystems: () => request<AiGridSystem[]>('/ai-systems'),
   getAiGridCoverage: () => request<AiGridCoverage>('/ai-coverage'),
   getAiGridCoverageDimensions: () => request<AiGridCoverageDimension[]>('/ai-coverage/dimensions'),
+  getAiFrameworkCoverage: (framework: string, version: string, coverageEpochId?: string) => {
+    const params = new URLSearchParams({ framework, version });
+    if (coverageEpochId) params.set('coverageEpochId', coverageEpochId);
+    return request<AiFrameworkCoverage>(`/ai-framework-coverage?${params.toString()}`);
+  },
+  getAiFrameworks: () => request<AiFrameworkDefinition[]>('/ai-frameworks'),
+  getAiRuntimeTelemetryReadiness: () =>
+    request<AiRuntimeTelemetryReadiness>('/ai-runtime-telemetry-readiness'),
+  getLatestAiGridAssessmentStates: () =>
+    request<AiGridPolicyAssessmentStateSummary[]>('/ai-assessment-states/latest'),
   listAiGridPolicies: () => request<AiGridPolicy[]>('/ai-policies'),
   listPlatformAiGridPolicies: async (filters?: { releaseFamily?: string; lifecycle?: string }) => {
     const params = new URLSearchParams();
@@ -1463,6 +1478,11 @@ export const api = {
     request<AiGridPolicy[]>(`/ai-policies/${encodeURIComponent(policyId)}/selection`, {
       method: 'PUT',
       body: JSON.stringify({ selection, reason }),
+    }),
+  enableAllDistributedAiGridPolicies: (reason: string) =>
+    request<AiGridBulkPolicySelectionResult>('/ai-policies/enable-all', {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
     }),
   getAiGridRunMetrics: (runId: string) => request<AiGridRunMetrics>(
     `/ai-assessment-runs/${encodeURIComponent(runId)}/metrics`,
@@ -1680,7 +1700,7 @@ export const api = {
   saveCopilotStudioConnector: (payload: { organizationUrl: string; credentialProfileId: string; discoveryEnabled: boolean; executionEnabled: boolean; killSwitch: boolean; scheduleCron?: string; allowedDataverseHosts?: string[] }) =>
     request<CopilotStudioConnector>('/connectors/ai-security/copilot-studio', { method: 'PUT', body: JSON.stringify(payload) }),
   testCopilotStudioConnector: (connectorId: string) => request<{ bots: { ready: boolean; status: number; state: string }; components: { ready: boolean; status: number; state: string }; executions: { ready: boolean; status: number; state: string } }>(`/connectors/ai-security/copilot-studio/${encodeURIComponent(connectorId)}/test`, { method: 'POST' }),
-  runCopilotStudioDiscovery: (connectorId: string) => request<{ runId: string; artifacts: number; incompleteScopes: number; status: string }>(`/connectors/ai-security/copilot-studio/${encodeURIComponent(connectorId)}/run`, { method: 'POST' }),
+  runCopilotStudioDiscovery: (connectorId: string) => request<IngestionJobAccepted>(`/connectors/ai-security/copilot-studio/${encodeURIComponent(connectorId)}/run`, { method: 'POST' }),
   runCopilotStudioRuntime: (connectorId: string) => request<{ accepted: number; duplicates: number; windowStart: string }>(`/connectors/ai-security/copilot-studio/${encodeURIComponent(connectorId)}/runtime-run`, { method: 'POST' }),
   listAiSecurityConnectorFeatureFlags: () => request<AiSecurityConnectorFeatureFlag[]>('/connectors/ai-security/feature-flags'),
   updateAiSecurityConnectorFeatureFlag: (featureKey: string, payload: { enabled: boolean; killSwitch: boolean }) =>

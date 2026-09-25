@@ -151,7 +151,12 @@ class CustomerDemoDatasetPostgresIntegrationTest {
             assertEquals(4, count("fix_records"));
             assertEquals(2, count("campaigns"));
             assertEquals(4, count("campaign_vulnerabilities"));
-            assertEquals(6, count("audit_events"));
+            assertEquals(6, jdbcTemplate.queryForObject("""
+                    SELECT count(*)
+                      FROM audit_events
+                     WHERE target_type = 'demo-dataset'
+                       AND details_json @> '{"synthetic":true}'::jsonb
+                    """, Integer.class));
         });
 
         UUID aiBomId = tenantSchemaExecutionService.run(tenant, () -> jdbcTemplate.queryForObject("""

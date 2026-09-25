@@ -236,6 +236,12 @@ public class AwsBedrockDiscoveryService {
                 }
                 int persistedArtifacts = observationService.countPersistedArtifacts(tenant, run.getId());
                 capabilities.finalizeRun(tenant, run.getId());
+                capabilities.recordRuntimeCapabilities(tenant, "AWS", "AWS_CONTROL_PLANE",
+                        config.accountId(), "GLOBAL", "UNSUPPORTED_API",
+                        "AWS control-plane inventory does not establish observed runtime action or decision evidence",
+                        List.of("RUNTIME_EXECUTION_METADATA", "RUNTIME_VERSION_CORRELATION",
+                                "RUNTIME_EVENT_DECISIONS", "RUNTIME_ACTION_OUTCOMES",
+                                "RUNTIME_TOOL_CORRELATION", "RUNTIME_DATA_CLASSIFICATION"));
                 runMetrics.recordProviderCalls(tenant, run.getId(), "AWS", measurement.count());
                 budgets.reconcile(tenant, run.getId(), "AWS");
                 syncRunFacade.complete(

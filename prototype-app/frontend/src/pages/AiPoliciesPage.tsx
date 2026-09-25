@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
@@ -7,10 +7,21 @@ import { useActor } from '../features/auth/context';
 import { hasRole } from '../features/auth/roles';
 import { ProviderLogo } from '../features/ai-security/ProviderLogo';
 import { formatLabel, severityClassName } from '../features/cve-workbench/formatting';
-import type { AiGridPolicy, AiGridPolicySelection } from '../features/ai-security/types';
+import type { AiFrameworkCoverage, AiFrameworkDefinition, AiGridPolicy, AiGridPolicyAssessmentStateSummary, AiGridPolicySelection, AiRuntimeTelemetryReadiness } from '../features/ai-security/types';
 
 const SEVERITY_RANK: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 const PROVIDER_ORDER = ['AWS', 'AZURE', 'MULTI_CLOUD'];
+const assessmentKey = (policyId: string, version: string) => `${policyId}:${version}`;
+const CAPABILITY_LABELS: Record<string, string> = {
+  AI_ACCOUNTS: 'AI account inventory',
+  DIAGNOSTIC_SETTINGS: 'diagnostic logging configuration',
+  FOUNDRY_DEPLOYMENTS_RAI: 'Azure AI Foundry deployment and responsible-AI policy data',
+  ML_WORKSPACES_ENDPOINTS: 'machine-learning workspace and endpoint data',
+};
+
+function statusClass(value: string): string {
+  return `policy-status policy-status--${value.toLowerCase().replace(/_/g, '-')}`;
+}
 const RESOURCE_FAMILY_ARTIFACT_TYPES: Record<string, string> = {
   AWS_BEDROCK_AGENTS: 'AI_AGENT',
   BEDROCK_AGENTS: 'AI_AGENT',
@@ -61,6 +72,25 @@ function providerNames(provider: string): string[] {
   return normalized.split(/[,/ ]+/).filter((name) => name === 'AWS' || name === 'AZURE');
 }
 
+function userReadableBlockers(blockers: string[]): string[] {
+  return Array.from(new Set(blockers.map((blocker) => {
+    if (blocker.startsWith('assessment:')) return 'A mapped policy has not yet produced decision-ready assessment evidence.';
+    const capability = /^capability:([^:]+):MISSING$/i.exec(blocker);
+    if (capability) {
+      const label = CAPABILITY_LABELS[capability[1]] ?? formatLabel(capability[1]);
+      return `Required connector data is unavailable: ${label}.`;
+    }
+    const messages: Record<string, string> = {
+      TENANT_SCHEMA_VERSION_UNAVAILABLE: 'This workspace needs a schema upgrade before framework coverage can be assessed.',
+      TENANT_SCHEMA_UPGRADE_REQUIRED: 'This workspace needs a schema upgrade before runtime telemetry can be assessed.',
+      NO_COVERAGE_EPOCH: 'Framework coverage has not been assessed yet.',
+      POLICY_PAUSED_PENDING_EVIDENCE: 'A mapped policy is paused until the required evidence is available.',
+      POLICY_NOT_DISTRIBUTED: 'A mapped policy is not available to this workspace.',
+    };
+    return messages[blocker] ?? formatLabel(blocker).replace(/\b\w/g, (character) => character.toLowerCase());
+  }).filter(Boolean)));
+}
+
 export function AiPoliciesPage() {
   const actor = useActor();
   const navigate = useNavigate();
@@ -72,6 +102,13 @@ export function AiPoliciesPage() {
     queryKey: ['ai-grid-policies'],
     queryFn: api.listAiGridPolicies,
   });
+  const frameworksQuery = useQuery({ queryKey: ['ai-frameworks'], queryFn: api.getAiFrameworks });
+  const coverageQueries = useQueries({ queries: (frameworksQuery.data ?? []).map((framework) => ({
+    queryKey: ['ai-framework-coverage', framework.framework, framework.frameworkVersion],
+    queryFn: () => api.getAiFrameworkCoverage(framework.framework, framework.frameworkVersion),
+  })) });
+  const telemetryQuery = useQuery({ queryKey: ['ai-runtime-telemetry-readiness'], queryFn: api.getAiRuntimeTelemetryReadiness });
+  const assessmentStatesQuery = useQuery({ queryKey: ['ai-assessment-states-latest'], queryFn: api.getLatestAiGridAssessmentStates });
   const mutation = useMutation({
     mutationFn: ({ id, selection }: { id: string; selection: AiGridPolicySelection }) =>
       api.updateAiGridPolicySelection(id, selection),
@@ -114,6 +151,8 @@ export function AiPoliciesPage() {
     });
   };
   const policyInsights = React.useMemo(() => buildPolicyInsights(policies), [policies]);
+  const assessmentStates = React.useMemo(() => new Map((assessmentStatesQuery.data ?? [])
+    .map((summary) => [assessmentKey(summary.policyId, summary.policyVersion), summary])), [assessmentStatesQuery.data]);
   return (
     <div className="ai-security-page">
       <section className="ai-security-hero policies">
@@ -125,6 +164,9 @@ export function AiPoliciesPage() {
       </section>
 
       {!policiesQuery.isError ? <PolicyInsights insights={policyInsights} loading={policiesQuery.isLoading} /> : null}
+
+      <TenantFrameworkCoverage frameworksQuery={frameworksQuery} coverageQueries={coverageQueries} />
+      <RuntimeTelemetryGate query={telemetryQuery} />
 
       {policiesQuery.isLoading ? (
         <section className="panel"><div className="empty-state"><p>Loading policies…</p></div></section>
@@ -197,6 +239,7 @@ export function AiPoliciesPage() {
                         <th>Severity</th>
                         <th>Framework</th>
                         <th>Failed artefacts</th>
+                        <th>Assessment state</th>
                         <th>Provide</th>
                         <th>Artefact types</th>
                         <th>Enabled/disabled</th>
@@ -217,6 +260,7 @@ export function AiPoliciesPage() {
                             if (checked) next.add(policy.policyId); else next.delete(policy.policyId);
                             return next;
                           })}
+                          assessmentState={assessmentStates.get(assessmentKey(policy.policyId, policy.version))}
                         />
                       ))}
                     </tbody>
@@ -230,6 +274,41 @@ export function AiPoliciesPage() {
 }
 
 type PolicyInsights = ReturnType<typeof buildPolicyInsights>;
+
+function TenantFrameworkCoverage({ frameworksQuery, coverageQueries }: {
+  frameworksQuery: { data?: AiFrameworkDefinition[]; isLoading: boolean; isError: boolean };
+  coverageQueries: Array<{ data?: AiFrameworkCoverage; isLoading: boolean; isError: boolean }>;
+}) {
+  return <section className="panel"><div className="panel-header"><div><h3>Framework risk coverage</h3><p className="panel-caption">Breadth shows mapped controls; effective coverage requires a policy available to this tenant, enabled, and backed by decision-ready evidence.</p></div></div>
+    {frameworksQuery.isLoading ? <p role="status">Loading framework coverage…</p> : null}
+    {frameworksQuery.isError ? <p className="notice error">The framework registry could not be loaded.</p> : null}
+    {!frameworksQuery.isLoading && !frameworksQuery.isError && coverageQueries.length === 0 ? <p>No active framework registry entries were returned.</p> : coverageQueries.map((queryResult, index) => {
+      const framework = frameworksQuery.data?.[index];
+      const coverage = queryResult.data;
+      return <div key={`${framework?.framework}:${framework?.frameworkVersion}`}><h4>{framework?.displayName}</h4>
+        {queryResult.isLoading ? <p role="status">Loading {framework?.displayName} coverage…</p> : null}
+        {queryResult.isError ? <p className="notice error">Coverage could not be loaded for this tenant.</p> : null}
+        {coverage ? <><div className="table-scroll"><table className="data-table"><thead><tr><th>Control</th><th>Status</th><th>Applicable</th><th>Decision ready</th><th>Blocking reasons</th></tr></thead><tbody>
+          {coverage.controls.map((control) => <tr key={control.controlId}><td><strong>{control.controlId}</strong><br /><small>{control.name}</small></td><td><span className={statusClass(control.coverageStatus)}>{control.coverageStatus}</span></td><td>{control.applicableCount}</td><td>{control.decisionReadyCount}</td><td>{userReadableBlockers(control.blockers).join(' ') || '—'}</td></tr>)}
+        </tbody></table></div><p className="panel-caption">Legacy compatibility: {coverage.legacyCompatibility.distributed} of {coverage.legacyCompatibility.policies} policies distributed.</p></> : null}
+      </div>;
+    })}
+  </section>;
+}
+
+function RuntimeTelemetryGate({ query }: {
+  query: { data?: AiRuntimeTelemetryReadiness; isLoading: boolean; isError: boolean };
+}) {
+  const status = query.isError ? 'Unavailable' : query.isLoading ? 'Checking'
+    : query.data && !query.data.available ? 'Not assessed'
+    : query.data?.program2EntryGateMet ? 'Ready' : 'Blocked';
+  return <section className="panel"><div className="panel-header"><div><h3>Runtime telemetry gate</h3><p className="panel-caption">Program 2 remains blocked until both pilot providers meet the fixed server-side thresholds for this tenant.</p></div><span className={statusClass(status)}>{status}</span></div>
+    {query.isError ? <p className="notice error">Runtime telemetry readiness could not be loaded; this is not a gate result.</p> : null}
+    {query.isLoading ? <p role="status">Checking runtime telemetry readiness…</p> : null}
+    {query.data && !query.data.available ? <p className="notice">Runtime telemetry is not assessed because this workspace has not received the required tenant schema upgrade.</p> : null}
+    {query.data?.available ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Source</th><th>Executions / events</th><th>Decision fill</th><th>Correlation</th><th>Delivery lag</th><th>Duplicate / quarantine</th><th>Volume / estimated cost</th><th>Quota</th><th>Alerts / blockers</th></tr></thead><tbody>{query.data.providers.map((providerRow) => <tr key={providerRow.sourceId}><td>{providerRow.provider}<div className="panel-caption">{providerRow.sourceKind === 'TELEMETRY_ADAPTER' ? `${providerRow.sourceId} · ${providerRow.certificationState ?? 'UNCERTIFIED'}` : providerRow.sourceId}</div></td><td>{providerRow.executions} / {providerRow.consequentialEvents}</td><td>A {Math.round(providerRow.approvalStateFillRate * 100)}% · P {Math.round(providerRow.policyStateFillRate * 100)}% · O {Math.round(providerRow.actionOutcomeFillRate * 100)}%</td><td>Agent {Math.round(providerRow.agentCorrelationRate * 100)}% · Version {Math.round(providerRow.versionCorrelationRate * 100)}% ({providerRow.versionApplicableExecutions})</td><td>{Math.round(providerRow.averageDeliveryLatencyMs)} ms</td><td>{(providerRow.duplicateRate * 100).toFixed(1)}% / {(providerRow.quarantineRate * 100).toFixed(1)}%</td><td>{providerRow.acceptedEvents} accepted · {(providerRow.receivedBytes / 1_048_576).toFixed(2)} MiB · ${providerRow.estimatedStorageCostUsd.toFixed(4)}/mo</td><td>{providerRow.quotaExhausted ? 'Exhausted' : providerRow.quotaSoftLimit ? 'Soft limit' : 'Available'}</td><td>{userReadableBlockers([...providerRow.alerts, ...providerRow.blockers]).join(' ') || '—'}</td></tr>)}</tbody></table></div> : null}
+  </section>;
+}
 
 function buildPolicyInsights(policies: AiGridPolicy[]) {
   const required = policies.filter((policy) => policy.selection === 'REQUIRED').length;
@@ -312,7 +391,7 @@ function PolicyInsightCard({ label, value, detail, tone }: {
   );
 }
 
-function PolicyRows({ policy, canManage, saving, onOpen, onSelect, selected, onToggleSelected }: {
+function PolicyRows({ policy, canManage, saving, onOpen, onSelect, selected, onToggleSelected, assessmentState }: {
   policy: AiGridPolicy;
   canManage: boolean;
   saving: boolean;
@@ -320,6 +399,7 @@ function PolicyRows({ policy, canManage, saving, onOpen, onSelect, selected, onT
   onSelect: (checked: boolean) => void;
   selected: boolean;
   onToggleSelected: (checked: boolean) => void;
+  assessmentState?: AiGridPolicyAssessmentStateSummary;
 }) {
   const conditionalCapabilities = parseStringArray(policy.conditionalCapabilitiesJson);
   const frameworks = parseFrameworks(policy.frameworkMappingsJson);
@@ -350,6 +430,12 @@ function PolicyRows({ policy, canManage, saving, onOpen, onSelect, selected, onT
           </div>
         </td>
         <td><strong>{policy.failedArtifacts} / {policy.totalArtifacts}</strong></td>
+        <td>{assessmentState ? <div className="ai-policy-framework-list" aria-label={`Assessment states for ${policy.name}`}>
+          {assessmentState.fail > 0 ? <span className={statusClass('FAIL')}>Fail {assessmentState.fail}</span> : null}
+          {assessmentState.unknown > 0 ? <span className={statusClass('UNKNOWN')}>Unknown {assessmentState.unknown}</span> : null}
+          {assessmentState.pass > 0 ? <span className={statusClass('PASS')}>Pass {assessmentState.pass}</span> : null}
+          {assessmentState.notAssessed > 0 ? <span className={statusClass('NOT_ASSESSED')}>Not assessed {assessmentState.notAssessed}</span> : null}
+        </div> : <small>Not evaluated</small>}</td>
         <td>
           <div className="ai-policy-provider-logos" aria-label={`Applicable providers: ${providers.join(', ')}`}>
             {providers.length > 0 ? providers.map((provider) => <span key={provider} className="ai-policy-provider-logo"><ProviderLogo provider={provider} /></span>) : <small>—</small>}

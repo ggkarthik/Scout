@@ -764,15 +764,19 @@ public class AiSecurityApiService {
             String filter = """
                      where (:policyId is null or f.policy_id = :policyId)
                        and (:status is null or f.status = :status)
-                       and (:provider is null or a.provider = :provider)
+                       and (:provider is null or coalesce(a.provider,x.provider) = :provider)
                        and (:subscription is null or a.account_id = :subscription)
                        and (:nativeKind is null or a.native_kind = any(string_to_array(:nativeKind, ',')))
                        and (:severity is null or coalesce(f.severity_override, case when f.risk_score >= 9 then 'CRITICAL'
                            when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) = :severity)
                     """;
             List<FindingResponse> items = jdbc.query("""
-                    select f.id, f.display_id, f.policy_id, f.policy_version, fs.subject_id artifact_id,
-                           a.name as artifact_name,
+                    select f.id, f.display_id, f.policy_id, f.policy_version,
+                           case when fs.subject_type='ARTIFACT' then fs.subject_id end artifact_id,
+                           case when fs.subject_type='EXECUTION' then fs.subject_id end execution_id,
+                           fs.subject_type,
+                           coalesce(a.name, 'Runtime execution ' || left(fs.subject_id::text,8)) artifact_name,
+                           x.evidence_source, x.evidence_class,
                            coalesce(f.severity_override, case when f.risk_score >= 9 then 'CRITICAL'
                                when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) severity,
                            f.status, f.title, f.evidence::text evidence_json,
@@ -780,19 +784,21 @@ public class AiSecurityApiService {
                            f.closed_reason,
                            coalesce(review.disposition, 'UNREVIEWED') as disposition
                       from findings f
-                      join finding_subjects fs on fs.finding_id = f.id and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
-                      join ai_security_artifacts a on a.id = fs.subject_id
+                      join finding_subjects fs on fs.finding_id = f.id and fs.subject_role = 'PRIMARY'
+                      left join ai_security_artifacts a on a.id = fs.subject_id and fs.subject_type='ARTIFACT'
+                      left join ai_agent_executions x on x.id = fs.subject_id and fs.subject_type='EXECUTION'
                       left join lateral (
                           select disposition from finding_reviews r
                            where r.finding_id = f.id order by reviewed_at desc limit 1
                       ) review on true
-                    """ + filter + " and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE') order by f.last_observed_at desc, f.id limit :limit offset :offset",
+                    """ + filter + " and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE','AI_RUNTIME') order by f.last_observed_at desc, f.id limit :limit offset :offset",
                     params, this::finding);
             long total = count("""
                     select count(*) from findings f
-                    join finding_subjects fs on fs.finding_id = f.id and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
-                    join ai_security_artifacts a on a.id = fs.subject_id
-                    """ + filter + " and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE')", params);
+                    join finding_subjects fs on fs.finding_id = f.id and fs.subject_role = 'PRIMARY'
+                    left join ai_security_artifacts a on a.id = fs.subject_id and fs.subject_type='ARTIFACT'
+                    left join ai_agent_executions x on x.id = fs.subject_id and fs.subject_type='EXECUTION'
+                    """ + filter + " and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE','AI_RUNTIME')", params);
             return new PageResponse<>(items, safePage, safeSize, total);
         });
     }
@@ -1140,9 +1146,9 @@ public class AiSecurityApiService {
                   join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id
                    and (p.version=d.pinned_version or (d.pinned_version is null and p.package_digest is null))
                  where p.lifecycle in ('VALIDATED', 'PUBLISHED', 'CANARY', 'DEPRECATED')
-                   and (d.available=true or p.lifecycle='DEPRECATED')
-                   and (d.rollout_stage='GENERAL_AVAILABILITY'
-                        or (d.rollout_stage in ('CANARY','DEV') and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
+                   and platform.ai_grid_policy_visible_to_tenant(
+                           d.available or p.lifecycle='DEPRECATED', d.rollout_stage,
+                           d.canary_tenant_ids_json, cast(:tenantId as uuid))
                  order by p.policy_id,p.version
                 """, Map.of("tenantId", tenant.getId().toString()), (rs, n) -> catalogDefinition(rs));
     }
@@ -1155,9 +1161,9 @@ public class AiSecurityApiService {
                   join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id
                    and (p.version=d.pinned_version or (d.pinned_version is null and p.package_digest is null))
                  where p.policy_id=:id and p.lifecycle in ('VALIDATED', 'PUBLISHED', 'CANARY', 'DEPRECATED')
-                   and (d.available=true or p.lifecycle='DEPRECATED')
-                   and (d.rollout_stage='GENERAL_AVAILABILITY'
-                        or (d.rollout_stage in ('CANARY','DEV') and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
+                   and platform.ai_grid_policy_visible_to_tenant(
+                           d.available or p.lifecycle='DEPRECATED', d.rollout_stage,
+                           d.canary_tenant_ids_json, cast(:tenantId as uuid))
                  order by p.version limit 1
                 """, Map.of("id", policyId, "tenantId", tenant.getId().toString()), (rs, n) -> catalogDefinition(rs));
         return definitions.stream().findFirst();
@@ -1447,8 +1453,12 @@ public class AiSecurityApiService {
 
     private List<FindingResponse> findingsById(UUID findingId) {
         return jdbc.query("""
-                select f.id, f.display_id, f.policy_id, f.policy_version, fs.subject_id artifact_id,
-                       a.name as artifact_name,
+                select f.id, f.display_id, f.policy_id, f.policy_version,
+                       case when fs.subject_type='ARTIFACT' then fs.subject_id end artifact_id,
+                       case when fs.subject_type='EXECUTION' then fs.subject_id end execution_id,
+                       fs.subject_type,
+                       coalesce(a.name, 'Runtime execution ' || left(fs.subject_id::text,8)) artifact_name,
+                       x.evidence_source, x.evidence_class,
                        coalesce(f.severity_override, case when f.risk_score >= 9 then 'CRITICAL'
                            when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) severity,
                        f.status, f.title, f.evidence::text evidence_json,
@@ -1456,13 +1466,14 @@ public class AiSecurityApiService {
                        f.closed_reason,
                        coalesce(review.disposition, 'UNREVIEWED') as disposition
                   from findings f
-                  join finding_subjects fs on fs.finding_id = f.id and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
-                  join ai_security_artifacts a on a.id = fs.subject_id
+                  join finding_subjects fs on fs.finding_id = f.id and fs.subject_role = 'PRIMARY'
+                  left join ai_security_artifacts a on a.id = fs.subject_id and fs.subject_type='ARTIFACT'
+                  left join ai_agent_executions x on x.id = fs.subject_id and fs.subject_type='EXECUTION'
                   left join lateral (
                       select disposition from finding_reviews r
                        where r.finding_id = f.id order by reviewed_at desc limit 1
                   ) review on true
-                 where f.id = :id and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE')
+                 where f.id = :id and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE','AI_RUNTIME')
                 """, Map.of("id", findingId), this::finding);
     }
 
@@ -1558,7 +1569,11 @@ public class AiSecurityApiService {
                 rs.getString("policy_id"),
                 rs.getString("policy_version"),
                 rs.getObject("artifact_id", UUID.class),
+                rs.getObject("execution_id", UUID.class),
+                rs.getString("subject_type"),
                 rs.getString("artifact_name"),
+                rs.getString("evidence_source"),
+                rs.getString("evidence_class"),
                 rs.getString("severity"),
                 rs.getString("status"),
                 rs.getString("title"),
@@ -1701,7 +1716,9 @@ public class AiSecurityApiService {
 
     public record FindingResponse(
             UUID id, String displayId, String policyId, String policyVersion, UUID artifactId,
-            String artifactName, String severity, String status, String title, Map<String, Object> evidence,
+            UUID executionId, String subjectType,
+            String artifactName, String evidenceSource, String evidenceClass,
+            String severity, String status, String title, Map<String, Object> evidence,
             String reviewDisposition, Instant firstObservedAt, Instant lastObservedAt, Instant resolvedAt
             , String closedReason
     ) {

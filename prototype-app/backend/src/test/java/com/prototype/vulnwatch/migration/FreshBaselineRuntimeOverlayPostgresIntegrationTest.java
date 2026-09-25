@@ -35,7 +35,8 @@ class FreshBaselineRuntimeOverlayPostgresIntegrationTest {
                 .placeholders(Map.of("tenantId", TENANT_ID.toString(), "tenantSchema", "tenant_default"))
                 .load();
         tenant.migrate();
-        assertEquals("1", tenant.info().current().getVersion().getVersion());
+        assertEquals(Integer.toString(PackagedMigrationCatalog.resolve().tenantTarget()),
+                tenant.info().current().getVersion().getVersion());
 
         try (Connection connection = DriverManager.getConnection(DATABASE.url(), DATABASE.username(), DATABASE.password())) {
             try (Statement statement = connection.createStatement()) {

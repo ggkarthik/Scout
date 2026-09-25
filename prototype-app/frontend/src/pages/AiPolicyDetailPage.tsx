@@ -146,6 +146,7 @@ type ImpactedArtifact = {
 function buildImpactedArtifacts(findings: AiSecurityFinding[]): ImpactedArtifact[] {
   const byArtifact = new Map<string, ImpactedArtifact>();
   findings.forEach((finding) => {
+    if (!finding.artifactId) return;
     const isOpen = finding.status === 'OPEN';
     const existing = byArtifact.get(finding.artifactId);
     if (!existing) {

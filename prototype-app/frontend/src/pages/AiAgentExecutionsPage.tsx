@@ -41,7 +41,10 @@ export function AiAgentExecutionsPage() {
     {executions.data.items.length === 0 ? <p>No runtime metadata has been collected.</p> : <table><thead><tr><th>Evidence time</th><th>Provider</th><th>Source</th><th>Agent version</th><th>Correlation</th><th>Status</th><th>Latency</th><th /></tr></thead>
       <tbody>{executions.data.items.map(item => <tr key={item.id}><td>{formatTimestamp(item.evidenceTime)}</td><td>{item.provider}</td><td>{item.source}</td><td className="mono">{item.agentVersionArtifactId ?? '—'}</td><td>{item.correlationStatus}{item.correlationDiagnostic ? <small>{item.correlationDiagnostic.replace(/_/g, ' ')}</small> : null}</td><td>{item.status}</td><td>{item.latencyMs == null ? '—' : `${item.latencyMs} ms`}</td><td><button type="button" onClick={() => setSelected(item.id)}>Timeline</button></td></tr>)}</tbody></table>}
     <div className="pagination-row"><button type="button" disabled={page === 0} onClick={() => setPage(value => value - 1)}>Previous</button><span>Page {page + 1}</span><button type="button" disabled={(page + 1) * pageSize >= executions.data.total} onClick={() => setPage(value => value + 1)}>Next</button></div>
-    {selected && <section><h2>Timeline</h2><button type="button" onClick={() => setSelected(null)}>Close</button>{timeline.isPending ? <p>Loading…</p> : timeline.isError ? <p>Unable to load this timeline.</p> : <ol>{timeline.data?.map(event => <li key={event.id}>{formatTimestamp(event.eventTime)} — {event.eventType}{event.status ? ` (${event.status})` : ''}</li>)}</ol>}</section>}
+    {selected && <section><h2>Timeline</h2><button type="button" onClick={() => setSelected(null)}>Close</button>{timeline.isPending ? <p>Loading…</p> : timeline.isError ? <p>Unable to load this timeline.</p> : <ol>{timeline.data?.map(event => <li key={event.id}>
+      {formatTimestamp(event.eventTime)} — {event.actionCategory ?? event.eventType}{event.targetClass ? ` → ${event.targetClass}` : ''}{event.status ? ` (${event.status})` : ''}
+      <small>{[event.approvalState && `approval ${event.approvalState}`, event.policyState && `policy ${event.policyState}`, event.actionOutcome && `outcome ${event.actionOutcome}`, event.evidenceClass && `evidence ${event.evidenceClass}`].filter(Boolean).join(' · ')}</small>
+    </li>)}</ol>}</section>}
   </main>;
 }
 

@@ -1,0 +1,108 @@
+{
+  "policyId": "AGCF-RT-007",
+  "version": "1.0.0",
+  "name": "Sensitive read was followed by an external write or send",
+  "description": "Fails when a restricted or confidential read is followed within the same execution by an external write or send with no approved declassification.",
+  "securityIntent": "Detect sensitive data leaving the boundary within a single agent execution.",
+  "remediationIntent": "Require declassification approval between sensitive reads and external egress, and review the observed egress.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-RT-007",
+  "provider": "MULTI_CLOUD",
+  "evaluationMode": "RUNTIME_SEQUENCE",
+  "evaluationDefinition": {
+    "mode": "RUNTIME_SEQUENCE",
+    "runtimeSequence": {
+      "steps": [
+        {
+          "conditions": [
+            {
+              "field": "event.data_sensitivity",
+              "operator": "IN",
+              "value": ["CONFIDENTIAL", "RESTRICTED"]
+            },
+            {
+              "field": "event.data_operation",
+              "operator": "EQ",
+              "value": "READ"
+            }
+          ]
+        },
+        {
+          "conditions": [
+            {
+              "field": "event.target_class",
+              "operator": "IN",
+              "value": ["EXTERNAL", "PUBLIC"]
+            },
+            {
+              "field": "event.action_category",
+              "operator": "IN",
+              "value": ["WRITE", "SEND", "PUBLISH"]
+            },
+            {
+              "field": "event.approval_state",
+              "operator": "NOT_IN",
+              "value": ["APPROVED"]
+            }
+          ]
+        }
+      ],
+      "maximumDurationSeconds": 7200,
+      "allowedLatenessSeconds": 300,
+      "deduplicationKey": "execution.agent_artifact_id",
+      "maximumEventsExamined": 2000,
+      "explanationFields": [
+        "event.target_digest",
+        "event.approval_state",
+        "event.data_sensitivity"
+      ]
+    }
+  },
+  "baseEvidenceTiers": [
+    "E1"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "PREVIEW",
+  "releaseFamily": "AGCF_PHASE_2",
+  "wave": "WAVE_2B",
+  "workflowClass": "RUNTIME_FINDING",
+  "evaluationSubject": "EXECUTION",
+  "artifactTypes": [],
+  "nativeKinds": [],
+  "requiredCapabilities": [
+    "RUNTIME_EVENT_DECISIONS",
+    "RUNTIME_DATA_CLASSIFICATION"
+  ],
+  "requiredRelationships": [],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [],
+  "reasonCode": "AGCF_RT_007_SENSITIVE_READ_EXTERNAL_EGRESS",
+  "frameworkMappings": [
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM02",
+      "mappingType": "PARTIAL",
+      "rationale": "Sensitive information disclosure is the direct risk."
+    },
+    {
+      "framework": "OWASP_AGENTIC_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "ASI02",
+      "mappingType": "DIRECT",
+      "rationale": "Uncontrolled egress after a sensitive read is an agentic data-leak path."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "DSP-17",
+      "mappingType": "PARTIAL",
+      "rationale": "Data egress control is a data security and privacy control."
+    }
+  ],
+  "parameterDefinitions": [],
+  "certificationParameterProfile": null,
+  "packageSourceRef": "policy-packages/agcf/AGCF-RT-007/1.0.0.json"
+}

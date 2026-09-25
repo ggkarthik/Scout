@@ -1,0 +1,76 @@
+{
+  "policyId": "AGCF-RT-002",
+  "version": "1.0.0",
+  "name": "Endpoint served an unhealthy or unapproved agent version",
+  "description": "Fails when an execution reports a version digest that is absent from the tenant's approved agent-version manifest.",
+  "securityIntent": "Keep runtime traffic on agent versions the tenant has approved.",
+  "remediationIntent": "Approve the observed version in the agent manifest or roll the endpoint back to an approved version.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-RT-002",
+  "provider": "MULTI_CLOUD",
+  "evaluationMode": "RUNTIME_FACTS",
+  "evaluationDefinition": {
+    "mode": "RUNTIME_FACTS",
+    "runtimeFacts": {
+      "conditions": [
+        {
+          "field": "execution.version_approval_state",
+          "operator": "NOT_IN",
+          "value": ["APPROVED"]
+        }
+      ],
+      "explanationFields": [
+        "execution.provider_agent_version_digest",
+        "execution.deployment_digest",
+        "execution.version_approval_state"
+      ]
+    }
+  },
+  "baseEvidenceTiers": [
+    "E1"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "PREVIEW",
+  "releaseFamily": "AGCF_PHASE_2",
+  "wave": "WAVE_2A",
+  "workflowClass": "RUNTIME_FINDING",
+  "evaluationSubject": "EXECUTION",
+  "artifactTypes": [],
+  "nativeKinds": [],
+  "requiredCapabilities": [
+    "RUNTIME_EXECUTION_METADATA",
+    "RUNTIME_VERSION_CORRELATION"
+  ],
+  "requiredRelationships": [],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [],
+  "reasonCode": "AGCF_RT_002_UNAPPROVED_VERSION_SERVED",
+  "frameworkMappings": [
+    {
+      "framework": "OWASP_AGENTIC_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "ASI04",
+      "mappingType": "DIRECT",
+      "rationale": "Serving an unapproved version is an agent supply-chain control failure."
+    },
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM03",
+      "mappingType": "PARTIAL",
+      "rationale": "Unapproved runtime versions are a supply-chain risk."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "AIS-04",
+      "mappingType": "PARTIAL",
+      "rationale": "Approved-version enforcement is an application security control."
+    }
+  ],
+  "parameterDefinitions": [],
+  "certificationParameterProfile": null,
+  "packageSourceRef": "policy-packages/agcf/AGCF-RT-002/1.0.0.json"
+}

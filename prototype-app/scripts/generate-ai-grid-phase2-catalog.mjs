@@ -8,6 +8,17 @@ const packageRoot = join(root, 'policy-packages', 'agcf');
 const contractPath = join(packageRoot, 'phase-2-catalog-contract.json');
 const version = '1.0.0';
 
+// This is intentionally a small release candidate set, not a shortcut around
+// the validation-governance workflow.  The policy package remains PAUSED until
+// its answer-key, precision, approval, and rollout gates have passed.
+const evidenceCertificationWave = new Set([
+  'AGCF-AWS-039', 'AGCF-AWS-040', 'AGCF-AWS-041', 'AGCF-AWS-042',
+  'AGCF-AZR-033', 'AGCF-AZR-034', 'AGCF-AZR-035', 'AGCF-AZR-036',
+  'AGCF-AZR-037', 'AGCF-AZR-038', 'AGCF-AZR-039',
+  'AGCF-AWS-048', 'AGCF-AWS-049', 'AGCF-AWS-050',
+  'AGCF-AWS-071', 'AGCF-AWS-072',
+]);
+
 const aws = [
   ['039','Effective agent permissions exceed the approved action/resource matrix','AWS_EFFECTIVE_ACCESS','identity.effective_access_exceeds_approved_matrix','IAM'],
   ['040','Effective agent permissions allow cross-account sensitive-resource access','AWS_EFFECTIVE_ACCESS','identity.cross_account_sensitive_access_observed','IAM'],
@@ -109,11 +120,13 @@ const mappings = (family, provider) => {
 
 function posture(id, name, capability, factKey, family, provider, predecessorPolicyId = null) {
   const nativeKinds = provider === 'AWS' ? ['AWS_AI_LINKED_RESOURCE'] : ['AZURE_AI_LINKED_RESOURCE'];
-  return { policyId: `AGCF-${provider === 'AZURE' ? 'AZR' : provider}-${id}`, version, name, description: `Evaluates whether ${name.toLowerCase()} using bounded, normalized provider evidence.`, securityIntent: `Prevent the risk condition described by AGCF-${provider === 'AZURE' ? 'AZR' : provider}-${id}.`, remediationIntent: 'Correct the provider configuration or relationship and reassess with complete, fresh evidence.', owner: 'AI Grid Security', lifecycle: 'VALIDATED', releaseStatus: 'PAUSED', controlObjectiveId: `AGCF-OBJ-P2-${provider}-${id}`, provider, evaluationMode: 'ARTIFACT_FACTS', evaluationDefinition: { mode: 'ARTIFACT_FACTS', artifactFacts: { predicate: { fact: factKey, eq: true } } }, baseEvidenceTiers: ['E1'], conditionalCapabilities: [], defaultSelection: 'DISABLED', releaseFamily: 'AGCF_PHASE_2', wave: 'PHASE_2', workflowClass: 'POSTURE_FINDING', artifactTypes: [], nativeKinds, requiredCapabilities: [capability], requiredRelationships: [], requiredResourceFamilies: [], requiredFacts: [{ factKey, valueType: 'BOOLEAN', evidenceClasses: ['CONFIGURATION'], maxAgeSeconds: 86400 }], reasonCode: `AGCF_P2_${provider}_${id}`, frameworkMappings: mappings(family, provider), parameterDefinitions: [], certificationParameterProfile: null, packageSourceRef: `policy-packages/agcf/AGCF-${provider === 'AZURE' ? 'AZR' : provider}-${id}/${version}.json`, ...(predecessorPolicyId ? { predecessorPolicyId } : {}) };
+  const policyId = `AGCF-${provider === 'AZURE' ? 'AZR' : provider}-${id}`;
+  return { policyId, version, name, description: `Evaluates whether ${name.toLowerCase()} using bounded, normalized provider evidence.`, securityIntent: `Prevent the risk condition described by ${policyId}.`, remediationIntent: 'Correct the provider configuration or relationship and reassess with complete, fresh evidence.', owner: 'AI Grid Security', lifecycle: 'VALIDATED', releaseStatus: 'PAUSED', controlObjectiveId: `AGCF-OBJ-P2-${provider}-${id}`, provider, evaluationMode: 'ARTIFACT_FACTS', evaluationDefinition: { mode: 'ARTIFACT_FACTS', artifactFacts: { predicate: { fact: factKey, eq: true } } }, baseEvidenceTiers: ['E1'], conditionalCapabilities: [], defaultSelection: 'DISABLED', releaseFamily: 'AGCF_PHASE_2', wave: 'PHASE_2', workflowClass: 'POSTURE_FINDING', artifactTypes: [], nativeKinds, requiredCapabilities: [capability], requiredRelationships: [], requiredResourceFamilies: [], requiredFacts: [{ factKey, valueType: 'BOOLEAN', evidenceClasses: ['CONFIGURATION'], maxAgeSeconds: 86400 }], reasonCode: `AGCF_P2_${provider}_${id}`, frameworkMappings: mappings(family, provider), parameterDefinitions: [], certificationParameterProfile: null, packageSourceRef: `policy-packages/agcf/${policyId}/${version}.json`, ...(predecessorPolicyId ? { predecessorPolicyId } : {}) };
 }
 
 function exposure(predecessor, successor, name, factKey) {
-  return { policyId: `AGCF-${successor}`, version, name, description: `Evaluates ${name.toLowerCase()} only from complete, fresh relationship evidence.`, securityIntent: `Prevent the exposure condition described by AGCF-${successor}.`, remediationIntent: 'Break the decisive relationship or correct the linked provider controls, then reassess with complete, fresh evidence.', owner: 'AI Grid Security', lifecycle: 'VALIDATED', releaseStatus: 'PAUSED', controlObjectiveId: `AGCF-OBJ-P2-XSP-${successor.slice(-3)}`, provider: 'MULTI_CLOUD', evaluationMode: 'CORRELATION_PATH', evaluationDefinition: { mode: 'CORRELATION_PATH', correlationPath: { correlationId: successor, correlationVersion: version, decisiveFact: factKey, maxDepth: 4, maxFanOut: 50 } }, baseEvidenceTiers: ['E2'], conditionalCapabilities: [], defaultSelection: 'REQUIRED', releaseFamily: 'AGCF_PHASE_2', wave: 'PHASE_2', workflowClass: 'VALIDATED_EXPOSURE', artifactTypes: [], nativeKinds: ['MULTI_CLOUD_GRAPH'], requiredCapabilities: ['MULTI_CLOUD_GRAPH'], requiredRelationships: ['DIRECT_PROVIDER_RELATIONSHIP'], requiredResourceFamilies: [], requiredFacts: [], reasonCode: `AGCF_P2_XSP_${successor.slice(-3)}`, frameworkMappings: mappings('XSP', 'MULTI_CLOUD'), parameterDefinitions: [], certificationParameterProfile: null, packageSourceRef: `policy-packages/agcf/${successor}/${version}.json`, predecessorPolicyId: `AGCF-${predecessor}` };
+  const policyId = `AGCF-${successor}`;
+  return { policyId, version, name, description: `Evaluates ${name.toLowerCase()} only from complete, fresh relationship evidence.`, securityIntent: `Prevent the exposure condition described by ${policyId}.`, remediationIntent: 'Break the decisive relationship or correct the linked provider controls, then reassess with complete, fresh evidence.', owner: 'AI Grid Security', lifecycle: 'VALIDATED', releaseStatus: 'PAUSED', controlObjectiveId: `AGCF-OBJ-P2-XSP-${successor.slice(-3)}`, provider: 'MULTI_CLOUD', evaluationMode: 'CORRELATION_PATH', evaluationDefinition: { mode: 'CORRELATION_PATH', correlationPath: { correlationId: successor, correlationVersion: version, decisiveFact: factKey, maxDepth: 4, maxFanOut: 50 } }, baseEvidenceTiers: ['E2'], conditionalCapabilities: [], defaultSelection: 'REQUIRED', releaseFamily: 'AGCF_PHASE_2', wave: 'PHASE_2', workflowClass: 'VALIDATED_EXPOSURE', artifactTypes: [], nativeKinds: ['MULTI_CLOUD_GRAPH'], requiredCapabilities: ['MULTI_CLOUD_GRAPH'], requiredRelationships: ['DIRECT_PROVIDER_RELATIONSHIP'], requiredResourceFamilies: [], requiredFacts: [], reasonCode: `AGCF_P2_XSP_${successor.slice(-3)}`, frameworkMappings: mappings('XSP', 'MULTI_CLOUD'), parameterDefinitions: [], certificationParameterProfile: null, packageSourceRef: `policy-packages/agcf/${successor}/${version}.json`, predecessorPolicyId: `AGCF-${predecessor}` };
 }
 
 const policies = [
@@ -145,4 +158,33 @@ const manifestBytes = `${JSON.stringify(phase2Manifest, null, 2)}\n`;
 await writeFile(join(packageRoot, 'phase-2-manifest.json'), manifestBytes);
 await mkdir(join(root, 'backend', 'src', 'main', 'resources', 'ai-grid'), { recursive: true });
 await writeFile(join(root, 'backend', 'src', 'main', 'resources', 'ai-grid', 'phase-2-manifest.json'), manifestBytes);
+const certificationVersion = '1.0.1';
+const certificationPolicies = policies.filter((policy) => evidenceCertificationWave.has(policy.policyId)).map((policy) => ({
+  ...policy,
+  version: certificationVersion,
+  frameworkMappings: policy.frameworkMappings.map((mapping) => mapping.framework === 'OWASP_GENAI_LLM_TOP_10'
+    ? { ...mapping, mappingType: 'DIRECT', rationale: `${policy.provider} evidence directly evaluates this mapped risk. The mapping does not make the policy effective until validation and rollout gates pass.` }
+    : mapping),
+  packageSourceRef: `policy-packages/agcf/${policy.policyId}/${certificationVersion}.json`,
+}));
+for (const policy of certificationPolicies) {
+  await writeFile(join(packageRoot, policy.policyId, `${certificationVersion}.json`), `${JSON.stringify(policy, null, 2)}\n`);
+}
+const certificationManifest = {
+  release: 'AGCF_PHASE_2_EVIDENCE_CERTIFICATION_1',
+  certificationWave: contract.certificationWave.id,
+  requiredGates: contract.certificationWave.requiredGates,
+  policies: await Promise.all(certificationPolicies.map(async (policy) => {
+    const file = join(packageRoot, policy.policyId, `${certificationVersion}.json`);
+    const bytes = await readFile(file);
+    return { policyId: policy.policyId, version: certificationVersion,
+      digest: createHash('sha256').update(bytes).digest('hex'), provider: policy.provider,
+      controlObjectiveId: policy.controlObjectiveId, evaluationMode: policy.evaluationMode,
+      defaultSelection: policy.defaultSelection, releaseFamily: policy.releaseFamily,
+      wave: policy.wave, packageSourceRef: policy.packageSourceRef };
+  })),
+};
+const certificationManifestBytes = `${JSON.stringify(certificationManifest, null, 2)}\n`;
+await writeFile(join(packageRoot, 'phase-2-certification-wave-1-manifest.json'), certificationManifestBytes);
+await writeFile(join(root, 'backend', 'src', 'main', 'resources', 'ai-grid', 'phase-2-certification-wave-1-manifest.json'), certificationManifestBytes);
 console.log(`Generated ${policies.length} Phase 2 packages.`);

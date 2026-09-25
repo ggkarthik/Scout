@@ -100,7 +100,7 @@ export function AiFindingsPage() {
                 >
                   <td><span className={`severity-badge ${finding.severity.toLowerCase()}`}>{finding.severity}</span><strong>{finding.displayId}</strong></td>
                   <td>{finding.title}<small>v{finding.policyVersion}</small></td>
-                  <td>{finding.artifactName}</td>
+                  <td>{finding.artifactName}{finding.subjectType === 'EXECUTION' ? <small>{finding.evidenceSource ?? 'Unknown source'} · {finding.evidenceClass ?? 'Unknown class'}</small> : null}</td>
                   <td><span className="status-pill">{finding.status.replace(/_/g, ' ')}</span></td>
                   <td>{timeAgo(finding.lastObservedAt) ?? 'Unknown'}</td>
                 </tr>

@@ -8,6 +8,9 @@ import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.Relationship
 import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ScopeStatus;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityObservationService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridCapabilityService;
+import com.prototype.vulnwatch.aisecurity.service.AiGridBudgetService;
+import com.prototype.vulnwatch.aisecurity.service.AiGridProviderCallCounter;
+import com.prototype.vulnwatch.aisecurity.service.AiGridRunMetricsService;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityConnectorFeatureFlagService;
 import com.prototype.vulnwatch.aisecurity.service.AiSecuritySyncRunFacade;
 import com.prototype.vulnwatch.domain.Tenant;
@@ -31,18 +34,29 @@ public class CopilotStudioDiscoveryService {
     private final CopilotStudioDataverseClient dataverse; private final AiSecurityObservationService observations;
     private final AiSecuritySyncRunFacade runs;
     private final AiGridCapabilityService capabilities;
+    private final AiGridBudgetService budgets;
+    private final AiGridProviderCallCounter providerCalls;
+    private final AiGridRunMetricsService runMetrics;
     private final AiSecurityConnectorFeatureFlagService featureFlags;
     private final boolean enabled;
+    private final long providerCallCeiling;
     public CopilotStudioDiscoveryService(CopilotStudioConnectorService configs, AiSecurityAzureCredentialService credentials,
                                          CopilotStudioDataverseClient dataverse, AiSecurityObservationService observations,
                                          AiSecuritySyncRunFacade runs, AiGridCapabilityService capabilities,
+                                         AiGridBudgetService budgets,
+                                         AiGridProviderCallCounter providerCalls, AiGridRunMetricsService runMetrics,
                                          AiSecurityConnectorFeatureFlagService featureFlags,
-                                         @Value("${app.ai-security.copilot.enabled:false}") boolean enabled) {
+                                         @Value("${app.ai-security.copilot.enabled:false}") boolean enabled,
+                                         @Value("${app.ai-security.provider-call-ceiling:10000}") long providerCallCeiling) {
         this.configs = configs; this.credentials = credentials; this.dataverse = dataverse; this.observations = observations;
         this.runs = runs;
         this.capabilities = capabilities;
+        this.budgets = budgets;
+        this.providerCalls = providerCalls;
+        this.runMetrics = runMetrics;
         this.featureFlags = featureFlags;
         this.enabled = enabled;
+        this.providerCallCeiling = providerCallCeiling;
     }
     public Result run(Tenant tenant, UUID connectorId) {
         featureFlags.assertEnabled(tenant, AiSecurityConnectorFeatureFlagService.Feature.COPILOT_DISCOVERY, enabled);
@@ -51,15 +65,22 @@ public class CopilotStudioDiscoveryService {
         UUID runId = runs.start(tenant, AiSecuritySyncRunFacade.COPILOT_SYNC_TYPE).getId();
         capabilities.registerRun(tenant, runId, "MICROSOFT_COPILOT", connectorId,
                 config.organizationUrl(), List.of("GLOBAL"), List.of("COPILOT_STUDIO"));
-        try {
-            Result result = collect(tenant, connectorId, config, runId);
-            capabilities.finalizeRun(tenant, runId);
-            runs.complete(tenant.getId(), runId, result.artifacts(), result.incompleteScopes(), null);
-            return result;
-        } catch (RuntimeException error) {
-            capabilities.finalizeRun(tenant, runId);
-            runs.fail(tenant.getId(), runId, "Copilot Studio discovery failed: " + error.getClass().getSimpleName());
-            throw error;
+        try (var measurement = providerCalls.begin(providerCallCeiling)) {
+            try {
+                budgets.admit(tenant, runId, "MICROSOFT_COPILOT", List.of("COPILOT_STUDIO"), "*", "*");
+                Result result = collect(tenant, connectorId, config, runId);
+                capabilities.finalizeRun(tenant, runId);
+                runMetrics.recordProviderCalls(tenant, runId, "MICROSOFT_COPILOT", measurement.count());
+                budgets.reconcile(tenant, runId, "MICROSOFT_COPILOT");
+                runs.complete(tenant.getId(), runId, result.artifacts(), result.incompleteScopes(), null);
+                return result;
+            } catch (RuntimeException error) {
+                capabilities.finalizeRun(tenant, runId);
+                runMetrics.recordProviderCalls(tenant, runId, "MICROSOFT_COPILOT", measurement.count());
+                budgets.reconcile(tenant, runId, "MICROSOFT_COPILOT");
+                runs.fail(tenant.getId(), runId, "Copilot Studio discovery failed: " + error.getClass().getSimpleName());
+                throw error;
+            }
         }
     }
     private Result collect(Tenant tenant, UUID connectorId, CopilotStudioConnectorService.Response config, UUID runId) {
