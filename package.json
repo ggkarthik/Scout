@@ -6,7 +6,7 @@
   "scripts": {
     "build:ai-grid-phase1": "node scripts/compile-ai-grid-phase1.mjs --write && node scripts/validate-ai-grid-phase1-permissions.mjs --write",
     "validate:ai-grid-phase1": "node scripts/compile-ai-grid-phase1.mjs && node scripts/validate-ai-grid-phase1-permissions.mjs",
-    "validate:ai-grid-legacy-cleanup": "node scripts/validate-ai-grid-legacy-cleanup.mjs",
+    "validate:ai-grid-legacy-cleanup": "node scripts/validate-ai-grid-legacy-cleanup.mjs && node prototype-app/scripts/validate-ai-grid-legacy-parity.mjs",
     "generate:ai-grid-catalog-repair": "node scripts/generate-ai-grid-catalog-repair.mjs"
   }
 }

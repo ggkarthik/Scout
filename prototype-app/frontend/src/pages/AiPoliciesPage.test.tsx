@@ -1,6 +1,6 @@
 import { screen, fireEvent } from '@testing-library/react';
 import { Route, Routes, useParams } from 'react-router-dom';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../api/client';
 import type { AiGridPolicy } from '../features/ai-security/types';
 import { renderWithProviders } from '../test/test-utils';
@@ -48,6 +48,24 @@ function buildPolicy(overrides: Partial<AiGridPolicy> = {}): AiGridPolicy {
 }
 
 describe('AiPoliciesPage', () => {
+  beforeEach(() => {
+    vi.spyOn(api, 'getAiFrameworks').mockResolvedValue([{
+      framework: 'OWASP_GENAI_LLM_TOP_10', frameworkVersion: '2026', displayName: 'OWASP GenAI LLM Top 10', controls: [],
+    }]);
+    vi.spyOn(api, 'getAiFrameworkCoverage').mockResolvedValue({
+      framework: 'OWASP_GENAI_LLM_TOP_10', frameworkVersion: '2026', coverageEpochId: null, runId: null,
+      tenantSchemaReady: true, blockers: ['NO_COVERAGE_EPOCH'], controls: [],
+      legacyCompatibility: { policies: 21, distributed: 21, required: 13, enabled: 0, preview: 8 },
+    });
+    vi.spyOn(api, 'getAiRuntimeTelemetryReadiness').mockResolvedValue({
+      windowStart: '2026-01-01T00:00:00Z', windowEnd: '2026-01-15T00:00:00Z', windowDays: 14,
+      minimumFillRate: 0.95, minimumAgentCorrelationRate: 0.9, minimumVersionCorrelationRate: 0.8,
+      minimumExecutionsPerProvider: 100, minimumVersionApplicableExecutions: 50,
+      available: true, program2EntryGateMet: false, blockers: [], providers: [],
+    });
+    vi.spyOn(api, 'getLatestAiGridAssessmentStates').mockResolvedValue([]);
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -105,8 +123,9 @@ describe('AiPoliciesPage', () => {
 
     await screen.findByText('Sensitive-data agent lacks PII guardrail');
     // Policies from all providers share one table; provider is shown in its column.
-    expect(screen.queryAllByRole('heading', { level: 3 })).toHaveLength(0);
-    expect(screen.getAllByRole('columnheader')).toHaveLength(8);
+    expect(screen.queryByRole('heading', { name: 'AWS policies' })).not.toBeInTheDocument();
+    // Nine policy columns plus five framework-coverage and nine telemetry columns.
+    expect(screen.getAllByRole('columnheader')).toHaveLength(23);
     expect(screen.getByRole('checkbox', { name: 'Select Sensitive-data agent lacks PII guardrail' })).toBeInTheDocument();
     // A conditional-capability policy is flagged, but metadata is no longer inline.
     expect(screen.getByText(/needs capability/)).toBeInTheDocument();
@@ -117,6 +136,56 @@ describe('AiPoliciesPage', () => {
     expect(await screen.findByText('Required connector capabilities')).toBeInTheDocument();
     expect(screen.getByText('DIRECT')).toBeInTheDocument();
     expect(screen.getByText('PII guardrail reduces sensitive disclosure.')).toBeInTheDocument();
+  });
+
+  it('shows customer-facing assessment states without treating out-of-scope subjects as unknown', async () => {
+    vi.mocked(api.getLatestAiGridAssessmentStates).mockResolvedValue([{
+      policyId: 'AGCF-AWS-001', policyVersion: '1.0.0', pass: 1, fail: 0, unknown: 0, notAssessed: 2,
+    }]);
+    vi.spyOn(api, 'listAiGridPolicies').mockResolvedValue([buildPolicy()]);
+    renderPoliciesPage();
+
+    expect(await screen.findByText('Pass 1')).toBeInTheDocument();
+    expect(screen.getByText('Not assessed 2')).toBeInTheDocument();
+    expect(screen.queryByText(/Unknown 2/)).not.toBeInTheDocument();
+  });
+
+  it('shows a schema coverage gap as not assessed instead of an API error', async () => {
+    vi.mocked(api.getAiRuntimeTelemetryReadiness).mockResolvedValue({
+      windowStart: '2026-01-01T00:00:00Z', windowEnd: '2026-01-15T00:00:00Z', windowDays: 14,
+      minimumFillRate: 0.95, minimumAgentCorrelationRate: 0.9, minimumVersionCorrelationRate: 0.8,
+      minimumExecutionsPerProvider: 100, minimumVersionApplicableExecutions: 50,
+      available: false, program2EntryGateMet: false,
+      blockers: ['TENANT_SCHEMA_UPGRADE_REQUIRED'], providers: [],
+    });
+    vi.spyOn(api, 'listAiGridPolicies').mockResolvedValue([buildPolicy()]);
+    renderPoliciesPage();
+
+    expect(await screen.findByText('Not assessed')).toBeInTheDocument();
+    expect(screen.getByText(/required tenant schema upgrade/)).toBeInTheDocument();
+    expect(screen.queryByText(/could not be loaded/)).not.toBeInTheDocument();
+  });
+
+  it('turns internal framework blocker codes into customer-readable explanations', async () => {
+    vi.mocked(api.getAiFrameworkCoverage).mockResolvedValue({
+      framework: 'OWASP_GENAI_LLM_TOP_10', frameworkVersion: '2026', coverageEpochId: 'epoch-1', runId: 'run-1',
+      tenantSchemaReady: true, blockers: [],
+      controls: [{
+        controlId: 'LLM01', name: 'Prompt Injection', coverageStatus: 'NOT_ASSESSED',
+        mappedPolicies: 1, distributedPolicies: 1, selectedPolicies: 1, previewPolicies: 0,
+        previewDecisionReadyPolicies: 0, effectivePolicies: 0, applicableCount: 10, decisionReadyCount: 0,
+        blockers: ['assessment:9a8d8d7c-6b5a-4e3f-8d7c-6b5a4e3f8d7c', 'capability:FOUNDRY_DEPLOYMENTS_RAI:MISSING'],
+        mappings: [],
+      }],
+      legacyCompatibility: { policies: 21, distributed: 21, required: 13, enabled: 0, preview: 8 },
+    });
+    vi.spyOn(api, 'listAiGridPolicies').mockResolvedValue([buildPolicy()]);
+    renderPoliciesPage();
+
+    expect(await screen.findByText(/mapped policy has not yet produced decision-ready assessment evidence/i)).toBeInTheDocument();
+    expect(screen.getByText(/required connector data is unavailable: azure ai foundry deployment and responsible-ai policy data/i)).toBeInTheDocument();
+    expect(screen.queryByText(/assessment:9a8d8d7c/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/capability:FOUNDRY_DEPLOYMENTS_RAI:MISSING/i)).not.toBeInTheDocument();
   });
 
   it('filters rows by severity pill and by search text', async () => {

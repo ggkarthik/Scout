@@ -7,9 +7,14 @@ import { InventoryRunQueuePage } from './InventoryRunQueuePage';
 describe('InventoryRunQueuePage', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it('shows AWS and Azure AI discovery progress with provider details and errors', async () => {
+  it('shows AWS, Azure, and Copilot AI discovery progress with provider details and errors', async () => {
     vi.spyOn(api, 'listIngestionJobs').mockResolvedValue({
-      items: [], page: 0, size: 100, totalItems: 0, totalPages: 0
+      items: [{
+        jobId: 'copilot-job', jobType: 'AI_SECURITY_COPILOT_STUDIO', status: 'QUEUED',
+        sourceType: 'ai-security-copilot', assetIdentifier: 'connector:copilot-connector',
+        requestedAt: '2026-07-29T09:10:00Z', requestedBy: 'operator', attemptCount: 0,
+        resultJson: null, failureCode: null, failureMessage: null, sbomUploadId: null, startedAt: null, completedAt: null,
+      }], page: 0, size: 100, totalItems: 1, totalPages: 1
     });
     vi.spyOn(api, 'listSyncRuns').mockResolvedValue([
       {
@@ -111,6 +116,16 @@ describe('InventoryRunQueuePage', () => {
     expect(within(azureRow as HTMLTableRowElement).getByText(/Azure subscription: sub-1/)).toBeInTheDocument();
     expect(within(azureRow as HTMLTableRowElement).getByText(
       /Error: Azure AI Security discovery failed/
+    )).toBeInTheDocument();
+
+    const copilotType = screen.getByText('Microsoft Copilot Discovery');
+    const copilotRow = copilotType.closest('tr');
+    expect(copilotRow).not.toBeNull();
+    expect(within(copilotRow as HTMLTableRowElement).getByText('Queued')).toBeInTheDocument();
+    within(copilotRow as HTMLTableRowElement).getByText('Details').click();
+    expect(within(copilotRow as HTMLTableRowElement).getByText(/Provider: MICROSOFT_COPILOT/)).toBeInTheDocument();
+    expect(within(copilotRow as HTMLTableRowElement).getByText(
+      /Waiting for the AI Security discovery worker to claim this job/
     )).toBeInTheDocument();
 
     const azureCloudType = screen.getByText('Azure Cloud Discovery');

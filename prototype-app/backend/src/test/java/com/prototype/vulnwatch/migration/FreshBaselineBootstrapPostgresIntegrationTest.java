@@ -16,7 +16,8 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 @EnabledIfSystemProperty(named = "run.postgres.it", matches = "true")
 class FreshBaselineBootstrapPostgresIntegrationTest {
 
-    private static final String CURRENT_SCHEMA_VERSION = "1";
+    private static final String CURRENT_SCHEMA_VERSION = Integer.toString(
+            PackagedMigrationCatalog.resolve().platformTarget());
     private static final LocalPostgresTestDatabase.DatabaseConfig DATABASE =
             LocalPostgresTestDatabase.provision("fresh_baseline_bootstrap");
 
@@ -58,12 +59,15 @@ class FreshBaselineBootstrapPostgresIntegrationTest {
                 .defaultSchema("tenant_default")
                 .table("tenant_schema_history")
                 .locations("filesystem:src/main/resources/db/migration/tenant")
-                .placeholders(java.util.Map.of("tenantSchema", "tenant_default"))
+                .placeholders(java.util.Map.of(
+                        "tenantSchema", "tenant_default",
+                        "tenantId", "e5fe0d29-1d64-4175-8ce6-c34f42b214cc"))
                 .validateOnMigrate(true)
                 .outOfOrder(false)
                 .load();
         tenant.migrate();
-        assertEquals("1", tenant.info().current().getVersion().getVersion());
+        assertEquals(Integer.toString(PackagedMigrationCatalog.resolve().tenantTarget()),
+                tenant.info().current().getVersion().getVersion());
     }
 
     private Flyway configuredFlyway() {

@@ -1,0 +1,88 @@
+{
+  "policyId": "AGCF-RT-008",
+  "version": "1.0.0",
+  "name": "Runtime used an undeclared tool or tool version",
+  "description": "Fails when an execution invokes a tool whose digest is absent from the tenant's component allowlist.",
+  "securityIntent": "Keep runtime tool use inside the declared, approved component set.",
+  "remediationIntent": "Add the observed tool digest to the component allowlist or block the undeclared tool.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-RT-008",
+  "provider": "MULTI_CLOUD",
+  "evaluationMode": "RUNTIME_SEQUENCE",
+  "evaluationDefinition": {
+    "mode": "RUNTIME_SEQUENCE",
+    "runtimeSequence": {
+      "steps": [
+        {
+          "conditions": [
+            {
+              "field": "event.tool_digest",
+              "operator": "EXISTS"
+            },
+            {
+              "field": "event.component_approval_state",
+              "operator": "IN",
+              "value": ["UNDECLARED"]
+            }
+          ]
+        }
+      ],
+      "maximumDurationSeconds": 3600,
+      "allowedLatenessSeconds": 300,
+      "deduplicationKey": "execution.agent_artifact_id",
+      "maximumEventsExamined": 1000,
+      "explanationFields": [
+        "event.tool_digest",
+        "event.tool_version_digest",
+        "event.component_approval_state"
+      ]
+    }
+  },
+  "baseEvidenceTiers": [
+    "E1"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "PREVIEW",
+  "releaseFamily": "AGCF_PHASE_2",
+  "wave": "WAVE_2B",
+  "workflowClass": "RUNTIME_FINDING",
+  "evaluationSubject": "EXECUTION",
+  "artifactTypes": [],
+  "nativeKinds": [],
+  "requiredCapabilities": [
+    "RUNTIME_EVENT_DECISIONS",
+    "RUNTIME_TOOL_CORRELATION"
+  ],
+  "requiredRelationships": [],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [],
+  "reasonCode": "AGCF_RT_008_UNDECLARED_TOOL_USED",
+  "frameworkMappings": [
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM03",
+      "mappingType": "PARTIAL",
+      "rationale": "Undeclared tool use is a supply-chain risk."
+    },
+    {
+      "framework": "OWASP_AGENTIC_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "ASI04",
+      "mappingType": "DIRECT",
+      "rationale": "Undeclared components break the agent supply chain contract."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "AIS-04",
+      "mappingType": "PARTIAL",
+      "rationale": "Component allowlisting is an application security control."
+    }
+  ],
+  "parameterDefinitions": [],
+  "certificationParameterProfile": null,
+  "packageSourceRef": "policy-packages/agcf/AGCF-RT-008/1.0.0.json"
+}

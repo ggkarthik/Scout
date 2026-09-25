@@ -4,6 +4,7 @@ import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.service.TenantSchemaExecutionService;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -242,32 +243,69 @@ public class AiAgentExecutionIngestionService {
                 .addValue("classification", input.classification()).addValue("apiVersion", input.apiVersion())
                 .addValue("tokenCount", input.tokenCount()).addValue("latencyMs", input.latencyMs())
                 .addValue("retryCount", input.retryCount()).addValue("spendMicros", input.spendMicros())
+                .addValue("environmentDigest", digestValue(tenant, input.provider(), "environment", input.environmentReference()))
+                .addValue("deploymentDigest", digestValue(tenant, input.provider(), "deployment", input.deploymentReference()))
+                .addValue("actingIdentityDigest", digestValue(tenant, input.provider(), "acting-identity", input.actingIdentityReference()))
+                .addValue("delegatedIdentityDigest", digestValue(tenant, input.provider(), "delegated-identity", input.delegatedIdentityReference()))
+                .addValue("identityDigestKeyVersion", identityKeyVersion(tenant, input.provider(), input))
+                .addValue("terminationReason", input.terminationReason()).addValue("evidenceSource", input.evidenceSource())
+                .addValue("evidenceClass", input.evidenceClass()).addValue("evidenceConfidence", input.evidenceConfidence())
+                .addValue("stepCount", input.stepCount()).addValue("spendCurrency", input.spendCurrency())
+                .addValue("spendUnit", input.spendUnit()).addValue("collectedAt", timestamp(input.collectedAt()))
+                .addValue("providerEventTime", timestamp(input.providerEventTime()))
+                .addValue("deliveryLatencyMs", input.deliveryLatencyMs())
                 .addValue("evidenceTime", Timestamp.from(input.evidenceTime()));
         jdbc.update("""
                 insert into ai_agent_executions (id,tenant_id,provider,provider_execution_digest,digest_key_version,
                     agent_artifact_id,agent_version_artifact_id,provider_agent_digest,provider_agent_version_digest,
                     correlation_status,correlation_diagnostic,source,started_at,completed_at,status,outcome_category,approval_state,policy_state,
-                    classification,api_version,token_count,latency_ms,retry_count,spend_micros,evidence_time)
+                    classification,api_version,token_count,latency_ms,retry_count,spend_micros,evidence_time,
+                    environment_digest,deployment_digest,acting_identity_digest,delegated_identity_digest,
+                    identity_digest_key_version,termination_reason,evidence_source,evidence_class,evidence_confidence,
+                    step_count,spend_currency,spend_unit,collected_at,provider_event_time,delivery_latency_ms)
                 values (:id,:tenantId,:provider,:executionDigest,:keyVersion,:agentId,
                     :agentVersionId,:providerAgentDigest,:providerAgentVersionDigest,:correlationStatus,:correlationDiagnostic,
                     :source,:startedAt,:completedAt,:status,:outcome,:approval,:policy,:classification,:apiVersion,:tokenCount,:latencyMs,:retryCount,
-                    :spendMicros,:evidenceTime)
+                    :spendMicros,:evidenceTime,:environmentDigest,:deploymentDigest,:actingIdentityDigest,
+                    :delegatedIdentityDigest,:identityDigestKeyVersion,:terminationReason,:evidenceSource,:evidenceClass,
+                    :evidenceConfidence,:stepCount,:spendCurrency,:spendUnit,:collectedAt,:providerEventTime,:deliveryLatencyMs)
                 """, values);
-        for (RuntimeEvent event : input.events()) {
+        List<EventWrite> events = input.events().stream().map(event -> eventWrite(tenant, input, event))
+                .sorted(Comparator.comparing(EventWrite::eventTime).thenComparingLong(EventWrite::sequence)
+                        .thenComparing(EventWrite::providerEventDigest))
+                .toList();
+        for (EventWrite event : events) {
             jdbc.update("""
                     insert into ai_agent_execution_events (id,tenant_id,execution_id,sequence,event_time,event_type,status,
-                        classification,evidence_time)
-                    values (:id,:tenantId,:executionId,:sequence,:eventTime,:eventType,:status,:classification,:evidenceTime)
+                        classification,evidence_time,producer_id,provider_event_digest,digest_key_version,action_category,
+                        target_class,tool_digest,tool_version_digest,target_digest,action_correlation_digest,data_sensitivity,
+                        data_operation,approval_state,policy_state,decision_reason,enforcement_point,action_outcome,evidence_class)
+                    values (:id,:tenantId,:executionId,:sequence,:eventTime,:eventType,:status,:classification,:evidenceTime,
+                        :producerId,:providerEventDigest,:digestKeyVersion,:actionCategory,:targetClass,:toolDigest,
+                        :toolVersionDigest,:targetDigest,:actionCorrelationDigest,:dataSensitivity,:dataOperation,
+                        :approvalState,:policyState,:decisionReason,:enforcementPoint,:actionOutcome,:evidenceClass)
+                    on conflict (tenant_id,producer_id,provider_event_digest,digest_key_version)
+                        where producer_id is not null and provider_event_digest is not null and digest_key_version is not null
+                        do nothing
                     """, new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("tenantId", tenant.getId())
                     .addValue("executionId", id).addValue("sequence", event.sequence())
                     .addValue("eventTime", Timestamp.from(event.eventTime())).addValue("eventType", event.eventType())
                     .addValue("status", event.status()).addValue("classification", event.classification())
+                    .addValue("producerId", input.source()).addValue("providerEventDigest", event.providerEventDigest())
+                    .addValue("digestKeyVersion", event.digestKeyVersion()).addValue("actionCategory", event.actionCategory())
+                    .addValue("targetClass", event.targetClass()).addValue("toolDigest", event.toolDigest())
+                    .addValue("toolVersionDigest", event.toolVersionDigest()).addValue("targetDigest", event.targetDigest())
+                    .addValue("actionCorrelationDigest", event.actionCorrelationDigest())
+                    .addValue("dataSensitivity", event.dataSensitivity()).addValue("dataOperation", event.dataOperation())
+                    .addValue("approvalState", event.approvalState()).addValue("policyState", event.policyState())
+                    .addValue("decisionReason", event.decisionReason()).addValue("enforcementPoint", event.enforcementPoint())
+                    .addValue("actionOutcome", event.actionOutcome()).addValue("evidenceClass", event.evidenceClass())
                     .addValue("evidenceTime", Timestamp.from(input.evidenceTime())));
         }
         jdbc.update("update ai_agent_execution_receipts set execution_id=:executionId where tenant_id=:tenantId and idempotency_key=:key",
                 new MapSqlParameterSource().addValue("executionId", id).addValue("tenantId", tenant.getId()).addValue("key", receipt.value()));
         insertParticipants(tenant, id, input, input.evidenceTime());
-        jdbc.update("""
+        if (connectorId != null) jdbc.update("""
                 insert into ai_agent_execution_cursors (id,tenant_id,connector_id,source,scope_key,provider_timestamp,
                     provider_stable_digest,lookback_days,overlap_days)
                 values (:id,:tenantId,:connectorId,:source,:scopeKey,:timestamp,:stableId,:lookbackDays,:overlapDays)
@@ -312,7 +350,77 @@ public class AiAgentExecutionIngestionService {
         if (input.events().stream().anyMatch(event -> event == null || event.eventTime() == null || blank(event.eventType()))) {
             throw new IllegalArgumentException("Runtime events require timestamp and type only");
         }
+        validateState(input.approvalState(), "approvalState",
+                java.util.Set.of("APPROVED", "DENIED", "REQUIRED", "NOT_REQUIRED", "BYPASSED", "UNKNOWN"));
+        validateState(input.policyState(), "policyState",
+                java.util.Set.of("ALLOWED", "DENIED", "BLOCKED", "NOT_EVALUATED", "UNKNOWN"));
+        if (input.evidenceConfidence() != null
+                && (input.evidenceConfidence() < 0 || input.evidenceConfidence() > 1)) {
+            throw new IllegalArgumentException("evidenceConfidence must be between zero and one");
+        }
+        for (RuntimeEvent event : input.events()) {
+            if (blank(event.providerEventReference())) {
+                throw new IllegalArgumentException("Runtime event requires providerEventReference");
+            }
+            validateState(event.actionCategory(), "actionCategory", java.util.Set.of(
+                    "READ", "WRITE", "DELETE", "SEND", "EXECUTE", "ADMIN", "PAYMENT", "PUBLISH", "OTHER"));
+            validateState(event.targetClass(), "targetClass", java.util.Set.of(
+                    "INTERNAL", "EXTERNAL", "PUBLIC", "SENSITIVE_STORE", "CODE_RUNTIME", "IDENTITY_SYSTEM",
+                    "FINANCIAL_SYSTEM", "UNKNOWN"));
+            validateState(event.approvalState(), "event.approvalState",
+                    java.util.Set.of("APPROVED", "DENIED", "REQUIRED", "NOT_REQUIRED", "BYPASSED", "UNKNOWN"));
+            validateState(event.policyState(), "event.policyState",
+                    java.util.Set.of("ALLOWED", "DENIED", "BLOCKED", "NOT_EVALUATED", "UNKNOWN"));
+            validateState(event.actionOutcome(), "actionOutcome",
+                    java.util.Set.of("SUCCEEDED", "FAILED", "DENIED", "BLOCKED", "CANCELLED", "UNKNOWN"));
+            validateState(event.dataSensitivity(), "dataSensitivity",
+                    java.util.Set.of("PUBLIC", "INTERNAL", "CONFIDENTIAL", "RESTRICTED", "UNKNOWN"));
+            validateState(event.dataOperation(), "dataOperation",
+                    java.util.Set.of("READ", "WRITE", "DELETE", "TRANSFORM", "TRANSMIT", "NONE", "UNKNOWN"));
+            requireMaximumLength(event.decisionReason(), "decisionReason", 512);
+            requireMaximumLength(event.enforcementPoint(), "enforcementPoint", 128);
+            requireMaximumLength(event.evidenceClass(), "event.evidenceClass", 64);
+        }
         if (estimatedBytes(input) > maxMetadataBytes) throw new IllegalArgumentException("Runtime metadata byte budget exceeded");
+    }
+
+    private EventWrite eventWrite(Tenant tenant, RuntimeExecution execution, RuntimeEvent event) {
+        AiSecurityDigestService.Digest providerEvent = digests.identityDigest(tenant,
+                "provider-event:" + execution.provider() + ":" + execution.source(), event.providerEventReference());
+        return new EventWrite(event.sequence(), event.eventTime(), event.eventType(), event.status(), event.classification(),
+                providerEvent.value(), providerEvent.keyVersion(), event.actionCategory(), event.targetClass(),
+                digestValue(tenant, execution.provider(), "tool", event.toolReference()),
+                digestValue(tenant, execution.provider(), "tool-version", event.toolVersionReference()),
+                digestValue(tenant, execution.provider(), "target", event.targetReference()),
+                digestValue(tenant, execution.provider(), "action-correlation", event.actionCorrelationReference()),
+                event.dataSensitivity(), event.dataOperation(), event.approvalState(), event.policyState(),
+                event.decisionReason(), event.enforcementPoint(), event.actionOutcome(), event.evidenceClass());
+    }
+
+    private String digestValue(Tenant tenant, String provider, String family, String value) {
+        return blank(value) ? null : digests.identityDigest(tenant, "runtime-" + family + ":" + provider, value).value();
+    }
+
+    private String identityKeyVersion(Tenant tenant, String provider, RuntimeExecution input) {
+        if (!blank(input.actingIdentityReference())) {
+            return digests.identityDigest(tenant, "runtime-acting-identity:" + provider,
+                    input.actingIdentityReference()).keyVersion();
+        }
+        return blank(input.delegatedIdentityReference()) ? null
+                : digests.identityDigest(tenant, "runtime-delegated-identity:" + provider,
+                        input.delegatedIdentityReference()).keyVersion();
+    }
+
+    private static void validateState(String value, String field, java.util.Set<String> allowed) {
+        if (value != null && (!value.equals(value.toUpperCase(java.util.Locale.ROOT)) || !allowed.contains(value))) {
+            throw new IllegalArgumentException(field + " must use the governed runtime state vocabulary");
+        }
+    }
+
+    private static void requireMaximumLength(String value, String field, int maximum) {
+        if (value != null && value.length() > maximum) {
+            throw new IllegalArgumentException(field + " exceeds the governed runtime length limit");
+        }
     }
 
     private static Timestamp timestamp(Instant value) { return value == null ? null : Timestamp.from(value); }
@@ -320,8 +428,21 @@ public class AiAgentExecutionIngestionService {
     private static int estimatedBytes(RuntimeExecution value) {
         int bytes = safeLength(value.provider()) + safeLength(value.providerExecutionId()) + safeLength(value.source()) + safeLength(value.scopeKey())
                 + safeLength(value.status()) + safeLength(value.outcomeCategory()) + safeLength(value.approvalState()) + safeLength(value.policyState())
-                + safeLength(value.classification()) + safeLength(value.apiVersion());
-        for (RuntimeEvent event : value.events()) bytes += safeLength(event.eventType()) + safeLength(event.status()) + safeLength(event.classification()) + 32;
+                + safeLength(value.classification()) + safeLength(value.apiVersion()) + safeLength(value.environmentReference())
+                + safeLength(value.deploymentReference()) + safeLength(value.actingIdentityReference())
+                + safeLength(value.delegatedIdentityReference()) + safeLength(value.terminationReason())
+                + safeLength(value.evidenceSource()) + safeLength(value.evidenceClass());
+        for (RuntimeEvent event : value.events()) {
+            bytes += safeLength(event.eventType()) + safeLength(event.status()) + safeLength(event.classification())
+                    + safeLength(event.providerEventReference()) + safeLength(event.actionCategory())
+                    + safeLength(event.targetClass()) + safeLength(event.toolReference())
+                    + safeLength(event.toolVersionReference()) + safeLength(event.targetReference())
+                    + safeLength(event.actionCorrelationReference()) + safeLength(event.dataSensitivity())
+                    + safeLength(event.dataOperation()) + safeLength(event.approvalState())
+                    + safeLength(event.policyState()) + safeLength(event.decisionReason())
+                    + safeLength(event.enforcementPoint()) + safeLength(event.actionOutcome())
+                    + safeLength(event.evidenceClass()) + 32;
+        }
         return bytes;
     }
     private static int safeLength(String value) { return value == null ? 0 : value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length; }
@@ -332,11 +453,41 @@ public class AiAgentExecutionIngestionService {
                                    String apiVersion, Long tokenCount, Long latencyMs, Integer retryCount, Long spendMicros,
                                    Instant evidenceTime, List<RuntimeEvent> events, UUID agentVersionArtifactId,
                                    String providerAgentReference, String providerAgentVersionReference,
-                                   String correlationStatus, String correlationDiagnostic) { }
-    public record RuntimeEvent(long sequence, Instant eventTime, String eventType, String status, String classification) { }
+                                   String correlationStatus, String correlationDiagnostic,
+                                   String environmentReference, String deploymentReference,
+                                   String actingIdentityReference, String delegatedIdentityReference,
+                                   String terminationReason, String evidenceSource, String evidenceClass,
+                                   Double evidenceConfidence, Long stepCount, String spendCurrency, String spendUnit,
+                                   Instant collectedAt, Instant providerEventTime, Long deliveryLatencyMs) {
+        public RuntimeExecution(String provider, String providerExecutionId, UUID agentArtifactId, String source,
+                                String scopeKey, Instant startedAt, Instant completedAt, String status,
+                                String outcomeCategory, String approvalState, String policyState, String classification,
+                                String apiVersion, Long tokenCount, Long latencyMs, Integer retryCount, Long spendMicros,
+                                Instant evidenceTime, List<RuntimeEvent> events, UUID agentVersionArtifactId,
+                                String providerAgentReference, String providerAgentVersionReference,
+                                String correlationStatus, String correlationDiagnostic) {
+            this(provider, providerExecutionId, agentArtifactId, source, scopeKey, startedAt, completedAt, status,
+                    outcomeCategory, approvalState, policyState, classification, apiVersion, tokenCount, latencyMs,
+                    retryCount, spendMicros, evidenceTime, events, agentVersionArtifactId, providerAgentReference,
+                    providerAgentVersionReference, correlationStatus, correlationDiagnostic, null, null, null, null,
+                    null, null, null, null, null, null, null, null, null, null);
+        }
+    }
+    public record RuntimeEvent(long sequence, Instant eventTime, String eventType, String status, String classification,
+                               String providerEventReference, String actionCategory, String targetClass,
+                               String toolReference, String toolVersionReference, String targetReference,
+                               String actionCorrelationReference, String dataSensitivity, String dataOperation,
+                               String approvalState, String policyState, String decisionReason,
+                               String enforcementPoint, String actionOutcome, String evidenceClass) { }
     public record Result(UUID executionId, boolean duplicate) { }
     public record AgentResolution(UUID agentArtifactId, UUID agentVersionArtifactId,
                                   String status, String diagnostic) { }
     private record ArtifactMatch(UUID id, String artifactType, String nativeKind) { }
+    private record EventWrite(long sequence, Instant eventTime, String eventType, String status, String classification,
+                              String providerEventDigest, String digestKeyVersion, String actionCategory,
+                              String targetClass, String toolDigest, String toolVersionDigest, String targetDigest,
+                              String actionCorrelationDigest, String dataSensitivity, String dataOperation,
+                              String approvalState, String policyState, String decisionReason,
+                              String enforcementPoint, String actionOutcome, String evidenceClass) { }
     public record CursorState(Instant timestamp, int lookbackDays, int overlapDays) { }
 }

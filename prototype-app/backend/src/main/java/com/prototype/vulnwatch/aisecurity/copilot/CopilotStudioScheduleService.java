@@ -24,19 +24,16 @@ public class CopilotStudioScheduleService {
     private static final Logger LOG = LoggerFactory.getLogger(CopilotStudioScheduleService.class);
     private final TenantService tenants;
     private final CopilotStudioConnectorService configs;
-    private final CopilotStudioDiscoveryService discovery;
     private final CopilotStudioRuntimeCollectionService runtime;
     private final boolean enabled;
     private final Map<UUID, Instant> lastFire = new ConcurrentHashMap<>();
     private BackgroundTaskExecutionPolicy backgroundTasks = BackgroundTaskExecutionPolicy.allowAll();
 
     public CopilotStudioScheduleService(TenantService tenants, CopilotStudioConnectorService configs,
-                                        CopilotStudioDiscoveryService discovery,
                                         CopilotStudioRuntimeCollectionService runtime,
                                         @Value("${app.ai-security.copilot.enabled:false}") boolean enabled) {
         this.tenants = tenants;
         this.configs = configs;
-        this.discovery = discovery;
         this.runtime = runtime;
         this.enabled = enabled;
     }
@@ -59,7 +56,7 @@ public class CopilotStudioScheduleService {
             Instant due = dueTime(config.scheduleCron(), now);
             if (due == null || due.equals(lastFire.put(config.id(), due))) continue;
             if (config.discoveryEnabled()) runSafely("discovery", tenant, config.id(),
-                    () -> discovery.run(tenant, config.id()));
+                    () -> configs.trigger(tenant, config.id(), "copilot-studio-schedule"));
             if (config.executionEnabled()) runSafely("runtime", tenant, config.id(),
                     () -> runtime.run(tenant, config.id()));
         }

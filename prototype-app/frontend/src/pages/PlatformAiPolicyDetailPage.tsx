@@ -18,7 +18,7 @@ function frameworkMappings(value?: unknown): Array<{ name: string; control: stri
     return Array.isArray(parsed) ? parsed.map((item) => ({
       name: `${formatLabel(item.framework ?? 'Framework')}${item.frameworkVersion ? ` ${item.frameworkVersion}` : ''}`,
       control: item.controlId ?? '—',
-      type: item.mappingType ?? '—',
+      type: item.mappingType === 'INFORMATIVE' ? 'SUPPORTING (legacy)' : (item.mappingType ?? '—'),
     })) : [];
   } catch { return []; }
 }

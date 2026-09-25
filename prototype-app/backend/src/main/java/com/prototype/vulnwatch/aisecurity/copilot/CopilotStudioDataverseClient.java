@@ -6,6 +6,7 @@ import com.azure.core.credential.TokenRequestContext;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityDigestService;
+import com.prototype.vulnwatch.aisecurity.service.AiGridProviderCallCounter;
 import com.prototype.vulnwatch.domain.Tenant;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -26,12 +27,22 @@ public class CopilotStudioDataverseClient {
     private static final int MAX_BODY_CHARS = 4_000_000;
     private final ObjectMapper json;
     private final AiSecurityDigestService digests;
+    private final AiGridProviderCallCounter providerCalls;
     private final int maxPages;
+    private final int maxAttempts;
+    private final long retryBackoffMs;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15))
             .followRedirects(HttpClient.Redirect.NEVER).build();
 
     public CopilotStudioDataverseClient(ObjectMapper json, AiSecurityDigestService digests,
-                                        @Value("${app.ai-security.runtime.max-api-calls-per-run:100}") int maxPages) { this.json = json; this.digests = digests; this.maxPages = Math.max(1, maxPages); }
+                                        AiGridProviderCallCounter providerCalls,
+                                        @Value("${app.ai-security.runtime.max-api-calls-per-run:100}") int maxPages,
+                                        @Value("${app.ai-security.copilot.max-attempts:3}") int maxAttempts,
+                                        @Value("${app.ai-security.copilot.retry-backoff-ms:250}") long retryBackoffMs) {
+        this.json = json; this.digests = digests; this.providerCalls = providerCalls;
+        this.maxPages = Math.max(1, maxPages); this.maxAttempts = Math.max(1, maxAttempts);
+        this.retryBackoffMs = Math.max(0, retryBackoffMs);
+    }
 
     public Discovery discover(Tenant tenant, TokenCredential credential, String organizationUrl) {
         URI base = organization(organizationUrl);
@@ -109,16 +120,31 @@ public class CopilotStudioDataverseClient {
     }
 
     private JsonNode get(TokenCredential credential, URI uri) {
-        try {
-            AccessToken token = credential.getToken(new TokenRequestContext().addScopes(uri.getScheme() + "://" + uri.getHost() + "/.default")).block(Duration.ofSeconds(20));
-            if (token == null || token.getToken() == null || token.getToken().isBlank()) throw new DataverseException(401, "Dataverse token unavailable");
-            HttpResponse<String> response = http.send(HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(30))
-                    .header("Authorization", "Bearer " + token.getToken()).header("Accept", "application/json").GET().build(), HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() < 200 || response.statusCode() >= 300) throw new DataverseException(response.statusCode(), "Dataverse metadata request failed");
-            if (response.body().length() > MAX_BODY_CHARS) throw new DataverseException(413, "Dataverse response budget exceeded");
-            return json.readTree(response.body());
-        } catch (DataverseException error) { throw error;
-        } catch (Exception error) { throw new DataverseException(502, "Dataverse metadata request failed"); }
+        DataverseException lastFailure = null;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                AccessToken token = credential.getToken(new TokenRequestContext().addScopes(uri.getScheme() + "://" + uri.getHost() + "/.default")).block(Duration.ofSeconds(20));
+                if (token == null || token.getToken() == null || token.getToken().isBlank()) throw new DataverseException(401, "Dataverse token unavailable");
+                providerCalls.increment();
+                HttpResponse<String> response = http.send(HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(30))
+                        .header("Authorization", "Bearer " + token.getToken()).header("Accept", "application/json").GET().build(), HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() < 200 || response.statusCode() >= 300) throw new DataverseException(response.statusCode(), "Dataverse metadata request failed");
+                if (response.body().length() > MAX_BODY_CHARS) throw new DataverseException(413, "Dataverse response budget exceeded");
+                return json.readTree(response.body());
+            } catch (DataverseException error) {
+                lastFailure = error;
+            } catch (Exception error) {
+                lastFailure = new DataverseException(502, "Dataverse metadata request failed");
+            }
+            if (lastFailure == null || !retryable(lastFailure.status()) || attempt == maxAttempts) break;
+            delay(attempt);
+        }
+        throw lastFailure == null ? new DataverseException(502, "Dataverse metadata request failed") : lastFailure;
+    }
+    private static boolean retryable(int status) { return status == 429 || status >= 500; }
+    private void delay(int attempt) {
+        try { Thread.sleep(Math.min(5_000L, retryBackoffMs * (1L << Math.min(10, attempt - 1)))); }
+        catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw new DataverseException(502, "Dataverse retry was interrupted"); }
     }
     private static URI organization(String value) {
         URI uri = URI.create(value); String host = uri.getHost() == null ? "" : uri.getHost().toLowerCase();

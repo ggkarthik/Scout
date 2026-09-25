@@ -4,12 +4,17 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.prototype.vulnwatch.aisecurity.controller.AiGridController;
 import com.prototype.vulnwatch.aisecurity.service.AiExposureIntelligenceService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridApiService;
+import com.prototype.vulnwatch.aisecurity.service.AiGridPolicyPortfolioService;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityAccessService;
 import com.prototype.vulnwatch.config.ApiKeyAuthenticationFilter;
 import com.prototype.vulnwatch.config.RequestCorrelationFilter;
@@ -38,6 +43,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.http.MediaType;
 
 @WebMvcTest(controllers = AiGridController.class,
         excludeAutoConfiguration = UserDetailsServiceAutoConfiguration.class,
@@ -52,6 +58,7 @@ class AiGridEvidenceAuthorizationIntegrationTest {
     @MockBean private WorkspaceService workspaceService;
     @MockBean private AiSecurityAccessService accessService;
     @MockBean private AiGridApiService apiService;
+    @MockBean private AiGridPolicyPortfolioService policyPortfolioService;
     @MockBean private AiExposureIntelligenceService intelligenceService;
     @MockBean private JwtDecoder jwtDecoder;
     @MockBean private JwtTenantAuthenticationService jwtAuthentication;
@@ -87,6 +94,69 @@ class AiGridEvidenceAuthorizationIntegrationTest {
         mockMvc.perform(get("/api/ai-systems/{id}/facts", UUID.randomUUID())
                         .header("Authorization", "Bearer auditor.jwt"))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void frameworkCoverageUsesTheEntitledTenantBoundary() throws Exception {
+        authenticate("auditor.jwt", "auditor", "READ_ONLY_AUDITOR");
+        when(policyPortfolioService.frameworkCoverage(eq(tenant), eq("OWASP_AGENTIC_TOP_10"), eq("2026"),
+                org.mockito.ArgumentMatchers.isNull()))
+                .thenReturn(new AiGridPolicyPortfolioService.FrameworkCoverage(
+                        "OWASP_AGENTIC_TOP_10", "2026", null, null, true, List.of(), List.of(),
+                        new AiGridPolicyPortfolioService.LegacyCompatibility(21, 21, 13, 0, 8)));
+
+        mockMvc.perform(get("/api/ai-framework-coverage")
+                        .queryParam("framework", "OWASP_AGENTIC_TOP_10")
+                        .queryParam("version", "2026")
+                        .header("Authorization", "Bearer auditor.jwt"))
+                .andExpect(status().isOk());
+
+        verify(accessService).assertEntitled(tenant);
+        verify(policyPortfolioService).frameworkCoverage(tenant, "OWASP_AGENTIC_TOP_10", "2026", null);
+    }
+
+    @Test
+    void platformOwnerCanReadGlobalFrameworkRegistryWithoutTenantContext() throws Exception {
+        authenticate("platform.jwt", "platform-owner", "PLATFORM_OWNER");
+        when(workspaceService.getWorkspace()).thenThrow(new IllegalStateException("tenant context required"));
+        when(policyPortfolioService.frameworks()).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/ai-frameworks")
+                        .header("Authorization", "Bearer platform.jwt"))
+                .andExpect(status().isOk());
+
+        verify(policyPortfolioService).frameworks();
+        verify(workspaceService, never()).getWorkspace();
+        verify(accessService, never()).assertEntitled(any());
+    }
+
+    @Test
+    void tenantAdminCanEnableAllDistributedPoliciesThroughTheTenantBoundary() throws Exception {
+        authenticate("admin.jwt", "admin", "TENANT_ADMIN");
+        when(apiService.enableAllDistributedPolicies(eq(tenant), eq("admin"), anyString()))
+                .thenReturn(new AiGridApiService.BulkPolicySelectionResult(159, 103, 127, 32));
+
+        mockMvc.perform(post("/api/ai-policies/enable-all")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"Program 2 pilot\"}")
+                        .header("Authorization", "Bearer admin.jwt"))
+                .andExpect(status().isOk());
+
+        verify(accessService).assertEntitled(tenant);
+        verify(apiService).enableAllDistributedPolicies(tenant, "admin", "Program 2 pilot");
+    }
+
+    @Test
+    void securityAnalystCannotApproveAnAgentManifest() throws Exception {
+        authenticate("analyst.jwt", "analyst", "SECURITY_ANALYST");
+
+        mockMvc.perform(put("/api/ai-approved-manifests/{id}", UUID.randomUUID())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"agentArtifactId\":\"" + UUID.randomUUID()
+                                + "\",\"components\":[{\"componentType\":\"TOOL\",\"artifactId\":\""
+                                + UUID.randomUUID() + "\",\"digest\":\"sha256:test\"}]}")
+                        .header("Authorization", "Bearer analyst.jwt"))
+                .andExpect(status().isForbidden());
     }
 
     private void authenticate(String token, String userId, String role) {

@@ -197,6 +197,7 @@ export function AiAssetDetailPage({ artifactId }: AiAssetDetailPageProps) {
   const findingsCountByArtifactId = React.useMemo(() => {
     const counts: Record<string, number> = {};
     for (const finding of findingsQuery.data?.items ?? []) {
+      if (!finding.artifactId) continue;
       counts[finding.artifactId] = (counts[finding.artifactId] ?? 0) + 1;
     }
     return counts;

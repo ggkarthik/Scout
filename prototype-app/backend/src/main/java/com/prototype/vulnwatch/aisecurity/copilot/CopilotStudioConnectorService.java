@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.aisecurity.azure.AiSecurityAzureCredentialService;
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.dto.IngestionJobAcceptedResponse;
+import com.prototype.vulnwatch.service.IngestionJobService;
 import com.prototype.vulnwatch.service.TenantSchemaExecutionService;
 import java.net.URI;
 import java.time.Instant;
@@ -24,12 +26,14 @@ public class CopilotStudioConnectorService {
     private final TenantSchemaExecutionService tenantExecution;
     private final TransactionTemplate transactions;
     private final AiSecurityAzureCredentialService credentials;
+    private final IngestionJobService jobs;
     private final ObjectMapper json;
 
     public CopilotStudioConnectorService(NamedParameterJdbcTemplate jdbc, TenantSchemaExecutionService tenantExecution,
                                          TransactionTemplate transactions, AiSecurityAzureCredentialService credentials,
-                                         ObjectMapper json) {
-        this.jdbc = jdbc; this.tenantExecution = tenantExecution; this.transactions = transactions; this.credentials = credentials; this.json=json;
+                                         IngestionJobService jobs, ObjectMapper json) {
+        this.jdbc = jdbc; this.tenantExecution = tenantExecution; this.transactions = transactions;
+        this.credentials = credentials; this.jobs = jobs; this.json=json;
     }
 
     public List<Response> list(Tenant tenant) {
@@ -71,6 +75,18 @@ public class CopilotStudioConnectorService {
             return value;
         }));
         return list(tenant).stream().filter(item -> item.id().equals(id)).findFirst().orElseThrow();
+    }
+
+    /** Queues discovery so request and scheduled callers share admission, visibility, and recovery behavior. */
+    public IngestionJobAcceptedResponse trigger(Tenant tenant, UUID connectorId, String requestedBy) {
+        Response config = required(tenant, connectorId);
+        if (!config.discoveryEnabled() || config.killSwitch()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Copilot discovery is disabled");
+        }
+        credentials.secret(tenant, config.credentialProfileId());
+        return jobs.enqueueAiSecurityJob(tenant, connectorId,
+                IngestionJobService.JOB_TYPE_AI_SECURITY_COPILOT_STUDIO,
+                "ai-security-copilot", requestedBy);
     }
 
     private static URI validateOrganizationUrl(String value) {

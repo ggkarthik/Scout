@@ -49,7 +49,7 @@ describe('CopilotStudioConnectorPage', () => {
     expect(screen.getByText(/Runtime — executions: DENIED/)).toBeInTheDocument();
   });
 
-  it('reports completed inventory and policy processing after discovery', async () => {
+  it('queues discovery for durable worker processing', async () => {
     vi.spyOn(api, 'listAiSecurityConnectorFeatureFlags').mockResolvedValue([]);
     vi.spyOn(api, 'listCopilotStudioConnectors').mockResolvedValue([{
       id: 'connector-1', organizationUrl: 'https://org.crm.dynamics.com', credentialProfileId: 'profile-1',
@@ -57,7 +57,7 @@ describe('CopilotStudioConnectorPage', () => {
       allowedDataverseHosts: ['org.crm.dynamics.com'], createdAt: '2026-09-17T00:00:00Z', updatedAt: '2026-09-17T00:00:00Z',
     }]);
     const run = vi.spyOn(api, 'runCopilotStudioDiscovery').mockResolvedValue({
-      runId: 'run-1', artifacts: 5, incompleteScopes: 0, status: 'COMPLETE',
+      jobId: 'job-1', status: 'QUEUED', message: 'Ingestion job queued', existingJob: false, retryAfterSeconds: null,
     });
 
     renderWithProviders(<CopilotStudioConnectorPage />);
@@ -65,7 +65,7 @@ describe('CopilotStudioConnectorPage', () => {
 
     await waitFor(() => expect(run).toHaveBeenCalledWith('connector-1', expect.anything()));
     expect(await screen.findByRole('status')).toHaveTextContent(
-      'Discovery completed: 5 inventory artifacts, 0 incomplete scopes. Policy validation ran for every complete scope.'
+      'Discovery queued (job job-1). Track progress in the ingestion run queue.'
     );
   });
 });

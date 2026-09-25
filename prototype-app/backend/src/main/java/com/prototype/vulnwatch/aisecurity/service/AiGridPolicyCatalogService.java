@@ -71,9 +71,11 @@ public class AiGridPolicyCatalogService {
                     || !relationships.isArray() || !conditionalCapabilities.isArray() || !evidenceTiers.isArray()
                     || !mappings.isArray() || mappings.isEmpty()) bad("Invalid policy package shape");
             validateArtifactTypes(artifactTypes);
-            validateMappings(mappings);
+            validateMappings(command.policyId(), mappings);
             validateParameterDefinitions(parameterDefinitions, predicate);
-            if (!"CORRELATION_PATH".equals(command.evaluationMode())) predicates.validate(predicate);
+            if (!"CORRELATION_PATH".equals(command.evaluationMode()) && !isRuntimeMode(command.evaluationMode())) {
+                predicates.validate(predicate);
+            }
             validateEvidenceTiers(evidenceTiers);
             validateCatalogReference(command.controlObjectiveId(), CatalogReference.OBJECTIVE);
             validateCatalogReferences(conditionalCapabilities, CatalogReference.CAPABILITY);
@@ -122,7 +124,7 @@ public class AiGridPolicyCatalogService {
                     .addValue("evidenceTiers", evidenceTiers.toString()).addValue("conditionalCapabilities", conditionalCapabilities.toString())
                     .addValue("certificationProfile", certificationProfile == null ? null : certificationProfile.toString())
                     .addValue("releaseFamily", command.releaseFamily()).addValue("releaseWave", command.releaseWave())
-                    .addValue("evaluationSubject", "CORRELATION_PATH".equals(command.evaluationMode()) ? "SYSTEM" : "ARTIFACT")
+                    .addValue("evaluationSubject", evaluationSubject(command.evaluationMode()))
                     .addValue("relationshipTypes", relationships.toString())
                     .addValue("applicabilityNotes", applicabilityNotes(artifactTypes, command.evaluationMode())));
             audit.record("ai_grid.policy_package.imported", "ai_grid_policy", command.policyId() + ":" + command.version(), "{\"digest\":\"" + digest + "\"}");
@@ -310,7 +312,9 @@ public class AiGridPolicyCatalogService {
     }
     private void validateEvaluationDefinition(PolicyPackageCommand command, JsonNode definition, JsonNode predicate) {
         if (!definition.isObject() || !command.evaluationMode().equals(definition.path("mode").asText())) bad("Evaluation mode does not match definition");
-        List<String> payloads = List.of("artifactFacts", "directRelationship", "correlationPath").stream().filter(name -> definition.path(name).isObject()).toList();
+        List<String> payloads = List.of("artifactFacts", "directRelationship", "correlationPath",
+                "runtimeFacts", "runtimeSequence", "runtimeAggregate", "runtimeCoverage").stream()
+                .filter(name -> definition.path(name).isObject()).toList();
         if (payloads.size() != 1) bad("Evaluation definition must contain exactly one payload");
         switch (command.evaluationMode()) {
             case "ARTIFACT_FACTS" -> { JsonNode definedPredicate = definition.path("artifactFacts").path("predicate"); if (!definedPredicate.isObject() || !definedPredicate.equals(predicate)) bad("Artifact-fact definition must match predicateJson"); }
@@ -326,8 +330,185 @@ public class AiGridPolicyCatalogService {
                 validateCatalogReference(id + "@" + version, CatalogReference.CORRELATION);
                 if (!"MULTI_CLOUD".equals(command.provider()) || !"VALIDATED_EXPOSURE".equals(command.workflowClass())) bad("Correlation path policies must be multi-cloud validated exposures");
             }
+            case "RUNTIME_FACTS" -> {
+                // Execution-attribute checks (correlation quality, approved version, telemetry
+                // completeness) are neither ordered event sequences nor numeric aggregates, so
+                // they bind a bounded conjunction of execution-scoped conditions.
+                JsonNode facts = definition.path("runtimeFacts");
+                JsonNode conditions = facts.path("conditions");
+                if (!conditions.isArray() || conditions.isEmpty() || conditions.size() > 16) {
+                    bad("Invalid runtime facts definition");
+                }
+                for (JsonNode condition : conditions) {
+                    if (!condition.isObject() || condition.path("field").asText().isBlank()
+                            || !Set.of("EQ", "NE", "IN", "NOT_IN", "EXISTS", "ABSENT")
+                                .contains(condition.path("operator").asText())) {
+                        bad("Invalid runtime facts condition");
+                    }
+                    validateRuntimeExecutionField(condition.path("field").asText());
+                }
+                validateRuntimeFieldList(facts.path("explanationFields"));
+            }
+            case "RUNTIME_SEQUENCE" -> {
+                JsonNode sequence = definition.path("runtimeSequence");
+                JsonNode steps = sequence.path("steps");
+                if (!steps.isArray() || steps.isEmpty()
+                        || steps.size() > 16
+                        || sequence.path("maximumDurationSeconds").asLong(0) <= 0
+                        || sequence.path("maximumDurationSeconds").asLong() > 86400
+                        || sequence.path("allowedLatenessSeconds").asLong(-1) < 0
+                        || sequence.path("allowedLatenessSeconds").asLong() > 3600
+                        || sequence.path("maximumEventsExamined").asLong(0) <= 0
+                        || sequence.path("maximumEventsExamined").asLong() > 10000
+                        || sequence.path("deduplicationKey").asText().isBlank()) {
+                    bad("Invalid runtime sequence definition");
+                }
+                validateRuntimePhysicalExecutionField(sequence.path("deduplicationKey").asText(),
+                        "Runtime sequence deduplication keys must be physical execution fields");
+                for (JsonNode step : steps) {
+                    if (!step.isObject()) bad("Invalid runtime sequence step");
+                    JsonNode conditions = step.path("conditions");
+                    if (conditions.isArray()) {
+                        if (conditions.isEmpty() || conditions.size() > 16) {
+                            bad("Runtime sequence step conditions must be bounded and non-empty");
+                        }
+                        for (JsonNode condition : conditions) validateRuntimeSequencePredicate(condition);
+                    } else {
+                        validateRuntimeSequencePredicate(step);
+                    }
+                }
+                validateRuntimeFieldList(sequence.path("explanationFields"));
+            }
+            case "RUNTIME_AGGREGATE" -> {
+                JsonNode aggregate = definition.path("runtimeAggregate");
+                if (!Set.of("RETRIES", "REPEATED_ACTION_SIGNATURE", "TOKEN_TOTAL", "LATENCY_MS", "SPEND_MICROS", "EVENT_COUNT")
+                            .contains(aggregate.path("metric").asText())
+                        || aggregate.path("lookbackSeconds").asLong(0) <= 0
+                        || aggregate.path("lookbackSeconds").asLong() > 1209600
+                        || aggregate.path("maximumRowsExamined").asLong(0) <= 0
+                        || aggregate.path("maximumRowsExamined").asLong() > 10000
+                        || aggregate.path("maximumEventsExamined").asLong(0) <= 0
+                        || aggregate.path("maximumEventsExamined").asLong() > 100000
+                        || !Set.of("EQ", "NE", "GT", "GTE", "LT", "LTE")
+                            .contains(aggregate.path("operator").asText())
+                        || !aggregate.has("threshold")) {
+                    bad("Invalid runtime aggregate definition");
+                }
+                validateRuntimeGroupingKey(aggregate.path("groupingKey").asText());
+                validateRuntimeFieldList(aggregate.path("explanationFields"));
+            }
+            case "RUNTIME_COVERAGE" -> {
+                JsonNode coverage = definition.path("runtimeCoverage");
+                if (coverage.path("lookbackSeconds").asLong(0) <= 0
+                        || coverage.path("lookbackSeconds").asLong() > 1209600
+                        || coverage.path("windowSeconds").asLong(0) <= 0
+                        || coverage.path("windowSeconds").asLong() > 86400
+                        || coverage.path("maximumRowsExamined").asLong(0) <= 0
+                        || coverage.path("maximumRowsExamined").asLong() > 10000
+                        || coverage.path("sampleSize").asInt(0) <= 0
+                        || coverage.path("sampleSize").asInt() > 20) {
+                    bad("Invalid runtime coverage definition");
+                }
+                if (!"PROVIDER_WINDOW_CAPABILITY_FAMILY".equals(command.findingAggregationGrain())) {
+                    bad("Runtime coverage requires PROVIDER_WINDOW_CAPABILITY_FAMILY aggregation");
+                }
+            }
             default -> bad("Invalid evaluationMode");
         }
+    }
+
+    private void validateRuntimeFieldList(JsonNode node) {
+        if (!node.isArray() || node.size() > 32) bad("Runtime explanationFields must be a bounded array");
+        node.forEach(field -> {
+            if (!field.isTextual()) bad("Runtime explanationFields must contain field names");
+            validateRuntimeField(field.asText());
+        });
+    }
+
+    private void validateRuntimeField(String field) {
+        if (field == null || field.isBlank() || !field.contains(".")) {
+            bad("Runtime field references must be fully qualified");
+        }
+        Integer registered = jdbc.queryForObject("""
+                select count(*) from platform.ai_grid_runtime_field_definitions
+                 where field_key=:field and predicate_eligible=true and lifecycle='ACTIVE'
+                """, Map.of("field", field), Integer.class);
+        if (registered == null || registered == 0) bad("Unknown or ineligible runtime field: " + field);
+    }
+
+    /**
+     * Sequence steps are ordered over events, so a step may only bind an event-scoped field.
+     * An execution-scoped decision is constant across the run and can never establish ordering.
+     */
+    private void validateRuntimeEventField(String field) {
+        validateRuntimeField(field);
+        Integer eventScoped = jdbc.queryForObject("""
+                select count(*) from platform.ai_grid_runtime_field_definitions
+                 where field_key=:field and source_table='ai_agent_execution_events'
+                   and predicate_eligible=true and lifecycle='ACTIVE'
+                """, Map.of("field", field), Integer.class);
+        if (eventScoped == null || eventScoped == 0) {
+            bad("Runtime sequence steps require an event-scoped field: " + field);
+        }
+    }
+
+    private void validateRuntimeSequencePredicate(JsonNode predicate) {
+        if (!predicate.isObject() || predicate.path("field").asText().isBlank()
+                || !Set.of("EQ", "NE", "IN", "NOT_IN", "EXISTS")
+                    .contains(predicate.path("operator").asText())) {
+            bad("Invalid runtime sequence predicate");
+        }
+        validateRuntimeEventField(predicate.path("field").asText());
+    }
+
+    /** Runtime fact conditions describe the execution itself, so they must be execution-scoped. */
+    private void validateRuntimeExecutionField(String field) {
+        validateRuntimeField(field);
+        Integer executionScoped = jdbc.queryForObject("""
+                select count(*) from platform.ai_grid_runtime_field_definitions
+                 where field_key=:field and source_table='ai_agent_executions'
+                   and predicate_eligible=true and lifecycle='ACTIVE'
+                """, Map.of("field", field), Integer.class);
+        if (executionScoped == null || executionScoped == 0) {
+            bad("Runtime facts conditions require an execution-scoped field: " + field);
+        }
+    }
+
+    /**
+     * An aggregate grouping key must resolve to a UUID execution column so the breach is
+     * attributable to a real subject rather than to a free-text label.
+     */
+    private void validateRuntimeGroupingKey(String field) {
+        validateRuntimePhysicalExecutionField(field,
+                "Runtime aggregate grouping keys must be a physical UUID execution field");
+        Integer groupable = jdbc.queryForObject("""
+                select count(*) from platform.ai_grid_runtime_field_definitions
+                 where field_key=:field and source_table='ai_agent_executions' and value_type='UUID'
+                   and physical_column=true and predicate_eligible=true and lifecycle='ACTIVE'
+                """, Map.of("field", field), Integer.class);
+        if (groupable == null || groupable == 0) {
+            bad("Runtime aggregate grouping keys must be a physical UUID execution field: " + field);
+        }
+    }
+
+    private void validateRuntimePhysicalExecutionField(String field, String message) {
+        validateRuntimeField(field);
+        Integer physical = jdbc.queryForObject("""
+                select count(*) from platform.ai_grid_runtime_field_definitions
+                 where field_key=:field and source_table='ai_agent_executions'
+                   and physical_column=true and predicate_eligible=true and lifecycle='ACTIVE'
+                """, Map.of("field", field), Integer.class);
+        if (physical == null || physical == 0) bad(message + ": " + field);
+    }
+
+    private static boolean isRuntimeMode(String mode) {
+        return AiGridAssessmentService.isRuntimeMode(mode);
+    }
+
+    private static String evaluationSubject(String mode) {
+        if ("CORRELATION_PATH".equals(mode)) return "SYSTEM";
+        if (isRuntimeMode(mode)) return "EXECUTION";
+        return "ARTIFACT";
     }
     private void validateCertificationProfile(JsonNode definitions, JsonNode profile) {
         if (definitions.isEmpty()) { if (profile != null) bad("Certification profile requires parameters"); return; }
@@ -412,19 +593,56 @@ public class AiGridPolicyCatalogService {
         }
         validateParameterReferences(predicate, keys);
     }
-    private void validateMappings(JsonNode mappings) {
-        if (mappings.isObject()) return; // Legacy read compatibility is retained for one release.
+    private void validateMappings(String policyId, JsonNode mappings) {
+        JsonNode previous = latestMappings(policyId);
+        Set<String> tuples = new HashSet<>();
         for (JsonNode mapping : mappings) {
             String framework = mapping.path("framework").asText();
             String version = mapping.path("frameworkVersion").asText();
+            String controlId = mapping.path("controlId").asText();
             String type = mapping.path("mappingType").asText();
-            if (!(("CSA_AICM".equals(framework) && "1.1".equals(version))
-                    || ("OWASP_GENAI_LLM_TOP_10".equals(framework) && "2026".equals(version)))
-                    || mapping.path("controlId").asText().isBlank() || mapping.path("rationale").asText().isBlank()
-                    || !Set.of("DIRECT", "PARTIAL", "INFORMATIVE").contains(type)) {
+            String rationale = mapping.path("rationale").asText();
+            String tuple = framework + "\u0000" + version + "\u0000" + controlId;
+            Integer registered = jdbc.queryForObject("""
+                    select count(*) from platform.ai_grid_framework_controls
+                     where framework_key=:framework and framework_version=:version and control_id=:controlId
+                    """, Map.of("framework", framework, "version", version, "controlId", controlId), Integer.class);
+            if (controlId.isBlank() || rationale.isBlank() || !tuples.add(tuple)
+                    || !Set.of("DIRECT", "PARTIAL", "SUPPORTING").contains(type)
+                    || registered == null || registered != 1) {
                 bad("Invalid or unversioned framework mapping");
             }
+            JsonNode prior = findMapping(previous, framework, version, controlId);
+            boolean changed = prior == null || !prior.equals(mapping);
+            if (changed && genericMappingRationale(rationale)) {
+                bad("New or changed framework mappings require a policy-specific rationale");
+            }
         }
+    }
+
+    private boolean genericMappingRationale(String rationale) {
+        String normalized = rationale == null ? "" : rationale.trim();
+        return "This control is independently mapped to the policy's stated security intent.".equals(normalized)
+                || normalized.matches("(?i)^(AWS|AZURE)\\s+.+\\s+normalized evidence contributes to this control\\.$");
+    }
+
+    private JsonNode latestMappings(String policyId) {
+        List<String> values = jdbc.query("""
+                select framework_mappings_json::text from platform.ai_grid_policy_versions
+                 where policy_id=:policyId
+                 order by published_at desc nulls last, created_at desc, version desc limit 1
+                """, Map.of("policyId", policyId), (rs, row) -> rs.getString(1));
+        return values.isEmpty() ? mapper.createArrayNode() : tree(values.get(0), "stored framework mappings");
+    }
+
+    private JsonNode findMapping(JsonNode mappings, String framework, String version, String controlId) {
+        if (mappings == null || !mappings.isArray()) return null;
+        for (JsonNode mapping : mappings) {
+            if (framework.equals(mapping.path("framework").asText())
+                    && version.equals(mapping.path("frameworkVersion").asText())
+                    && controlId.equals(mapping.path("controlId").asText())) return mapping;
+        }
+        return null;
     }
     private void validateCatalogReferences(JsonNode values, CatalogReference reference) {
         for (JsonNode value : values) {
@@ -477,8 +695,22 @@ public class AiGridPolicyCatalogService {
             String remediation, String frameworkMappingsJson, String packageSourceRef, String releaseNotes, String parameterDefinitionsJson,
             String requiredCapabilitiesJson, String requiredRelationshipsJson, String controlObjectiveId, String provider,
             String evaluationMode, String evaluationDefinitionJson, String baseEvidenceTiersJson, String conditionalCapabilitiesJson,
-            String certificationParameterProfileJson, String releaseFamily, String releaseWave) {
-        String digestMaterial() { return String.join("|", policyId, version, name, description, severity, workflowClass, defaultSelection, artifactTypesJson, nativeKindsJson == null ? "[]" : nativeKindsJson, requiredCapabilitiesJson == null ? "[]" : requiredCapabilitiesJson, requiredRelationshipsJson == null ? "[]" : requiredRelationshipsJson, requiredResourceFamiliesJson, requiredFactsJson, predicateJson, reasonCode, remediation, frameworkMappingsJson, packageSourceRef, parameterDefinitionsJson == null ? "[]" : parameterDefinitionsJson, controlObjectiveId, provider, evaluationMode, evaluationDefinitionJson, baseEvidenceTiersJson, conditionalCapabilitiesJson == null ? "[]" : conditionalCapabilitiesJson, certificationParameterProfileJson == null ? "null" : certificationParameterProfileJson, releaseFamily, releaseWave); }
+            String certificationParameterProfileJson, String releaseFamily, String releaseWave,
+            String findingAggregationGrain) {
+        String digestMaterial() {
+            String base = String.join("|", policyId, version, name, description, severity, workflowClass,
+                    defaultSelection, artifactTypesJson, nativeKindsJson == null ? "[]" : nativeKindsJson,
+                    requiredCapabilitiesJson == null ? "[]" : requiredCapabilitiesJson,
+                    requiredRelationshipsJson == null ? "[]" : requiredRelationshipsJson,
+                    requiredResourceFamiliesJson, requiredFactsJson, predicateJson, reasonCode, remediation,
+                    frameworkMappingsJson, packageSourceRef,
+                    parameterDefinitionsJson == null ? "[]" : parameterDefinitionsJson, controlObjectiveId,
+                    provider, evaluationMode, evaluationDefinitionJson, baseEvidenceTiersJson,
+                    conditionalCapabilitiesJson == null ? "[]" : conditionalCapabilitiesJson,
+                    certificationParameterProfileJson == null ? "null" : certificationParameterProfileJson,
+                    releaseFamily, releaseWave);
+            return findingAggregationGrain == null ? base : base + "|" + findingAggregationGrain;
+        }
     }
     public record PolicyVersion(String policyId, String version, String lifecycle, String packageDigest, String packageSourceRef) {}
     public record DistributionCommand(boolean available, String defaultSelection, String rolloutStage, List<String> canaryTenantIds, String pinnedVersion) {}

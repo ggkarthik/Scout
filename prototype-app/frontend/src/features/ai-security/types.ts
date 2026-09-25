@@ -79,7 +79,117 @@ export type AiGridCoverageDimension = {
   noDecision: number;
 };
 
+export type AiFrameworkControlCoverage = {
+  controlId: string;
+  name: string;
+  coverageStatus: 'EFFECTIVE' | 'PARTIAL' | 'PREVIEW' | 'NOT_ASSESSED' | 'BREADTH_ONLY' | 'NOT_COVERED';
+  mappedPolicies: number;
+  distributedPolicies: number;
+  selectedPolicies: number;
+  previewPolicies: number;
+  previewDecisionReadyPolicies: number;
+  effectivePolicies: number;
+  applicableCount: number;
+  decisionReadyCount: number;
+  blockers: string[];
+  mappings: Array<{
+    policyId: string;
+    policyVersion: string;
+    mappingType: 'DIRECT' | 'PARTIAL' | 'SUPPORTING';
+    rationale: string;
+    selection: AiGridPolicySelection | null;
+    readiness: string | null;
+    distributed: boolean;
+  }>;
+};
+
+export type AiFrameworkCoverage = {
+  framework: string;
+  frameworkVersion: string;
+  coverageEpochId: string | null;
+  runId: string | null;
+  tenantSchemaReady: boolean;
+  blockers: string[];
+  controls: AiFrameworkControlCoverage[];
+  legacyCompatibility: {
+    policies: number;
+    distributed: number;
+    required: number;
+    enabled: number;
+    preview: number;
+  };
+};
+
+export type AiFrameworkDefinition = {
+  framework: string;
+  frameworkVersion: string;
+  displayName: string;
+  controls: Array<{ controlId: string; name: string; displayOrder: number }>;
+};
+
+export type AiRuntimeTelemetryReadiness = {
+  windowStart: string;
+  windowEnd: string;
+  windowDays: number;
+  minimumFillRate: number;
+  minimumAgentCorrelationRate: number;
+  minimumVersionCorrelationRate: number;
+  minimumExecutionsPerProvider: number;
+  minimumVersionApplicableExecutions: number;
+  available: boolean;
+  program2EntryGateMet: boolean;
+  blockers: string[];
+  providers: Array<{
+    sourceId: string;
+    provider: string;
+    sourceKind: 'PROVIDER_CONNECTOR' | 'TELEMETRY_ADAPTER';
+    requiredForProgramGate: boolean;
+    configured: boolean;
+    evidenceClass?: string | null;
+    certificationState?: string | null;
+    executions: number;
+    consequentialEvents: number;
+    approvalStateFillRate: number;
+    policyStateFillRate: number;
+    actionOutcomeFillRate: number;
+    executionApprovalStateFillRate: number;
+    executionPolicyStateFillRate: number;
+    agentCorrelationRate: number;
+    versionCorrelationRate: number;
+    versionApplicableExecutions: number;
+    averageDeliveryLatencyMs: number;
+    acceptedEvents: number;
+    duplicateRate: number;
+    quarantineRate: number;
+    receivedBytes: number;
+  quotaAcceptedEvents: number;
+  quotaAcceptedBytes: number;
+  estimatedStorageCostUsd: number;
+    quotaSoftLimit: boolean;
+    quotaExhausted: boolean;
+    entryGateMet: boolean;
+    blockers: string[];
+    alerts: string[];
+  }>;
+};
+
 export type AiGridPolicySelection = 'REQUIRED' | 'ENABLED' | 'PREVIEW' | 'DISABLED';
+
+export type AiGridPolicyAssessmentStateSummary = {
+  policyId: string;
+  policyVersion: string;
+  pass: number;
+  fail: number;
+  unknown: number;
+  notAssessed: number;
+};
+
+export type AiGridBulkPolicySelectionResult = {
+  distributedPolicies: number;
+  changedPolicies: number;
+  enabledPolicies: number;
+  requiredPolicies: number;
+};
 
 export type AiGridPolicy = {
   policyId: string;
@@ -503,8 +613,12 @@ export type AiSecurityFinding = {
   displayId: string;
   policyId: string;
   policyVersion: string;
-  artifactId: string;
+  artifactId: string | null;
+  executionId?: string | null;
+  subjectType?: 'ARTIFACT' | 'EXECUTION' | string;
   artifactName: string;
+  evidenceSource?: string | null;
+  evidenceClass?: string | null;
   severity: string;
   status: string;
   title: string;
@@ -772,12 +886,31 @@ export type AiAgentExecution = {
   retryCount: number | null;
   spendMicros: number | null;
   evidenceTime: string;
+  environmentDigest?: string | null;
+  deploymentDigest?: string | null;
+  actingIdentityDigest?: string | null;
+  delegatedIdentityDigest?: string | null;
+  terminationReason?: string | null;
+  evidenceSource?: string | null;
+  evidenceClass?: string | null;
+  evidenceConfidence?: number | null;
+  stepCount?: number | null;
+  spendCurrency?: string | null;
+  spendUnit?: string | null;
+  collectedAt?: string | null;
+  providerEventTime?: string | null;
+  deliveryLatencyMs?: number | null;
 };
 
 export type AiAgentExecutionPage = { items: AiAgentExecution[]; page: number; size: number; total: number };
 export type AiAgentExecutionEvent = {
   id: string; executionId: string; sequence: number; eventTime: string; eventType: string;
   status: string | null; classification: string | null; evidenceTime: string;
+  ingestedAt?: string; actionCategory?: string | null; targetClass?: string | null;
+  toolDigest?: string | null; toolVersionDigest?: string | null; targetDigest?: string | null;
+  actionCorrelationDigest?: string | null; dataSensitivity?: string | null; dataOperation?: string | null;
+  approvalState?: string | null; policyState?: string | null; decisionReason?: string | null;
+  enforcementPoint?: string | null; actionOutcome?: string | null; evidenceClass?: string | null;
 };
 
 export type CopilotStudioConnector = {

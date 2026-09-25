@@ -35,9 +35,13 @@ public class IngestionJobService {
     public static final String JOB_TYPE_GITHUB_GHCR = "GITHUB_GHCR";
     public static final String JOB_TYPE_AI_SECURITY_AWS_BEDROCK = "AI_SECURITY_AWS_BEDROCK";
     public static final String JOB_TYPE_AI_SECURITY_AZURE_DISCOVERY = "AI_SECURITY_AZURE_DISCOVERY";
+    public static final String JOB_TYPE_AI_SECURITY_COPILOT_STUDIO = "AI_SECURITY_COPILOT_STUDIO";
+    public static final String JOB_TYPE_AI_GRID_RUNTIME_ADAPTER = "AI_GRID_RUNTIME_ADAPTER";
     private static final List<String> AI_SECURITY_JOB_TYPES = List.of(
             JOB_TYPE_AI_SECURITY_AWS_BEDROCK,
-            JOB_TYPE_AI_SECURITY_AZURE_DISCOVERY);
+            JOB_TYPE_AI_SECURITY_AZURE_DISCOVERY,
+            JOB_TYPE_AI_SECURITY_COPILOT_STUDIO,
+            JOB_TYPE_AI_GRID_RUNTIME_ADAPTER);
     public static final String STATUS_QUEUED = "QUEUED";
     public static final String STATUS_RUNNING = "RUNNING";
     public static final String STATUS_SUCCEEDED = "SUCCEEDED";
@@ -228,6 +232,18 @@ public class IngestionJobService {
             Tenant tenant, UUID connectorId, String requestedBy) {
         return enqueueAiSecurityJob(
                 tenant, connectorId, JOB_TYPE_AI_SECURITY_AWS_BEDROCK, "ai-security-aws", requestedBy);
+    }
+
+    public IngestionJobAcceptedResponse enqueueRuntimeAdapterJob(
+            Tenant tenant, String producerId, UUID receiptId, com.fasterxml.jackson.databind.JsonNode batch) {
+        return enqueueJob(
+                tenant,
+                JOB_TYPE_AI_GRID_RUNTIME_ADAPTER,
+                "ai-grid-runtime-adapter",
+                receiptId.toString(),
+                producerId,
+                new RuntimeAdapterJobPayload(producerId, receiptId, batch)
+        );
     }
 
     public IngestionJobAcceptedResponse enqueueAiSecurityJob(
@@ -489,5 +505,9 @@ public class IngestionJobService {
     }
 
     public record AiSecurityJobPayload(UUID connectorId) {
+    }
+
+    public record RuntimeAdapterJobPayload(String producerId, UUID receiptId,
+                                           com.fasterxml.jackson.databind.JsonNode batch) {
     }
 }
