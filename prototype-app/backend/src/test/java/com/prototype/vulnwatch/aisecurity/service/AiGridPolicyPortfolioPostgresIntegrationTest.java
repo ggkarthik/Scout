@@ -14,6 +14,7 @@ import com.prototype.vulnwatch.service.TenantSchemaExecutionService;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.Map;
@@ -39,13 +40,20 @@ class AiGridPolicyPortfolioPostgresIntegrationTest {
         try (Connection connection = DriverManager.getConnection(DATABASE.url(), DATABASE.username(), DATABASE.password())) {
             try (Statement statement = connection.createStatement()) {
                 statement.execute("set search_path to tenant_default,platform,public");
-                statement.execute("select set_config('app.current_tenant_id','" + TENANT_ID + "',false)");
-                statement.execute("""
+            }
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "select set_config('app.current_tenant_id', ?, false)")) {
+                statement.setString(1, TENANT_ID.toString());
+                statement.execute();
+            }
+            try (PreparedStatement statement = connection.prepareStatement("""
                         insert into platform.tenant_schema_versions
                             (tenant_id,schema_name,current_version,target_version,status,last_successful_version)
-                        values ('%s','tenant_default',2,2,'CURRENT',2)
+                        values (?,'tenant_default',2,2,'CURRENT',2)
                         on conflict (tenant_id) do update set current_version=2,target_version=2,status='CURRENT',last_successful_version=2
-                        """.formatted(TENANT_ID));
+                        """)) {
+                statement.setObject(1, TENANT_ID);
+                statement.executeUpdate();
             }
             NamedParameterJdbcTemplate jdbc = new NamedParameterJdbcTemplate(new SingleConnectionDataSource(connection, true));
             TenantSchemaExecutionService execution = mock(TenantSchemaExecutionService.class);
@@ -95,23 +103,43 @@ class AiGridPolicyPortfolioPostgresIntegrationTest {
 
     private void insertReadiness(Connection connection, Mapping mapping, UUID epoch, UUID run,
                                  String selection, String readiness, int ready) throws Exception {
-        try (Statement statement = connection.createStatement()) {
-            statement.execute("insert into ai_grid_current_coverage_state (tenant_id,epoch_id,trigger_run_id) values ('"
-                    + TENANT_ID + "','" + epoch + "','" + run + "')");
-            statement.execute("""
+        try (PreparedStatement statement = connection.prepareStatement(
+                "insert into ai_grid_current_coverage_state (tenant_id,epoch_id,trigger_run_id) values (?, ?, ?)")) {
+            statement.setObject(1, TENANT_ID);
+            statement.setObject(2, epoch);
+            statement.setObject(3, run);
+            statement.executeUpdate();
+        }
+        try (PreparedStatement statement = connection.prepareStatement("""
                     insert into ai_grid_policy_readiness
                         (id,tenant_id,run_id,policy_id,policy_version,selection,readiness,
                          applicable_count,decision_ready_count,coverage_epoch_id)
-                    values ('%s','%s','%s','%s','%s','%s','%s',2,%d,'%s')
-                    """.formatted(UUID.randomUUID(), TENANT_ID, run, mapping.policyId(), mapping.policyVersion(),
-                    selection, readiness, ready, epoch));
+                    values (?, ?, ?, ?, ?, ?, ?, 2, ?, ?)
+                    """)) {
+            statement.setObject(1, UUID.randomUUID());
+            statement.setObject(2, TENANT_ID);
+            statement.setObject(3, run);
+            statement.setString(4, mapping.policyId());
+            statement.setString(5, mapping.policyVersion());
+            statement.setString(6, selection);
+            statement.setString(7, readiness);
+            statement.setInt(8, ready);
+            statement.setObject(9, epoch);
+            statement.executeUpdate();
         }
     }
 
     private void updateReadiness(Connection connection, UUID epoch, String selection, String readiness, int ready) throws Exception {
-        try (Statement statement = connection.createStatement()) {
-            statement.execute("update ai_grid_policy_readiness set selection='" + selection + "',readiness='"
-                    + readiness + "',decision_ready_count=" + ready + " where coverage_epoch_id='" + epoch + "'");
+        try (PreparedStatement statement = connection.prepareStatement("""
+                update ai_grid_policy_readiness
+                   set selection = ?, readiness = ?, decision_ready_count = ?
+                 where coverage_epoch_id = ?
+                """)) {
+            statement.setString(1, selection);
+            statement.setString(2, readiness);
+            statement.setInt(3, ready);
+            statement.setObject(4, epoch);
+            statement.executeUpdate();
         }
     }
 

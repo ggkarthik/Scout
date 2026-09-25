@@ -23,7 +23,7 @@ class AiGridFrameworkCoverageMigrationPostgresIntegrationTest {
         v1.migrate();
         String packagesBefore = packageRowsDigest();
 
-        Flyway current = flyway(Integer.toString(PackagedMigrationCatalog.resolve().platformTarget()));
+        Flyway current = flyway("2");
         current.migrate();
 
         assertEquals(packagesBefore, packageRowsDigest(),

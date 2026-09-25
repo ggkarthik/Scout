@@ -12,6 +12,7 @@ import com.prototype.vulnwatch.service.TenantSchemaExecutionService;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.util.Map;
 import java.util.UUID;
@@ -34,18 +35,28 @@ class AiGridRuntimeTelemetryReadinessPostgresIntegrationTest {
         migrate();
         try (Connection connection = DriverManager.getConnection(
                 DATABASE.url(), DATABASE.username(), DATABASE.password())) {
+            int tenantTarget = PackagedMigrationCatalog.resolve().tenantTarget();
             try (Statement statement = connection.createStatement()) {
                 statement.execute("set search_path to tenant_default,platform,public");
-                statement.execute("select set_config('app.current_tenant_id','" + TENANT_ID + "',false)");
-                int tenantTarget = PackagedMigrationCatalog.resolve().tenantTarget();
-                statement.execute("""
+            }
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "select set_config('app.current_tenant_id', ?, false)")) {
+                statement.setString(1, TENANT_ID.toString());
+                statement.execute();
+            }
+            try (PreparedStatement statement = connection.prepareStatement("""
                         insert into platform.tenant_schema_versions
                             (tenant_id,schema_name,current_version,target_version,status,last_successful_version)
-                        values ('%s','tenant_default',%d,%d,'CURRENT',%d)
-                        on conflict (tenant_id) do update set current_version=%d,target_version=%d,
-                            status='CURRENT',last_successful_version=%d
-                        """.formatted(TENANT_ID, tenantTarget, tenantTarget, tenantTarget,
-                                tenantTarget, tenantTarget, tenantTarget));
+                        values (?,'tenant_default',?,?, 'CURRENT',?)
+                        on conflict (tenant_id) do update set current_version=excluded.current_version,
+                            target_version=excluded.target_version, status='CURRENT',
+                            last_successful_version=excluded.last_successful_version
+                        """)) {
+                statement.setObject(1, TENANT_ID);
+                statement.setInt(2, tenantTarget);
+                statement.setInt(3, tenantTarget);
+                statement.setInt(4, tenantTarget);
+                statement.executeUpdate();
             }
             NamedParameterJdbcTemplate jdbc =
                     new NamedParameterJdbcTemplate(new SingleConnectionDataSource(connection, true));
