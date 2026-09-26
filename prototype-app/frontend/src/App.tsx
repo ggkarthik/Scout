@@ -4,13 +4,14 @@ import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 're
 import { PerformanceInstrumentation } from './lib/performanceMonitoring';
 import type { InventoryViewKey } from './features/inventory/types';
 import { AI_ARTIFACT_CATEGORIES, combinedNativeKindFilterValue } from './features/ai-security/categories';
-import type { AdminRouteView, AppTab, ConfigurationsRouteView, ConnectRouteView, VulnerabilityIntelRouteView } from './app/routes';
+import type { AdminRouteView, AppTab, ConfigurationsRouteView, ConnectRouteView, FixIntelligenceRouteView, VulnerabilityIntelRouteView } from './app/routes';
 import {
   activeTabForPath,
   buildLegacyCompatiblePath,
   normalizeAdminRouteView,
   normalizeConfigurationsRouteView,
   normalizeConnectRouteView,
+  normalizeFixIntelligenceRouteView,
   normalizeInventoryRouteView,
   normalizeOperationsRouteView,
   normalizePlatformRouteView,
@@ -18,6 +19,7 @@ import {
   pathForAiInventoryOverview,
   pathForConfigurationsView,
   pathForConnectView,
+  pathForFixIntelligenceView,
   pathForInventoryView,
   pathForPlatformView,
   pathForTab,
@@ -47,6 +49,12 @@ const ExposureDashboardPage = React.lazy(async () => ({
 }));
 const FindingsPage = React.lazy(async () => ({
   default: (await import('./pages/FindingsPage')).FindingsPage
+}));
+const FixIntelligencePage = React.lazy(async () => ({
+  default: (await import('./pages/FixIntelligencePage')).FixIntelligencePage
+}));
+const FixDetailPage = React.lazy(async () => ({
+  default: (await import('./pages/FixDetailPage')).FixDetailPage
 }));
 const AiFindingsPage = React.lazy(async () => ({
   default: (await import('./pages/AiFindingsPage')).AiFindingsPage
@@ -270,6 +278,12 @@ const CONFIGURATIONS_PILL_ORDER: Array<{ key: ConfigurationsRouteView; label: st
   { key: 'suppress', label: 'Suppression Rules' },
   { key: 'auto-findings', label: 'Auto Investigation & Findings' }
 ];
+const FIX_INTELLIGENCE_PILL_ORDER: Array<{ key: FixIntelligenceRouteView; label: string }> = [
+  { key: 'all', label: 'All Fixes' },
+  { key: 'patches', label: 'Patches' },
+  { key: 'workarounds', label: 'Workarounds' },
+  { key: 'compensating-controls', label: 'Compensating Controls' }
+];
 
 function getInitialTheme(): Theme {
   const saved = localStorage.getItem(THEME_STORAGE_KEY);
@@ -352,6 +366,11 @@ function FindingsRoute() {
       onOpenCveWorkbench={(vulnerabilityId) => navigate(pathForVulnRepoView('org-cves', vulnerabilityId))}
     />
   );
+}
+
+function FixIntelligenceRoute() {
+  const params = useParams<{ view?: string }>();
+  return <FixIntelligencePage selectedView={normalizeFixIntelligenceRouteView(params.view)} />;
 }
 
 function AiSecurityRoute({ children }: { children: React.ReactNode }) {
@@ -650,6 +669,18 @@ function restorePreviousAuthTokenForPersona(): void {
 
 function AuthSessionBoundary({ children }: { children: React.ReactNode }) {
   const location = useLocation();
+
+  // LOCAL DEV MODE: Bypass auth entirely
+  if (import.meta.env.VITE_LOCAL_DEV === 'true') {
+    return (
+      <TestPersonaControlsState.Provider value={{ enabled: false, personas: [], activePersona: null, loading: false, error: null, loadPersonas: () => {}, impersonateBackend: () => {}, previewPersona: () => {}, resetPersona: () => {} }}>
+        <ActorContextState.Provider value={{ creator: true, principal: 'dev-admin', userId: 'dev-admin-uuid', roles: ['ROLE_PLATFORM_OWNER', 'ROLE_TENANT_ADMIN', 'ROLE_SECURITY_ANALYST', 'ROLE_INVENTORY_ADMIN'], allowedTenants: [{ id: 'dev-tenant', name: 'Dev Tenant' }], platformScope: false, actingAsPlatformOwner: true, sensitiveActionConfirmationRequired: false, entitlements: { 'ai.security': true } } as any}>
+          {children}
+        </ActorContextState.Provider>
+      </TestPersonaControlsState.Provider>
+    );
+  }
+
   const actorQuery = useActorQuery();
   const [personas, setPersonas] = React.useState<TestPersona[]>([]);
   const [personaLoading, setPersonaLoading] = React.useState(false);
@@ -756,12 +787,14 @@ function AppShell() {
   const [findingsNavExpanded, setFindingsNavExpanded] = React.useState(false);
   const [adminNavExpanded, setAdminNavExpanded] = React.useState(false);
   const [configurationsNavExpanded, setConfigurationsNavExpanded] = React.useState(false);
+  const [fixIntelligenceNavExpanded, setFixIntelligenceNavExpanded] = React.useState(false);
 
   const activeTab = activeTabForPath(location.pathname);
   const pathSegments = location.pathname.split('/').filter(Boolean);
   const activeInventoryView = normalizeInventoryRouteView(pathSegments[1]);
   const activeAdminView = normalizeAdminRouteView(pathSegments[1]);
   const activeConfigurationsView = normalizeConfigurationsRouteView(pathSegments[1]);
+  const activeFixIntelligenceView = normalizeFixIntelligenceRouteView(pathSegments[1]);
   const vulnRepoSegment = location.pathname.startsWith('/vuln-repo')
     ? pathSegments[1]
     : null;
@@ -780,7 +813,7 @@ function AppShell() {
       return ['vuln-repo', 'connect', 'platform', 'end-of-life', 'platform-policies'] satisfies AppTab[];
     }
     if (canManageTenant(actor)) {
-      const tabs: AppTab[] = ['exposure', 'findings', 'vuln-repo', 'campaigns', 'inventory', 'connect', 'admin', 'configurations'];
+      const tabs: AppTab[] = ['exposure', 'findings', 'fix-intelligence', 'vuln-repo', 'campaigns', 'inventory', 'connect', 'admin', 'configurations'];
       if (aiSecurityEnabled) tabs.splice(2, 0, 'policies');
       return tabs;
     }
@@ -1014,6 +1047,16 @@ function AppShell() {
                   (key) => navigate(pathForInventoryView(key as InventoryViewKey))
                 );
               }
+              if (tab === 'fix-intelligence') {
+                return renderExpandableNavButton(
+                  tab,
+                  fixIntelligenceNavExpanded,
+                  () => setFixIntelligenceNavExpanded((current) => !current),
+                  FIX_INTELLIGENCE_PILL_ORDER,
+                  (key) => activeTab === 'fix-intelligence' && activeFixIntelligenceView === key,
+                  (key) => navigate(pathForFixIntelligenceView(key as FixIntelligenceRouteView))
+                );
+              }
               return renderNavButton(tab);
             })}
             {visiblePrimaryNavTabs.includes('policies') && renderNavButton('policies')}
@@ -1196,6 +1239,8 @@ function AppShell() {
               <Route path="/findings/ai/:findingId" element={<AiFindingDetailRoute />} />
               <Route path="/findings/ai" element={<AiSecurityRoute><AiFindingsPage /></AiSecurityRoute>} />
               <Route path="/findings" element={<FindingsRoute />} />
+              <Route path="/fix-intelligence/details/:fixId" element={<FixDetailPage />} />
+              <Route path="/fix-intelligence/:view?" element={<FixIntelligenceRoute />} />
               <Route path="/policies" element={<AiSecurityRoute><AiPoliciesPage /></AiSecurityRoute>} />
               <Route path="/policies/:policyId" element={<AiSecurityRoute><AiPolicyDetailRoute /></AiSecurityRoute>} />
               <Route path="/platform/ai-policies/:policyId" element={<PlatformAiPolicyDetailRoute />} />

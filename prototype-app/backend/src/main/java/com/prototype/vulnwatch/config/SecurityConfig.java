@@ -60,6 +60,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/readiness", "/actuator/health/liveness", "/actuator/info").permitAll()
                         .requestMatchers("/actuator/**").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/auth/context", "/api/me").permitAll() // Local dev: allow session verification
                         .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/setup-password", "/api/auth/setup-session").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/demo-requests").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/demo-invites/**").permitAll()
@@ -70,6 +71,7 @@ public class SecurityConfig {
                         .hasAnyRole("PLATFORM_OWNER", "TENANT_ADMIN", "INVENTORY_ADMIN", "SECURITY_ANALYST", "READ_ONLY_AUDITOR")
                         .requestMatchers("/api/platform/**").hasRole("PLATFORM_OWNER")
                         .requestMatchers("/api/operations/**").hasRole("PLATFORM_OWNER")
+                        .requestMatchers("/api/fix-intelligence/**").permitAll() // Local dev: allow public access to Fix Intelligence
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().permitAll())
                 .addFilterBefore(apiKeyAuthenticationFilter, CsrfFilter.class)

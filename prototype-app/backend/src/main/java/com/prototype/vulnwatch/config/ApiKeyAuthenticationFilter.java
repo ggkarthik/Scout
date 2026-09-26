@@ -59,11 +59,14 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
                 && !"/actuator/info".equals(path);
         return (!path.startsWith("/api/") && !protectedActuatorEndpoint)
                 || "/api/auth/login".equals(path)
+                || "/api/auth/context".equals(path) // Local dev: allow session verification
+                || "/api/me".equals(path) // Local dev: allow current user check
                 || "/api/auth/setup-password".equals(path)
                 || "/api/auth/setup-session".equals(path)
                 || ("/api/demo-requests".equals(path) && "POST".equalsIgnoreCase(request.getMethod()))
                 || path.startsWith("/api/demo-invites/")
-                || path.startsWith("/api/tenant-invites/");
+                || path.startsWith("/api/tenant-invites/")
+                || path.startsWith("/api/fix-intelligence/"); // Local dev: public Fix Intelligence API
     }
 
     @Override
