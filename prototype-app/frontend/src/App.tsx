@@ -671,35 +671,13 @@ function AuthSessionBoundary({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const isLocalDev = import.meta.env.VITE_LOCAL_DEV === 'true';
 
-  // Hooks must be called unconditionally
+  // Hooks must be called unconditionally - always at top level
   const actorQuery = useActorQuery();
   const [personas, setPersonas] = React.useState<TestPersona[]>([]);
   const [personaLoading, setPersonaLoading] = React.useState(false);
   const [personaError, setPersonaError] = React.useState<string | null>(null);
   const [activePersona, setActivePersona] = React.useState<ActiveTestPersona | null>(null);
   const [previewActor, setPreviewActor] = React.useState<ActorContext | null>(null);
-
-  // LOCAL DEV MODE: Bypass auth entirely
-  if (isLocalDev) {
-    const devActorContext: ActorContext = {
-      creator: true,
-      principal: 'dev-admin',
-      userId: 'dev-admin-uuid',
-      roles: ['ROLE_PLATFORM_OWNER', 'ROLE_TENANT_ADMIN', 'ROLE_SECURITY_ANALYST', 'ROLE_INVENTORY_ADMIN'],
-      allowedTenants: [{ id: 'dev-tenant', name: 'Dev Tenant' }],
-      platformScope: false,
-      actingAsPlatformOwner: true,
-      sensitiveActionConfirmationRequired: false,
-      entitlements: { 'ai.security': true }
-    };
-    return (
-      <TestPersonaControlsState.Provider value={{ enabled: false, personas: [], activePersona: null, loading: false, error: null, loadPersonas: () => {}, impersonateBackend: () => {}, previewPersona: () => {}, resetPersona: () => {} }}>
-        <ActorContextState.Provider value={devActorContext}>
-          {children}
-        </ActorContextState.Provider>
-      </TestPersonaControlsState.Provider>
-    );
-  }
 
   const loadPersonas = React.useCallback(() => {
     if (!TEST_PERSONAS_ENABLED || personaLoading || personas.length > 0) {
@@ -753,6 +731,28 @@ function AuthSessionBoundary({ children }: { children: React.ReactNode }) {
     previewPersona,
     resetPersona
   }), [activePersona, impersonateBackend, loadPersonas, personaError, personaLoading, personas, previewPersona, resetPersona]);
+
+  // LOCAL DEV MODE: Bypass auth entirely
+  if (isLocalDev) {
+    const devActorContext: ActorContext = {
+      creator: true,
+      principal: 'dev-admin',
+      userId: 'dev-admin-uuid',
+      roles: ['ROLE_PLATFORM_OWNER', 'ROLE_TENANT_ADMIN', 'ROLE_SECURITY_ANALYST', 'ROLE_INVENTORY_ADMIN'],
+      allowedTenants: [{ id: 'dev-tenant', name: 'Dev Tenant' }],
+      platformScope: false,
+      actingAsPlatformOwner: true,
+      sensitiveActionConfirmationRequired: false,
+      entitlements: { 'ai.security': true }
+    };
+    return (
+      <TestPersonaControlsState.Provider value={{ enabled: false, personas: [], activePersona: null, loading: false, error: null, loadPersonas: () => {}, impersonateBackend: () => {}, previewPersona: () => {}, resetPersona: () => {} }}>
+        <ActorContextState.Provider value={devActorContext}>
+          {children}
+        </ActorContextState.Provider>
+      </TestPersonaControlsState.Provider>
+    );
+  }
 
   if (actorQuery.isLoading || actorQuery.isFetching && !actorQuery.data) {
     if (location.pathname === '/') {
