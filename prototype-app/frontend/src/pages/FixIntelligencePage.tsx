@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { FixIntelligenceRouteView } from '../app/routes';
-import { pathForFixIntelligenceView } from '../app/routes';
 
 interface Fix {
   id: string;
