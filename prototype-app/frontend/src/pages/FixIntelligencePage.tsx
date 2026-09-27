@@ -1,7 +1,33 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { FixIntelligenceRouteView } from '../app/routes';
 import { pathForFixIntelligenceView } from '../app/routes';
+
+interface Fix {
+  id: string;
+  externalId: string;
+  title: string;
+  fixType: string;
+  severity: string;
+  ecosystem: string;
+  sourceSystem: string;
+  packageName: string;
+  fixedVersion: string;
+  applicableAssets: number;
+  deployedAssets: number;
+  deploymentRate: number;
+  requiresReboot: boolean;
+  estimatedDowntimeMinutes: number;
+  status: string;
+}
+
+interface Statistics {
+  totalFixes: number;
+  byType: Record<string, number>;
+  bySeverity: Record<string, number>;
+  byEcosystem: Record<string, number>;
+  bySource?: Record<string, number>;
+}
 
 interface FixIntelligencePageProps {
   selectedView?: FixIntelligenceRouteView;
@@ -10,31 +36,27 @@ interface FixIntelligencePageProps {
 export function FixIntelligencePage({ selectedView = 'all' }: FixIntelligencePageProps) {
   const navigate = useNavigate();
 
-  const getInitialView = () => {
+  const getInitialView = useCallback(() => {
     if (selectedView === 'patches') return 'patches';
     if (selectedView === 'workarounds') return 'workarounds';
     if (selectedView === 'compensating-controls') return 'compensating-controls';
     return 'all';
-  };
+  }, [selectedView]);
 
   const [activeView, setActiveView] = useState<FixIntelligenceRouteView>(getInitialView() as FixIntelligenceRouteView);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterSeverity, setFilterSeverity] = useState('all');
   const [filterEcosystem, setFilterEcosystem] = useState('all');
-  const [fixes, setFixes] = useState<any[]>([]);
-  const [statistics, setStatistics] = useState<any>(null);
+  const [fixes, setFixes] = useState<Fix[]>([]);
+  const [statistics, setStatistics] = useState<Statistics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setActiveView(getInitialView() as FixIntelligenceRouteView);
-  }, [selectedView]);
+  }, [getInitialView]);
 
-  useEffect(() => {
-    fetchFixesAndStatistics();
-  }, [activeView, searchTerm, filterSeverity, filterEcosystem]);
-
-  const fetchFixesAndStatistics = async () => {
+  const fetchFixesAndStatistics = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -82,7 +104,11 @@ export function FixIntelligencePage({ selectedView = 'all' }: FixIntelligencePag
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeView, searchTerm, filterSeverity, filterEcosystem]);
+
+  useEffect(() => {
+    fetchFixesAndStatistics();
+  }, [fetchFixesAndStatistics]);
 
   const defaultStatistics = {
     totalFixes: 100,
@@ -111,17 +137,6 @@ export function FixIntelligencePage({ selectedView = 'all' }: FixIntelligencePag
     bySeverity: statistics.bySeverity,
     byEcosystem: statistics.byEcosystem
   } : defaultStatistics;
-
-  const views = [
-    { id: 'all', label: 'All Fixes', icon: '📋', count: displayStats.totalFixes },
-    { id: 'patches', label: 'Patches', icon: '🔧', count: displayStats.byType?.PATCH || 0 },
-    { id: 'workarounds', label: 'Workarounds', icon: '⚙️', count: displayStats.byType?.WORKAROUND || 0 },
-    { id: 'compensating-controls', label: 'Compensating Controls', icon: '🛡️', count: displayStats.byType?.COMPENSATING_CONTROL || 0 }
-  ];
-
-  const handleViewChange = (viewId: string) => {
-    navigate(pathForFixIntelligenceView(viewId as FixIntelligenceRouteView));
-  };
 
   const handleRowClick = (fixId: string) => {
     navigate(`/fix-intelligence/details/${fixId}`);
@@ -255,7 +270,7 @@ export function FixIntelligencePage({ selectedView = 'all' }: FixIntelligencePag
           <div className="panel" style={{ padding: 24 }}>
             <h3 style={{ margin: '0 0 16px 0' }}>Severity Distribution</h3>
             <div style={{ display: 'grid', gap: 12 }}>
-              {displayStats.bySeverity && Object.entries(displayStats.bySeverity).map(([severity, count]: [string, any]) => {
+              {displayStats.bySeverity && Object.entries(displayStats.bySeverity).map(([severity, count]: [string, number]) => {
                 const total = displayStats.totalFixes;
                 const percentage = (count * 100) / total;
                 const colors: Record<string, string> = {
@@ -291,7 +306,7 @@ export function FixIntelligencePage({ selectedView = 'all' }: FixIntelligencePag
           <div className="panel" style={{ padding: 24 }}>
             <h3 style={{ margin: '0 0 16px 0' }}>Ecosystem Coverage</h3>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 12 }}>
-              {displayStats.byEcosystem && Object.entries(displayStats.byEcosystem).map(([ecosystem, count]: [string, any]) => (
+              {displayStats.byEcosystem && Object.entries(displayStats.byEcosystem).map(([ecosystem, count]: [string, number]) => (
                 <div key={ecosystem} style={{ background: 'var(--panel-muted)', padding: 12, borderRadius: 4, textAlign: 'center' }}>
                   <div style={{ fontSize: '1.5rem', fontWeight: 600, marginBottom: 4 }}>{count}</div>
                   <div style={{ fontSize: '0.875rem', fontWeight: 500 }}>{ecosystem}</div>

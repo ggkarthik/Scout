@@ -9,7 +9,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -20,8 +19,7 @@ public class FixApplicabilityService {
 
     public FixApplicabilityDecision evaluate(
         InventoryComponent component,
-        List<Fix> applicableFixes,
-        UUID tenantId) {
+        List<Fix> applicableFixes) {
 
         if (component == null || component.getAsset() == null || applicableFixes.isEmpty()) {
             return new FixApplicabilityDecision(false, "no_fixes", null, null);
@@ -30,7 +28,7 @@ public class FixApplicabilityService {
         // Check deployment status for best matching fix
         for (Fix fix : applicableFixes) {
             AssetFixStatus status = assetFixStatusRepository
-                .findByTenantAndAssetAndFix(tenantId, component.getAsset().getId(), fix.getId())
+                .findByAssetIdAndFixId(component.getAsset().getId(), fix.getId())
                 .orElse(null);
 
             if (status != null) {

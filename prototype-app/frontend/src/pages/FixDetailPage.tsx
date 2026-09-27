@@ -1,10 +1,39 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 
+interface FixResponse {
+  id: string;
+  externalId: string;
+  title: string;
+  description: string;
+  severity: string;
+  ecosystem: string;
+  sourceSystem: string;
+  packageName: string;
+  fixedVersion: string;
+  fixType: string;
+  status: string;
+  applicableAssets: number;
+  deployedAssets: number;
+  deploymentRate: number;
+  requiresReboot: boolean;
+  estimatedDowntimeMinutes: number;
+  installationInstructions: string;
+  knownLimitations: string;
+  patchUrl: string;
+  createdAt: string;
+  updatedAt: string;
+  syncedAt: string;
+  relatedCves?: Array<{ id: string; title: string; severity: string }>;
+  deploymentStatus?: Array<{ status: string; count: number; percentage: number }>;
+  affectedSoftware?: Array<{ name: string; version: string; assetCount: number }>;
+  sourceMetadata?: Record<string, unknown>;
+}
+
 export function FixDetailPage() {
   const { fixId } = useParams<{ fixId: string }>();
   const navigate = useNavigate();
-  const [fix, setFix] = useState<any>(null);
+  const [fix, setFix] = useState<FixResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -239,7 +268,7 @@ export function FixDetailPage() {
 
         {/* Status Breakdown */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
-          {displayFix.deploymentStatus && displayFix.deploymentStatus.map((status: any, idx: number) => (
+          {displayFix.deploymentStatus && displayFix.deploymentStatus.map((status, idx) => (
             <div key={idx} style={{ background: 'var(--panel-muted)', padding: 12, borderRadius: 4 }}>
               <div style={{ fontSize: '0.75rem', color: 'var(--fg-muted)', textTransform: 'uppercase', marginBottom: 6 }}>
                 {status.status}
@@ -260,7 +289,7 @@ export function FixDetailPage() {
       <div className="panel" style={{ padding: 24 }}>
         <h3 style={{ margin: '0 0 16px 0' }}>Related CVEs ({displayFix.relatedCves.length})</h3>
         <div style={{ display: 'grid', gap: 12 }}>
-          {displayFix.relatedCves.map((cve: any, idx: number) => (
+          {displayFix.relatedCves.map((cve, idx) => (
             <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 12, background: 'var(--panel-muted)', borderRadius: 4 }}>
               <span style={{
                 background: cve.severity === 'Critical' ? '#E63946' : cve.severity === 'High' ? '#FF9800' : '#FFC107',
@@ -329,7 +358,7 @@ export function FixDetailPage() {
               </tr>
             </thead>
             <tbody>
-              {displayFix.affectedSoftware && displayFix.affectedSoftware.map((software: any, idx: number) => (
+              {displayFix.affectedSoftware && displayFix.affectedSoftware.map((software, idx) => (
                 <tr key={idx} style={{ borderBottom: '1px solid var(--border)' }}>
                   <td style={{ padding: '12px 0' }}>{software.name}</td>
                   <td style={{ padding: '12px 0' }}>{software.version}</td>

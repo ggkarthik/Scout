@@ -13,75 +13,25 @@ import java.util.UUID;
 @Repository
 public interface AssetFixStatusRepository extends JpaRepository<AssetFixStatus, UUID> {
 
-    @Query("""
-        SELECT afs FROM AssetFixStatus afs
-        WHERE afs.tenantId = :tenantId
-        AND afs.asset.id = :assetId
-        AND afs.fixId = :fixId
-        """)
-    Optional<AssetFixStatus> findByTenantAndAssetAndFix(
-        @Param("tenantId") UUID tenantId,
-        @Param("assetId") UUID assetId,
-        @Param("fixId") UUID fixId
-    );
+    Optional<AssetFixStatus> findByAssetIdAndFixId(UUID assetId, UUID fixId);
 
-    @Query("""
-        SELECT afs FROM AssetFixStatus afs
-        WHERE afs.tenantId = :tenantId
-        AND afs.fixId = :fixId
-        """)
-    List<AssetFixStatus> findByTenantAndFix(
-        @Param("tenantId") UUID tenantId,
-        @Param("fixId") UUID fixId
-    );
+    List<AssetFixStatus> findByFixId(UUID fixId);
 
-    @Query("""
-        SELECT afs FROM AssetFixStatus afs
-        WHERE afs.tenantId = :tenantId
-        AND afs.asset.id = :assetId
-        """)
-    List<AssetFixStatus> findByTenantAndAsset(
-        @Param("tenantId") UUID tenantId,
-        @Param("assetId") UUID assetId
-    );
+    List<AssetFixStatus> findByAssetId(UUID assetId);
 
-    @Query("""
-        SELECT afs FROM AssetFixStatus afs
-        WHERE afs.tenantId = :tenantId
-        AND afs.deploymentStatus = :status
-        """)
-    List<AssetFixStatus> findByTenantAndDeploymentStatus(
-        @Param("tenantId") UUID tenantId,
-        @Param("status") AssetFixStatus.DeploymentStatus status
-    );
+    List<AssetFixStatus> findByDeploymentStatus(AssetFixStatus.DeploymentStatus status);
 
     @Query("""
         SELECT COUNT(afs) FROM AssetFixStatus afs
-        WHERE afs.tenantId = :tenantId
-        AND afs.fixId = :fixId
+        WHERE afs.fixId = :fixId
         AND afs.deploymentStatus = 'DEPLOYED'
         """)
-    long countDeployedByTenantAndFix(
-        @Param("tenantId") UUID tenantId,
-        @Param("fixId") UUID fixId
-    );
+    long countDeployedByFix(@Param("fixId") UUID fixId);
 
     @Query("""
         SELECT COUNT(afs) FROM AssetFixStatus afs
-        WHERE afs.tenantId = :tenantId
-        AND afs.fixId = :fixId
+        WHERE afs.fixId = :fixId
         AND afs.applicable = true
         """)
-    long countApplicableByTenantAndFix(
-        @Param("tenantId") UUID tenantId,
-        @Param("fixId") UUID fixId
-    );
-
-    @Query("""
-        SELECT afs FROM AssetFixStatus afs
-        WHERE afs.tenantId = :tenantId
-        """)
-    List<AssetFixStatus> findByTenantId(
-        @Param("tenantId") UUID tenantId
-    );
+    long countApplicableByFix(@Param("fixId") UUID fixId);
 }
