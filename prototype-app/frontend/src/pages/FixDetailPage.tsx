@@ -48,15 +48,15 @@ export function FixDetailPage() {
       try {
         setLoading(true);
         setError(null);
-        const response = await fetch(
-          `http://localhost:8080/api/fix-intelligence/fixes/${fixId}`,
-          {
-            headers: {
-              'X-API-Key': 'change-me-in-prod',
-              'X-Creator-Key': 'local-creator'
-            }
-          }
-        );
+
+        const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:8080/api';
+        const headers: Record<string, string> = {};
+        if (import.meta.env.DEV) {
+          headers['X-API-Key'] = import.meta.env.VITE_API_KEY || 'change-me-in-prod';
+          headers['X-Creator-Key'] = import.meta.env.VITE_CREATOR_KEY || 'local-creator';
+        }
+
+        const response = await fetch(`${apiBase}/fix-intelligence/fixes/${fixId}`, { headers });
 
         if (!response.ok) throw new Error(`Failed to fetch fix: ${response.statusText}`);
 

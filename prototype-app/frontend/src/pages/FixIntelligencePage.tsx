@@ -60,33 +60,31 @@ export function FixIntelligencePage({ selectedView = 'all' }: FixIntelligencePag
       setLoading(true);
       setError(null);
 
-      let url = `http://localhost:8080/api/fix-intelligence/fixes?page=0&size=100`;
+      const apiBase = import.meta.env.VITE_API_BASE || 'http://localhost:8080/api';
+
+      let endpoint = '/fix-intelligence/fixes?page=0&size=100';
 
       if (activeView === 'patches') {
-        url = `http://localhost:8080/api/fix-intelligence/fixes-by-type/PATCH?page=0&size=100`;
+        endpoint = '/fix-intelligence/fixes-by-type/PATCH?page=0&size=100';
       } else if (activeView === 'workarounds') {
-        url = `http://localhost:8080/api/fix-intelligence/fixes-by-type/WORKAROUND?page=0&size=100`;
+        endpoint = '/fix-intelligence/fixes-by-type/WORKAROUND?page=0&size=100';
       } else if (activeView === 'compensating-controls') {
-        url = `http://localhost:8080/api/fix-intelligence/fixes-by-type/COMPENSATING_CONTROL?page=0&size=100`;
+        endpoint = '/fix-intelligence/fixes-by-type/COMPENSATING_CONTROL?page=0&size=100';
       }
 
-      if (searchTerm) url += `&search=${encodeURIComponent(searchTerm)}`;
-      if (filterSeverity !== 'all') url += `&severity=${filterSeverity}`;
-      if (filterEcosystem !== 'all') url += `&ecosystem=${filterEcosystem}`;
+      if (searchTerm) endpoint += `&search=${encodeURIComponent(searchTerm)}`;
+      if (filterSeverity !== 'all') endpoint += `&severity=${filterSeverity}`;
+      if (filterEcosystem !== 'all') endpoint += `&ecosystem=${filterEcosystem}`;
+
+      const headers: Record<string, string> = {};
+      if (import.meta.env.DEV) {
+        headers['X-API-Key'] = import.meta.env.VITE_API_KEY || 'change-me-in-prod';
+        headers['X-Creator-Key'] = import.meta.env.VITE_CREATOR_KEY || 'local-creator';
+      }
 
       const [fixesRes, statsRes] = await Promise.all([
-        fetch(url, {
-          headers: {
-            'X-API-Key': 'change-me-in-prod',
-            'X-Creator-Key': 'local-creator'
-          }
-        }),
-        fetch('http://localhost:8080/api/fix-intelligence/statistics', {
-          headers: {
-            'X-API-Key': 'change-me-in-prod',
-            'X-Creator-Key': 'local-creator'
-          }
-        })
+        fetch(`${apiBase}${endpoint}`, { headers }),
+        fetch(`${apiBase}/fix-intelligence/statistics`, { headers })
       ]);
 
       if (!fixesRes.ok) throw new Error(`Failed to fetch fixes: ${fixesRes.statusText}`);
