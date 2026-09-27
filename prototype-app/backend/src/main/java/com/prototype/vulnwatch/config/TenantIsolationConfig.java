@@ -127,7 +127,9 @@ public class TenantIsolationConfig {
     /**
      * Registers TenantResolutionFilter explicitly (not via @Component) so that
      * @WebMvcTest slice tests do not try to load it without JPA context available.
+     * DISABLED temporarily to diagnose JPA configuration issues.
      */
+    /* TEMPORARILY DISABLED
     @Bean
     public FilterRegistrationBean<Filter> tenantResolutionFilter(
             WorkspaceService workspaceService,
@@ -142,4 +144,5 @@ public class TenantIsolationConfig {
         reg.setName("tenantResolutionFilter");
         return reg;
     }
+    */
 }
