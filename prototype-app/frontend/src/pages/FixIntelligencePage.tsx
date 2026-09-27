@@ -130,8 +130,8 @@ export function FixIntelligencePage({ selectedView = 'all' }: FixIntelligencePag
     }
   };
 
-  const displayStats = statistics?.metrics ? {
-    totalFixes: statistics.metrics.totalFixes,
+  const displayStats = statistics ? {
+    totalFixes: statistics.totalFixes,
     byType: statistics.byType,
     bySeverity: statistics.bySeverity,
     byEcosystem: statistics.byEcosystem
