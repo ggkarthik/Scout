@@ -669,24 +669,37 @@ function restorePreviousAuthTokenForPersona(): void {
 
 function AuthSessionBoundary({ children }: { children: React.ReactNode }) {
   const location = useLocation();
+  const isLocalDev = import.meta.env.VITE_LOCAL_DEV === 'true';
 
-  // LOCAL DEV MODE: Bypass auth entirely
-  if (import.meta.env.VITE_LOCAL_DEV === 'true') {
-    return (
-      <TestPersonaControlsState.Provider value={{ enabled: false, personas: [], activePersona: null, loading: false, error: null, loadPersonas: () => {}, impersonateBackend: () => {}, previewPersona: () => {}, resetPersona: () => {} }}>
-        <ActorContextState.Provider value={{ creator: true, principal: 'dev-admin', userId: 'dev-admin-uuid', roles: ['ROLE_PLATFORM_OWNER', 'ROLE_TENANT_ADMIN', 'ROLE_SECURITY_ANALYST', 'ROLE_INVENTORY_ADMIN'], allowedTenants: [{ id: 'dev-tenant', name: 'Dev Tenant' }], platformScope: false, actingAsPlatformOwner: true, sensitiveActionConfirmationRequired: false, entitlements: { 'ai.security': true } } as any}>
-          {children}
-        </ActorContextState.Provider>
-      </TestPersonaControlsState.Provider>
-    );
-  }
-
+  // Hooks must be called unconditionally
   const actorQuery = useActorQuery();
   const [personas, setPersonas] = React.useState<TestPersona[]>([]);
   const [personaLoading, setPersonaLoading] = React.useState(false);
   const [personaError, setPersonaError] = React.useState<string | null>(null);
   const [activePersona, setActivePersona] = React.useState<ActiveTestPersona | null>(null);
   const [previewActor, setPreviewActor] = React.useState<ActorContext | null>(null);
+
+  // LOCAL DEV MODE: Bypass auth entirely
+  if (isLocalDev) {
+    const devActorContext: ActorContext = {
+      creator: true,
+      principal: 'dev-admin',
+      userId: 'dev-admin-uuid',
+      roles: ['ROLE_PLATFORM_OWNER', 'ROLE_TENANT_ADMIN', 'ROLE_SECURITY_ANALYST', 'ROLE_INVENTORY_ADMIN'],
+      allowedTenants: [{ id: 'dev-tenant', name: 'Dev Tenant' }],
+      platformScope: false,
+      actingAsPlatformOwner: true,
+      sensitiveActionConfirmationRequired: false,
+      entitlements: { 'ai.security': true }
+    };
+    return (
+      <TestPersonaControlsState.Provider value={{ enabled: false, personas: [], activePersona: null, loading: false, error: null, loadPersonas: () => {}, impersonateBackend: () => {}, previewPersona: () => {}, resetPersona: () => {} }}>
+        <ActorContextState.Provider value={devActorContext}>
+          {children}
+        </ActorContextState.Provider>
+      </TestPersonaControlsState.Provider>
+    );
+  }
 
   const loadPersonas = React.useCallback(() => {
     if (!TEST_PERSONAS_ENABLED || personaLoading || personas.length > 0) {

@@ -1,8 +1,6 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 
 export function PatchConnectorPage() {
-  const navigate = useNavigate();
   const [selectedConnector, setSelectedConnector] = useState<string | null>(null);
 
   const connectors = [
