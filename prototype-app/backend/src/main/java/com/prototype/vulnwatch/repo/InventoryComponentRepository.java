@@ -85,6 +85,16 @@ public interface InventoryComponentRepository extends JpaRepository<InventoryCom
     );
 
     List<InventoryComponent> findByAsset(Asset asset);
+
+    List<InventoryComponent> findByAssetId(UUID assetId);
+
+    /**
+     * Components credited to one uploaded document. This is the only link back from an
+     * inventory component to the BOM that produced it, and it is single-valued: re-ingesting
+     * the same asset from another source overwrites it, so it can attribute a component to
+     * the most recent source only.
+     */
+    List<InventoryComponent> findByAsset_IdAndSbomUpload_Id(UUID assetId, UUID sbomUploadId);
     List<InventoryComponent> findByAsset_IdIn(Collection<UUID> assetIds);
     List<InventoryComponent> findByAssetAndComponentStatus(Asset asset, InventoryComponentStatus status);
     @Query("""

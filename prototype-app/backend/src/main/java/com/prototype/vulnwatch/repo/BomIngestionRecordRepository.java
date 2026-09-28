@@ -8,6 +8,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 
 public interface BomIngestionRecordRepository extends JpaRepository<BomIngestionRecord, UUID> {
 
@@ -30,4 +31,14 @@ public interface BomIngestionRecordRepository extends JpaRepository<BomIngestion
     );
 
     long countByTenant_IdAndStatus(UUID tenantId, BomStatus status);
+
+    /** Every document version for an asset, any status, for reconstructing its source chains. */
+    List<BomIngestionRecord> findByAssetId(UUID assetId);
+
+    /** Assets whose documents predate source tracking and so still need backfilling. */
+    @Query("""
+        SELECT DISTINCT r.assetId FROM BomIngestionRecord r
+        WHERE r.sourceId IS NULL AND r.assetId IS NOT NULL
+        """)
+    List<UUID> findAssetIdsAwaitingSourceBackfill(Pageable pageable);
 }
