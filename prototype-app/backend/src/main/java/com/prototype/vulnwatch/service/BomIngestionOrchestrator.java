@@ -350,6 +350,8 @@ public class BomIngestionOrchestrator {
         SbomIngestionResponse inventoryResult = null;
         if (bomType != BomType.CBOM) {
             // Delegate software inventory + CVE correlation path for software-like BOMs only.
+            // An AI-BOM is partial by nature (it declares AI resources, not the asset's full
+            // software inventory), so it must not imply absence of anything it omits.
             inventoryResult = sbomContentIngestionService.ingestBytes(
                     tenant,
                     legacyRequest.assetType(),
@@ -358,7 +360,8 @@ public class BomIngestionOrchestrator {
                     content,
                     originalFilename,
                     metadata,
-                    assetCustomizer
+                    assetCustomizer,
+                    bomType != BomType.AI_BOM
             );
         } else {
             resolvedAsset.setName(legacyRequest.assetName());

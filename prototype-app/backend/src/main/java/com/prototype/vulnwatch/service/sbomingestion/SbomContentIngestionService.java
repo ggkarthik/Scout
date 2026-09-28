@@ -86,6 +86,25 @@ public class SbomContentIngestionService {
             SbomIngestionSourceMetadata metadata,
             Consumer<Asset> assetCustomizer
     ) throws IOException {
+        return ingestBytes(tenant, assetType, assetName, assetIdentifier, content,
+                originalFilename, metadata, assetCustomizer, true);
+    }
+
+    // authoritativeForAssetSoftware=false means the document only adds evidence and never
+    // implies absence. A partial document (AI-BOM) must not retire components it does not
+    // list: that would auto-close their findings as AUTO_COMPONENT_REMOVED, reporting
+    // unremediated vulnerabilities as fixed.
+    public SbomIngestionResponse ingestBytes(
+            Tenant tenant,
+            AssetType assetType,
+            String assetName,
+            String assetIdentifier,
+            byte[] content,
+            String originalFilename,
+            SbomIngestionSourceMetadata metadata,
+            Consumer<Asset> assetCustomizer,
+            boolean authoritativeForAssetSoftware
+    ) throws IOException {
         Asset asset = sbomUploadSupportService.resolveAsset(tenant, assetType, assetName, assetIdentifier);
         asset.setName(assetName);
         asset.setType(assetType);
@@ -188,11 +207,13 @@ public class SbomContentIngestionService {
                 toPersist.add(component);
             }
 
-            for (InventoryComponent component : existingByKey.values()) {
-                if (component.getComponentStatus() != InventoryComponentStatus.RETIRED) {
-                    component.setComponentStatus(InventoryComponentStatus.RETIRED);
-                    component.setRetiredAt(now);
-                    toPersist.add(component);
+            if (authoritativeForAssetSoftware) {
+                for (InventoryComponent component : existingByKey.values()) {
+                    if (component.getComponentStatus() != InventoryComponentStatus.RETIRED) {
+                        component.setComponentStatus(InventoryComponentStatus.RETIRED);
+                        component.setRetiredAt(now);
+                        toPersist.add(component);
+                    }
                 }
             }
             if (!toPersist.isEmpty()) {
