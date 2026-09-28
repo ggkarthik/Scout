@@ -23,6 +23,12 @@ public interface CbomRiskFindingRepository extends JpaRepository<CbomRiskFinding
 
     List<CbomRiskFinding> findByTenant_IdAndComponent_Id(UUID tenantId, UUID componentId);
 
+    /** Findings reported by one CBOM document, for withdrawing its evidence when it goes. */
+    @Query("""
+        SELECT f FROM CbomRiskFinding f WHERE f.component.sourceBom.id = :sourceBomId
+        """)
+    List<CbomRiskFinding> findBySourceBomId(@Param("sourceBomId") UUID sourceBomId);
+
     List<CbomRiskFinding> findByTenant_IdAndComponent_Asset_IdAndStatusOrderBySeverityAscCreatedAtDesc(
             UUID tenantId,
             UUID assetId,

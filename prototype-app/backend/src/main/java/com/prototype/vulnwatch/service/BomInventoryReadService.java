@@ -7,6 +7,7 @@ import com.prototype.vulnwatch.domain.AssetState;
 import com.prototype.vulnwatch.domain.AssetType;
 import com.prototype.vulnwatch.domain.BomIngestionRecord;
 import com.prototype.vulnwatch.domain.BomStatus;
+import com.prototype.vulnwatch.domain.BomType;
 import com.prototype.vulnwatch.domain.InventoryComponent;
 import com.prototype.vulnwatch.domain.InventoryComponentStatus;
 import com.prototype.vulnwatch.domain.Tenant;
@@ -70,6 +71,7 @@ public class BomInventoryReadService {
     private final EolReleaseRepository eolReleaseRepository;
     private final FindingRepository findingRepository;
     private final BomContributionService bomContributionService;
+    private final com.prototype.vulnwatch.service.cbom.CbomIngestionService cbomIngestionService;
 
     public BomInventoryReadService(
             BomIngestionRecordRepository bomRecordRepository,
@@ -83,7 +85,8 @@ public class BomInventoryReadService {
             ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository,
             EolReleaseRepository eolReleaseRepository,
             FindingRepository findingRepository,
-            BomContributionService bomContributionService
+            BomContributionService bomContributionService,
+            com.prototype.vulnwatch.service.cbom.CbomIngestionService cbomIngestionService
     ) {
         this.bomRecordRepository = bomRecordRepository;
         this.bomComponentRepository = bomComponentRepository;
@@ -97,6 +100,7 @@ public class BomInventoryReadService {
         this.eolReleaseRepository = eolReleaseRepository;
         this.findingRepository = findingRepository;
         this.bomContributionService = bomContributionService;
+        this.cbomIngestionService = cbomIngestionService;
     }
 
     @Transactional(readOnly = true)
@@ -294,6 +298,12 @@ public class BomInventoryReadService {
         // absent. Finding status deliberately survives: deleting the document that reported a
         // vulnerable component is not evidence the vulnerability was remediated.
         bomContributionService.withdrawForDeletedDocument(record);
+        if (record.getBomType() == BomType.CBOM) {
+            // A CBOM's cryptographic assets and findings live in their own tables, so
+            // soft-deleting bom_components does not reach them; deleting a CBOM previously
+            // left its components active and its findings' evidence standing.
+            cbomIngestionService.deactivateBySourceBomId(bomId);
+        }
         record.setStatus(BomStatus.SUPERSEDED);
         bomRecordRepository.save(record);
     }
