@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.controller;
 
 import com.prototype.vulnwatch.domain.AssetType;
+import com.prototype.vulnwatch.domain.BomSourceCompleteness;
 import com.prototype.vulnwatch.domain.BomType;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.ApplicationRiskResponse;
@@ -13,11 +14,13 @@ import com.prototype.vulnwatch.dto.BomFetchRequest;
 import com.prototype.vulnwatch.dto.BomIngestionResultResponse;
 import com.prototype.vulnwatch.dto.BomInventoryItemResponse;
 import com.prototype.vulnwatch.dto.BomLineageItemResponse;
+import com.prototype.vulnwatch.dto.BomSourceSelector;
 import com.prototype.vulnwatch.dto.BomSupportMatrixResponse;
 import com.prototype.vulnwatch.dto.IngestionJobAcceptedResponse;
 import com.prototype.vulnwatch.service.BomIngestionOrchestrator;
 import com.prototype.vulnwatch.service.BomInventoryReadService;
 import com.prototype.vulnwatch.service.IngestionJobService;
+import com.prototype.vulnwatch.service.RequestActor;
 import com.prototype.vulnwatch.service.RequestActorService;
 import com.prototype.vulnwatch.service.WorkspaceService;
 import jakarta.validation.Valid;
@@ -95,7 +98,14 @@ public class BomController {
             @RequestParam AssetType assetType,
             @RequestParam String assetName,
             @RequestParam String assetIdentifier,
-            @RequestParam(required = false) String supplier
+            @RequestParam(required = false) String supplier,
+            // Omit to create an independent source; supply it to replace that source's
+            // current version. Replacement is never inferred from asset and supplier.
+            @RequestParam(required = false) UUID sourceId,
+            // PARTIAL unless the uploader asserts the document covers the asset's whole
+            // software inventory. Only that assertion can later justify retiring a component,
+            // and it must be repeated on every replacement.
+            @RequestParam(required = false) BomSourceCompleteness completeness
     ) throws IOException {
         if (file.isEmpty()) {
             throw new IOException("BOM file is empty");
@@ -104,9 +114,16 @@ public class BomController {
             throw new IOException("BOM file exceeds 50 MB limit");
         }
         Tenant tenant = workspaceService.getWorkspace();
+        RequestActor actor = requestActorService.currentActor();
+        BomSourceSelector selector = new BomSourceSelector(
+                sourceId,
+                null,
+                completeness == null ? BomSourceCompleteness.PARTIAL : completeness,
+                actor.roles(),
+                actor.userId());
         return bomIngestionOrchestrator.ingestFromUpload(
                 tenant, bomType, assetType, assetName, assetIdentifier,
-                supplier, file.getBytes(), file.getOriginalFilename()
+                supplier, file.getBytes(), file.getOriginalFilename(), selector
         );
     }
 

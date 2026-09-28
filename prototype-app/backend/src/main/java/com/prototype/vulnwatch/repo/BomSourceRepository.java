@@ -17,6 +17,9 @@ import java.util.UUID;
 @Repository
 public interface BomSourceRepository extends JpaRepository<BomSource, UUID> {
 
+    /** Automated callers resolve their own source by its deterministic key. */
+    Optional<BomSource> findBySourceKey(String sourceKey);
+
     List<BomSource> findByAssetIdAndBomType(UUID assetId, BomType bomType);
 
     List<BomSource> findByAssetId(UUID assetId);

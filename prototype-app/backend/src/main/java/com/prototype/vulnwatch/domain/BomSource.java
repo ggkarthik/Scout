@@ -51,6 +51,13 @@ public class BomSource {
     @Column(name = "source_reference")
     private String sourceReference;
 
+    /**
+     * Deterministic identity for automated callers, so a scheduled sync replaces its own
+     * source rather than accumulating one per run. Null for manual uploads.
+     */
+    @Column(name = "source_key", length = 700)
+    private String sourceKey;
+
     @Column(name = "current_bom_id")
     private UUID currentBomId;
 

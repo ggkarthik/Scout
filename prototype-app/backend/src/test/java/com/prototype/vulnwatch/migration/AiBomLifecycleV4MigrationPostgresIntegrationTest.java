@@ -122,6 +122,32 @@ class AiBomLifecycleV4MigrationPostgresIntegrationTest {
         insertContribution(CONSTRAINT_DB, "00000000-0000-0000-0000-00000000f004", "SUPPORTED", "null", "false");
         assertEquals(1, queryIntAsTenant(CONSTRAINT_DB,
                 "select count(*) from tenant_default.bom_component_contributions where contribution_state='SUPPORTED'"));
+
+        // source_key is uniquely indexed only where present. An automated caller must
+        // resolve back to one source, while manual uploads leave the key null and any
+        // number of them may coexist for the same asset.
+        execute(CONSTRAINT_DB, """
+                insert into tenant_default.bom_sources (id,tenant_id,bom_type,source_key,completeness,state)
+                values ('00000000-0000-0000-0000-00000000f101','%s','SBOM','github-repo:SBOM:acme/widget','PARTIAL','ACTIVE')
+                """.formatted(UPGRADE_TENANT_ID));
+        assertThrows(SQLException.class, () -> execute(CONSTRAINT_DB, """
+                insert into tenant_default.bom_sources (id,tenant_id,bom_type,source_key,completeness,state)
+                values ('00000000-0000-0000-0000-00000000f102','%s','SBOM','github-repo:SBOM:acme/widget','PARTIAL','ACTIVE')
+                """.formatted(UPGRADE_TENANT_ID)), "a duplicate source_key must be rejected");
+
+        execute(CONSTRAINT_DB, """
+                insert into tenant_default.bom_sources (id,tenant_id,bom_type,asset_id,completeness,state)
+                values ('00000000-0000-0000-0000-00000000f103','%s','SBOM','%s','PARTIAL','ACTIVE')
+                """.formatted(UPGRADE_TENANT_ID, ASSET_ID));
+        execute(CONSTRAINT_DB, """
+                insert into tenant_default.bom_sources (id,tenant_id,bom_type,asset_id,completeness,state)
+                values ('00000000-0000-0000-0000-00000000f104','%s','SBOM','%s','PARTIAL','ACTIVE')
+                """.formatted(UPGRADE_TENANT_ID, ASSET_ID));
+        // Three: the SBOM source seeded at the top of this test, plus the two just added.
+        assertEquals(3, queryIntAsTenant(CONSTRAINT_DB,
+                "select count(*) from tenant_default.bom_sources where source_key is null and asset_id='"
+                        + ASSET_ID + "'"),
+                "unnamed uploads for one asset stay independent rather than superseding");
     }
 
     private void insertContribution(LocalPostgresTestDatabase.DatabaseConfig db, String id, String state, String withdrawnAt, String absence) throws Exception {

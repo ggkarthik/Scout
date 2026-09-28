@@ -21,6 +21,11 @@ CREATE TABLE ${tenantSchema}.bom_sources (
     asset_id uuid REFERENCES ${tenantSchema}.assets(id) ON DELETE CASCADE,
     supplier varchar(255),
     source_reference text,
+    -- Deterministic identity for automated callers (a GitHub repo, a GHCR image, a remote
+    -- endpoint) so each scheduled run replaces its own source instead of creating another.
+    -- Null for manual uploads, where omitting a source id deliberately creates an
+    -- independent source rather than implicitly replacing anything.
+    source_key varchar(700),
     -- Immutable version chain lives on bom_ingestion_records.source_id; this points at the
     -- one that is current. Deliberately independent of document id and checksum.
     current_bom_id uuid,
@@ -152,6 +157,10 @@ CREATE INDEX idx_bom_sources_tenant_asset
     ON ${tenantSchema}.bom_sources(tenant_id, asset_id, bom_type);
 CREATE INDEX idx_bom_sources_tenant_state
     ON ${tenantSchema}.bom_sources(tenant_id, state);
+-- Partial: only keyed sources are unique. Manual uploads leave source_key null and any
+-- number of them may coexist for the same asset.
+CREATE UNIQUE INDEX uk_bom_sources_tenant_source_key
+    ON ${tenantSchema}.bom_sources(tenant_id, source_key) WHERE source_key IS NOT NULL;
 CREATE INDEX idx_bom_source_assertions_source
     ON ${tenantSchema}.bom_source_completeness_assertions(tenant_id, source_id, asserted_at DESC);
 CREATE INDEX idx_bom_contributions_inventory
