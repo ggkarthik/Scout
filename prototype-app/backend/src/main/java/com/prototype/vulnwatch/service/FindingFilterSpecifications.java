@@ -49,6 +49,7 @@ public final class FindingFilterSpecifications {
                 .and(byPatchAvailable(filter.patchAvailable()))
                 .and(bySuppressedUntilBand(filter.suppressedUntilBand()))
                 .and(byAssetType(filter.assetType()))
+                .and(byFindingKind(filter.findingKind()))
                 .and(byGroup(filter.groupField(), filter.groupValue()));
     }
 
@@ -153,6 +154,27 @@ public final class FindingFilterSpecifications {
             jakarta.persistence.criteria.Expression<String> effective = cb.coalesce(override, vulnSev);
             return effective.in(upper);
         };
+    }
+
+    /**
+     * Restricts to the given finding kinds. Empty means every kind, which keeps All Findings
+     * inclusive by default and leaves existing callers unchanged.
+     *
+     * <p>finding_kind is a plain string column on the entity, so this matches on the raw
+     * value rather than an enum -- the set is widened by tenant migrations (AI_RUNTIME
+     * arrived that way) and an unrecognised value must narrow the result rather than be
+     * silently dropped from the predicate, which would widen it instead.
+     */
+    private static Specification<Finding> byFindingKind(List<String> kinds) {
+        Set<String> normalized = normalizeFilterValues(kinds);
+        if (normalized.isEmpty()) {
+            return null;
+        }
+        Set<String> upper = new HashSet<>();
+        for (String value : normalized) {
+            upper.add(value.toUpperCase(Locale.ROOT));
+        }
+        return (root, query, builder) -> root.get("findingKind").in(upper);
     }
 
     private static Specification<Finding> byStatus(List<String> statuses) {

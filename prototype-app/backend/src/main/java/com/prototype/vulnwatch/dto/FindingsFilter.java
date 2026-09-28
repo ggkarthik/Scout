@@ -30,7 +30,14 @@ public record FindingsFilter(
         String suppressedUntilBand,
         List<String> assetType,
         String groupField,
-        String groupValue
+        String groupValue,
+        /**
+         * Finding kinds to include. Null or empty means every kind, which keeps the All
+         * Findings view inclusive; the software-vulnerability view selects VULNERABILITY
+         * explicitly. Cannot be inferred from vulnerabilityId, which the projection populates
+         * with a CVE id or an AI policy id depending on the kind.
+         */
+        List<String> findingKind
 ) {
     public FindingsFilter(
         List<String> severity,
@@ -56,7 +63,7 @@ public record FindingsFilter(
         String suppressedUntilBand,
         List<String> assetType
     ) {
-        this(severity, status, decisionState, creationSource, matchMethod, vexStatus, vexFreshness, vexProvider, minConfidence, vulnerabilityId, packageName, ecosystem, ownerGroup, assignedTo, unassignedOnly, incidentLinked, dueDateBand, assetName, supportGroup, patchAvailable, suppressedUntilBand, assetType, null, null);
+        this(severity, status, decisionState, creationSource, matchMethod, vexStatus, vexFreshness, vexProvider, minConfidence, vulnerabilityId, packageName, ecosystem, ownerGroup, assignedTo, unassignedOnly, incidentLinked, dueDateBand, assetName, supportGroup, patchAvailable, suppressedUntilBand, assetType, null, null, null);
     }
 
     /** Backward-compatible constructor for call sites predating the {@code assetType} filter. */
