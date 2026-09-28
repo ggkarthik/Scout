@@ -7709,10 +7709,10 @@ label {
 
 .connect-card-grid {
   display: grid;
-  /* auto-fill rather than a fixed count: the Inventory section holds eight cards and the
-     others two or three, and each should fill its row at whatever width is available. */
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 12px;
+  /* Exactly five per row on a full-width workspace. The narrower steps live in connect.css,
+     which loads after cve-workbench.css and so overrides its single-column rule. */
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
 }
 
 .connect-source-card {
@@ -7722,11 +7722,13 @@ label {
   color: var(--text);
   width: 100%;
   text-align: center;
-  padding: var(--space-4) var(--space-3);
+  padding: var(--space-5) var(--space-4);
+  min-height: 190px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  justify-content: flex-start;
+  gap: 14px;
 }
 
 .connect-source-card:hover {
@@ -7735,8 +7737,8 @@ label {
 }
 
 .connect-source-icon {
-  width: 44px;
-  height: 44px;
+  width: 56px;
+  height: 56px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -7745,10 +7747,13 @@ label {
 }
 
 /* Brand marks carry their own colours, so the icon well is borderless and unfilled here --
-   a tinted chip behind a multi-colour logo reads as a rendering fault. */
+   a tinted chip behind a multi-colour logo reads as a rendering fault. The aws and Azure
+   marks are wider than tall, so height rather than width is what keeps every logo optically
+   the same size. */
 .connect-source-icon svg {
-  width: 26px;
-  height: 26px;
+  width: auto;
+  height: 40px;
+  max-width: 100%;
 }
 
 .connect-source-card--active .connect-source-icon {
@@ -7758,7 +7763,7 @@ label {
 .connect-source-name {
   color: var(--title);
   font-family: var(--font-display);
-  font-size: 0.98rem;
+  font-size: 1.06rem;
   font-weight: 700;
   margin-bottom: 0;
 }

@@ -92,47 +92,64 @@ const IconGitHub = (
 );
 
 const IconMicrosoft = (
-  <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
-    <rect x="2" y="2" width="7.6" height="7.6" fill="#F25022" />
-    <rect x="10.4" y="2" width="7.6" height="7.6" fill="#7FBA00" />
-    <rect x="2" y="10.4" width="7.6" height="7.6" fill="#00A4EF" />
-    <rect x="10.4" y="10.4" width="7.6" height="7.6" fill="#FFB900" />
+  <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
+    <rect x="3" y="3" width="15.6" height="15.6" fill="#F25022" />
+    <rect x="21.4" y="3" width="15.6" height="15.6" fill="#7FBA00" />
+    <rect x="3" y="21.4" width="15.6" height="15.6" fill="#00A4EF" />
+    <rect x="21.4" y="21.4" width="15.6" height="15.6" fill="#FFB900" />
   </svg>
 );
 
 const IconAws = (
-  <svg width="34" height="20" viewBox="0 0 34 20" aria-hidden="true">
-    <text x="17" y="14" textAnchor="middle" fontSize="11" fontWeight="700"
+  <svg width="56" height="40" viewBox="0 0 56 40" aria-hidden="true">
+    <text x="28" y="27" textAnchor="middle" fontSize="21" fontWeight="700"
           fontFamily="Helvetica, Arial, sans-serif" fill="#FF9900">aws</text>
   </svg>
 );
 
 const IconAzure = (
-  <svg width="22" height="20" viewBox="0 0 22 20" aria-hidden="true">
-    <path d="M8.6 2.6h5.2L8.3 13.1 4 13.1z" fill="#0078D4" />
-    <path d="M9.6 14.2 14.4 5.4l4.3 11.9H7.1z" fill="#50BCEB" />
+  <svg width="44" height="40" viewBox="0 0 44 40" aria-hidden="true">
+    <path d="M17.2 5.2h10.4L16.6 26.2H8z" fill="#0078D4" />
+    <path d="M19.2 28.4 28.8 10.8l8.6 23.8H14.2z" fill="#50BCEB" />
   </svg>
 );
 
 const IconServiceNowBrand = (
-  <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
-    <rect x="1" y="1" width="20" height="20" rx="4" fill="#12263A" />
-    <text x="11" y="14.5" textAnchor="middle" fontSize="7.2" fontWeight="700"
+  <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
+    <rect x="2" y="2" width="36" height="36" rx="7" fill="#12263A" />
+    <text x="20" y="25.5" textAnchor="middle" fontSize="12.6" fontWeight="700"
           fontFamily="Helvetica, Arial, sans-serif" fill="#ffffff">NOW</text>
   </svg>
 );
 
+// BigFix: the lowercase "b" bowl in slate blue with an olive dot at its centre.
 const IconBigFix = (
-  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#16a34a" strokeWidth="1.6" strokeLinecap="round">
-    <circle cx="10" cy="10" r="7.5" />
-    <path d="M10 6.5v7M6.5 10h7" />
+  <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
+    <path
+      d="M13.2 24.4V6.5"
+      fill="none"
+      stroke="#7B9BC4"
+      strokeWidth="6.4"
+      strokeLinecap="round"
+    />
+    <path
+      d="M31.8 22.6a12.8 12.8 0 1 1-8.6-12.1"
+      fill="none"
+      stroke="#7B9BC4"
+      strokeWidth="6.4"
+      strokeLinecap="round"
+    />
+    <circle cx="19.6" cy="23.4" r="5.4" fill="#A8C63F" />
   </svg>
 );
 
+// Tanium: white "T" knocked out of a red disc, with the disc's upper-left squared off as
+// in the brand mark.
 const IconTanium = (
-  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#16a34a" strokeWidth="1.6" strokeLinecap="round">
-    <rect x="2.5" y="2.5" width="15" height="15" rx="2.5" />
-    <path d="M6.5 10h7" />
+  <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
+    <path d="M20 5.6A14.4 14.4 0 1 1 5.6 20V5.6Z" fill="#E4002B" />
+    <path d="M10.4 15.2h19.2" fill="none" stroke="#ffffff" strokeWidth="5" strokeLinecap="butt" />
+    <path d="M20 15.2v14.2" fill="none" stroke="#ffffff" strokeWidth="5" strokeLinecap="butt" />
   </svg>
 );
 
