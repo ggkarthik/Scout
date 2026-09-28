@@ -19,7 +19,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -78,15 +77,6 @@ public class ServiceNowCmdbConfigService {
     private final TenantQuotaService tenantQuotaService;
     private final CredentialEncryptionService credentialEncryptionService;
     private final OutboundHostPolicy outboundHostPolicy;
-
-    @Value("${app.cmdb.servicenow.base-url:}")
-    private String fallbackBaseUrl;
-
-    @Value("${app.cmdb.servicenow.username:}")
-    private String fallbackUsername;
-
-    @Value("${app.cmdb.servicenow.password:}")
-    private String fallbackPassword;
 
     @Autowired
     public ServiceNowCmdbConfigService(
@@ -177,6 +167,13 @@ public class ServiceNowCmdbConfigService {
         );
     }
 
+    /**
+     * The tenant's own ServiceNow settings, or empty when it has not configured the connector.
+     *
+     * <p>Resolution is strictly per tenant. There is deliberately no environment-level
+     * fallback: one shared instance across tenants would let each tenant's CI lookups,
+     * incidents and credentials reach another tenant's ServiceNow.
+     */
     @Transactional(readOnly = true)
     public Optional<ServiceNowRuntimeConfig> resolveRuntimeConfig(Tenant tenant) {
         Optional<ServiceNowCmdbConfig> saved = findConfig(tenant);
@@ -200,26 +197,10 @@ public class ServiceNowCmdbConfigService {
                     config.getIntervalMinutes() == null ? 1440 : Math.max(5, config.getIntervalMinutes())
             ));
         }
-        if (!hasText(fallbackBaseUrl)) {
-            return Optional.empty();
-        }
-        return Optional.of(new ServiceNowRuntimeConfig(
-                trimToNull(fallbackBaseUrl),
-                ServiceNowAuthType.BASIC,
-                trimToNull(fallbackUsername),
-                trimToNull(fallbackPassword),
-                "cmdb_sam_sw_install",
-                "cmdb_sam_sw_discovery_model",
-                "cmdb_ci",
-                null,
-                null,
-                DEFAULT_INSTALL_FIELDS,
-                DEFAULT_DISCOVERY_FIELDS,
-                1000,
-                true,
-                false,
-                1440
-        ));
+        // No deployment-wide fallback: a tenant without its own connector row has no
+        // ServiceNow instance. A shared fallback would silently point every unconfigured
+        // tenant at one instance, mixing their CIs and incidents together.
+        return Optional.empty();
     }
 
     Optional<ServiceNowCmdbConfig> findConfig(Tenant tenant) {

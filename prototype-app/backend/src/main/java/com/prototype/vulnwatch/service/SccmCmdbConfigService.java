@@ -10,7 +10,6 @@ import com.prototype.vulnwatch.repo.SccmCmdbConfigRepository;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.Optional;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -23,18 +22,6 @@ public class SccmCmdbConfigService {
     private final SccmQueryService sccmQueryService;
     private final TenantQuotaService tenantQuotaService;
     private final CredentialEncryptionService credentialEncryptionService;
-
-    @Value("${app.cmdb.sccm.jdbc-url:}")
-    private String fallbackJdbcUrl;
-
-    @Value("${app.cmdb.sccm.username:}")
-    private String fallbackUsername;
-
-    @Value("${app.cmdb.sccm.password:}")
-    private String fallbackPassword;
-
-    @Value("${app.cmdb.sccm.mock-mode:false}")
-    private boolean fallbackMockMode;
 
     public SccmCmdbConfigService(
             SccmCmdbConfigRepository sccmCmdbConfigRepository,
@@ -104,6 +91,10 @@ public class SccmCmdbConfigService {
         );
     }
 
+    /**
+     * The tenant's own SCCM settings, or empty when it has not configured the connector.
+     * Resolution is strictly per tenant; see the note at the end of this method.
+     */
     @Transactional(readOnly = true)
     public Optional<SccmRuntimeConfig> resolveRuntimeConfig(Tenant tenant) {
         Optional<SccmCmdbConfig> saved = findConfig(tenant);
@@ -124,24 +115,11 @@ public class SccmCmdbConfigService {
                     config.getIntervalMinutes() == null ? 1440 : Math.max(5, config.getIntervalMinutes())
             ));
         }
-        // Fall back to environment-variable driven config
-        if (!hasText(fallbackJdbcUrl) && !fallbackMockMode) {
-            return Optional.empty();
-        }
-        return Optional.of(new SccmRuntimeConfig(
-                trimToNull(fallbackJdbcUrl),
-                SccmAuthType.SQL_AUTH,
-                trimToNull(fallbackUsername),
-                trimToNull(fallbackPassword),
-                null,
-                "CM_P01",
-                500,
-                120,
-                fallbackMockMode,
-                true,
-                false,
-                1440
-        ));
+        // No deployment-wide fallback: a tenant without its own connector row has no SCCM
+        // database. A shared fallback would run every unconfigured tenant's inventory queries
+        // against one site database, attributing another organisation's hosts to them.
+        // Mock mode is still available per tenant via the connector's own mockMode flag.
+        return Optional.empty();
     }
 
     Optional<SccmCmdbConfig> findConfig(Tenant tenant) {

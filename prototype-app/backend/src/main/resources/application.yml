@@ -309,16 +309,10 @@ app:
     release-refresh-cron: ${EOL_RELEASE_REFRESH_CRON:0 0 3 * * SUN}
     resolve-mappings-cron: ${EOL_RESOLVE_MAPPINGS_CRON:0 30 3 * * SUN}
     denormalize-cron: ${EOL_DENORMALIZE_CRON:0 0 4 * * SUN}
-  cmdb:
-    servicenow:
-      base-url: ${CMDB_SERVICENOW_BASE_URL:}
-      username: ${CMDB_SERVICENOW_USERNAME:}
-      password: ${CMDB_SERVICENOW_PASSWORD:}
-    sccm:
-      jdbc-url: ${SCCM_JDBC_URL:}
-      username: ${SCCM_USERNAME:}
-      password: ${SCCM_PASSWORD:}
-      mock-mode: ${SCCM_MOCK_MODE:false}
+  # Deployment-wide CMDB credentials were removed: ServiceNow and SCCM are configured per
+  # tenant, on the tenant's own connector. LegacySharedConnectorConfigGuard fails startup if
+  # the old environment variables are still set, so an upgrade cannot quietly fall back to a
+  # shared instance.
 
 management:
   endpoint:
