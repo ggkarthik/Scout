@@ -1,6 +1,7 @@
 package com.prototype.vulnwatch.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -33,6 +34,7 @@ class AiBomProjectionServiceTest {
     private BomIngestionRecordRepository recordRepository;
     private AiBomProvenanceFactRepository provenanceFactRepository;
     private AiBomProjectionReceiptRepository receiptRepository;
+    private AiBomProjectionBudgetService budgetService;
     private AiBomProjectionService service;
 
     private Tenant tenant;
@@ -45,8 +47,10 @@ class AiBomProjectionServiceTest {
         recordRepository = mock(BomIngestionRecordRepository.class);
         provenanceFactRepository = mock(AiBomProvenanceFactRepository.class);
         receiptRepository = mock(AiBomProjectionReceiptRepository.class);
+        budgetService = mock(AiBomProjectionBudgetService.class);
+        when(budgetService.admit(any())).thenReturn(AiBomProjectionBudgetService.Decision.ADMITTED);
         service = new AiBomProjectionService(
-                sourceRepository, recordRepository, provenanceFactRepository, receiptRepository);
+                sourceRepository, recordRepository, provenanceFactRepository, receiptRepository, budgetService);
 
         tenant = new Tenant();
         tenant.setId(UUID.randomUUID());
@@ -81,6 +85,7 @@ class AiBomProjectionServiceTest {
         verify(recordRepository, never()).findById(any());
         verify(provenanceFactRepository, never()).save(any());
         verify(receiptRepository, never()).save(any());
+        verify(budgetService, never()).admit(any());
     }
 
     @Test
@@ -139,5 +144,17 @@ class AiBomProjectionServiceTest {
         var factCaptor = org.mockito.ArgumentCaptor.forClass(AiBomProvenanceFact.class);
         verify(provenanceFactRepository, times(1)).save(factCaptor.capture());
         assertEquals(existing.getId(), factCaptor.getValue().getId());
+    }
+
+    @Test
+    void aThrottledBudgetDecisionThrowsRatherThanWritingAnything() {
+        BomIngestionRecord record = record();
+        when(recordRepository.findById(source.getCurrentBomId())).thenReturn(Optional.of(record));
+        when(budgetService.admit(tenant)).thenReturn(AiBomProjectionBudgetService.Decision.THROTTLED);
+
+        assertThrows(AiBomProjectionThrottledException.class, () -> service.project(tenant, sourceId));
+
+        verify(provenanceFactRepository, never()).save(any());
+        verify(receiptRepository, never()).save(any());
     }
 }

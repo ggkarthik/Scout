@@ -100,7 +100,7 @@ public class BomIngestionOrchestrator {
     private final BomContributionService bomContributionService;
     private final BomRelationshipParsingService bomRelationshipParsingService;
     private final AiBomDeclaredResourceService aiBomDeclaredResourceService;
-    private final IngestionJobService ingestionJobService;
+    private final AiBomProjectionSchedulingService aiBomProjectionSchedulingService;
 
     public BomIngestionOrchestrator(
             SbomEndpointFetchService sbomEndpointFetchService,
@@ -124,7 +124,7 @@ public class BomIngestionOrchestrator {
             BomContributionService bomContributionService,
             BomRelationshipParsingService bomRelationshipParsingService,
             AiBomDeclaredResourceService aiBomDeclaredResourceService,
-            IngestionJobService ingestionJobService
+            AiBomProjectionSchedulingService aiBomProjectionSchedulingService
     ) {
         this.sbomEndpointFetchService = sbomEndpointFetchService;
         this.sbomContentIngestionService = sbomContentIngestionService;
@@ -147,7 +147,7 @@ public class BomIngestionOrchestrator {
         this.bomContributionService = bomContributionService;
         this.bomRelationshipParsingService = bomRelationshipParsingService;
         this.aiBomDeclaredResourceService = aiBomDeclaredResourceService;
-        this.ingestionJobService = ingestionJobService;
+        this.aiBomProjectionSchedulingService = aiBomProjectionSchedulingService;
     }
 
     @Transactional
@@ -520,11 +520,13 @@ public class BomIngestionOrchestrator {
         }
 
         if (bomType == BomType.AI_BOM) {
-            // Persisted in this same transaction: the job row is invisible to the scheduled
-            // worker (a separate connection) until this transaction commits, which is exactly
-            // "persist projection intent in the ingestion transaction; process after commit"
-            // with no extra plumbing needed.
-            ingestionJobService.enqueueAiGridBomProjectionJob(tenant, source.getId());
+            // Persisted in this same transaction when the source is entitled and under its
+            // queue cap: the job row is invisible to the scheduled worker (a separate
+            // connection) until this transaction commits, which is exactly "persist projection
+            // intent in the ingestion transaction; process after commit" with no extra
+            // plumbing needed. Otherwise the source is marked HELD_ENTITLEMENT/DEFERRED and
+            // picked up later by the reconciliation sweep.
+            aiBomProjectionSchedulingService.scheduleOrDefer(tenant, source);
         }
 
         String action = existingOpt.isPresent() ? "REPLACED" : "CREATED";

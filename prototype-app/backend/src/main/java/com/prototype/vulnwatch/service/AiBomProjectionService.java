@@ -34,16 +34,19 @@ public class AiBomProjectionService {
     private final BomIngestionRecordRepository recordRepository;
     private final AiBomProvenanceFactRepository provenanceFactRepository;
     private final AiBomProjectionReceiptRepository receiptRepository;
+    private final AiBomProjectionBudgetService budgetService;
 
     public AiBomProjectionService(
             BomSourceRepository sourceRepository,
             BomIngestionRecordRepository recordRepository,
             AiBomProvenanceFactRepository provenanceFactRepository,
-            AiBomProjectionReceiptRepository receiptRepository) {
+            AiBomProjectionReceiptRepository receiptRepository,
+            AiBomProjectionBudgetService budgetService) {
         this.sourceRepository = sourceRepository;
         this.recordRepository = recordRepository;
         this.provenanceFactRepository = provenanceFactRepository;
         this.receiptRepository = receiptRepository;
+        this.budgetService = budgetService;
     }
 
     public void project(Tenant tenant, UUID sourceId) {
@@ -62,6 +65,13 @@ public class AiBomProjectionService {
         BomIngestionRecord record = recordRepository.findById(source.getCurrentBomId())
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Current BOM record not found for source: " + sourceId));
+
+        // Checked after the receipt short-circuit above, not before: a job redelivered after
+        // the real work already completed must never burn a fresh admission.
+        if (budgetService.admit(tenant) == AiBomProjectionBudgetService.Decision.THROTTLED) {
+            throw new AiBomProjectionThrottledException(
+                    "Daily AI-BOM projection admission budget exhausted for tenant " + tenant.getId());
+        }
 
         Instant now = Instant.now();
         AiBomProvenanceFact fact = provenanceFactRepository

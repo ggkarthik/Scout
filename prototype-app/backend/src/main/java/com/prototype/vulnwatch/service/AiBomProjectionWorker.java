@@ -3,6 +3,8 @@ package com.prototype.vulnwatch.service;
 import com.prototype.vulnwatch.domain.IngestionJob;
 import com.prototype.vulnwatch.domain.Tenant;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -25,6 +27,7 @@ public class AiBomProjectionWorker {
     private final TenantService tenants;
     private final TenantSchemaExecutionService tenantExecution;
     private final AiBomProjectionService projectionService;
+    private final AiBomProjectionSchedulingService schedulingService;
     private final boolean enabled;
 
     public AiBomProjectionWorker(
@@ -32,11 +35,13 @@ public class AiBomProjectionWorker {
             TenantService tenants,
             TenantSchemaExecutionService tenantExecution,
             AiBomProjectionService projectionService,
+            AiBomProjectionSchedulingService schedulingService,
             @Value("${app.ai-bom.projection.worker-enabled:true}") boolean enabled) {
         this.jobs = jobs;
         this.tenants = tenants;
         this.tenantExecution = tenantExecution;
         this.projectionService = projectionService;
+        this.schedulingService = schedulingService;
         this.enabled = enabled;
     }
 
@@ -52,6 +57,20 @@ public class AiBomProjectionWorker {
         }
     }
 
+    /**
+     * Lighter-weight than {@link #poll()}: sources waiting on entitlement or queue room don't
+     * need second-by-second attention. Reuses the same admission decision ingestion itself
+     * runs, so "on entitlement enablement, schedule" and "retain overflow for later scheduling"
+     * are one code path re-run, not two mechanisms.
+     */
+    @Scheduled(fixedDelayString = "${app.ai-bom.projection.reconcile-interval-ms:60000}")
+    public void reconcile() {
+        if (!enabled) return;
+        for (Tenant tenant : tenants.listActiveTenants()) {
+            schedulingService.reconcileHeldAndDeferredSources(tenant);
+        }
+    }
+
     private void processSafely(Tenant tenant, IngestionJobService.ClaimedJobRef ref) {
         tenantExecution.run(tenant, () -> {
             IngestionJob job = jobs.loadJob(ref.tenantId(), ref.jobId());
@@ -63,6 +82,11 @@ public class AiBomProjectionWorker {
                 jobs.markSucceeded(ref.tenantId(), ref.jobId(), null, null);
                 job.setCompletedAt(Instant.now());
                 jobs.recordCompleted(job);
+            } catch (AiBomProjectionThrottledException throttled) {
+                // Not a failure: the work is still valid, just waiting for tomorrow's budget.
+                // recordCompleted/recordFailed are both skipped -- the job isn't done.
+                jobs.markQueuedForRetry(ref.tenantId(), ref.jobId(), "DAILY_BUDGET_EXCEEDED",
+                        throttled.getMessage(), nextUtcMidnight());
             } catch (Exception failure) {
                 jobs.markFailed(ref.tenantId(), ref.jobId(), "AI_BOM_PROJECTION_FAILED",
                         "AI-BOM provenance projection could not be processed");
@@ -70,5 +94,9 @@ public class AiBomProjectionWorker {
                 jobs.recordFailed(job);
             }
         });
+    }
+
+    private Instant nextUtcMidnight() {
+        return LocalDate.now(ZoneOffset.UTC).plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
     }
 }
