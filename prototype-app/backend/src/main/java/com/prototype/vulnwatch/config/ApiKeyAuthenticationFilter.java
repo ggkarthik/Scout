@@ -57,10 +57,13 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
                 && !"/actuator/health".equals(path)
                 && !path.startsWith("/actuator/health/")
                 && !"/actuator/info".equals(path);
+        // /api/auth/context and /api/me are deliberately NOT skipped. They report who the
+        // caller is, so they have to authenticate the caller first. Skipping them while
+        // SecurityConfig requires authentication on /api/** left both endpoints returning 403
+        // to every caller, credentials or not — the filter that could have authenticated them
+        // was never invoked.
         return (!path.startsWith("/api/") && !protectedActuatorEndpoint)
                 || "/api/auth/login".equals(path)
-                || "/api/auth/context".equals(path) // Local dev: allow session verification
-                || "/api/me".equals(path) // Local dev: allow current user check
                 || "/api/auth/setup-password".equals(path)
                 || "/api/auth/setup-session".equals(path)
                 || ("/api/demo-requests".equals(path) && "POST".equalsIgnoreCase(request.getMethod()))
