@@ -31,6 +31,10 @@ public class AiSecurityMetadataSanitizer {
                     + "headers?|openapi|smithy|schema|parameter[_-]?defaults?)");
     /** Version 1 registry: every native kind emitted by the current AWS/Azure collectors. */
     private static final Set<String> REGISTERED_NATIVE_KINDS = Set.of(
+            // Declared by an uploaded AI-BOM rather than observed in a cloud account. Kept
+            // distinct from provider-discovered kinds so a declaration is never mistaken for
+            // a deployment.
+            "AI_BOM_DECLARED_MODEL", "AI_BOM_DECLARED_DATASET",
             "AWS_BEDROCK_AGENT", "AWS_BEDROCK_CUSTOM_MODEL", "AWS_BEDROCK_FLOW", "AWS_BEDROCK_GUARDRAIL",
             "AWS_BEDROCK_IMPORTED_MODEL", "AWS_BEDROCK_INFERENCE_PROFILE", "AWS_BEDROCK_INVOCATION_LOGGING",
             "AWS_BEDROCK_KNOWLEDGE_BASE", "AWS_BEDROCK_MODEL", "AWS_BEDROCK_MODEL_CUSTOMIZATION_JOB",
@@ -85,7 +89,8 @@ public class AiSecurityMetadataSanitizer {
         return REGISTERED_NATIVE_KINDS.contains(nativeKind)
                 && (("AWS".equals(normalizedProvider) && nativeKind.startsWith("AWS_"))
                 || ("AZURE".equals(normalizedProvider) && nativeKind.startsWith("AZURE_"))
-                || ("MICROSOFT_COPILOT".equals(normalizedProvider) && nativeKind.startsWith("MICROSOFT_COPILOT")));
+                || ("MICROSOFT_COPILOT".equals(normalizedProvider) && nativeKind.startsWith("MICROSOFT_COPILOT"))
+                || ("AI_BOM".equals(normalizedProvider) && nativeKind.startsWith("AI_BOM_")));
     }
 
     private Map<String, Object> map(Map<?, ?> source, int depth, String prefix, Limits limits, boolean topLevel) {

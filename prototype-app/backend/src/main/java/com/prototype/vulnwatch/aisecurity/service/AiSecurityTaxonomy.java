@@ -20,6 +20,9 @@ public final class AiSecurityTaxonomy {
     /** Explicit inventory categories. New categories must be added here deliberately. */
     public static final Set<String> EXPLICIT_ARTIFACT_TYPES = Set.of(
             "AI_AGENT", "AI_AGENT_VERSION", "AI_PROMPT", "AI_TOOL", "AI_COMPONENT", "AI_MODEL",
+            // A declared dataset is its own type: a training or reference corpus is not a
+            // model, and conflating them would misreport what an AI-BOM actually declared.
+            "AI_DATASET",
             "AI_GUARDRAIL", "MCP_GATEWAY", "MCP_TARGET", "MCP_SERVER", "KNOWLEDGE_BASE",
             "DATA_SOURCE", "DATA_STORE", "SEARCH_INDEX", "SUPPORTING_RESOURCE", "OTHER_AI_ARTIFACT");
 
