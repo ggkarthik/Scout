@@ -63,6 +63,8 @@ public class BomContributionBackfillService {
     private final BomAssetBackfillStateRepository backfillStateRepository;
     private final InventoryComponentRepository inventoryComponentRepository;
     private final BomContributionService contributionService;
+    private final com.prototype.vulnwatch.repo.BomComponentRepository bomComponentRepository;
+    private final BomComponentCategorizationService categorizationService;
     private final TenantService tenantService;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
     private final TransactionTemplate transactionTemplate;
@@ -126,7 +128,15 @@ public class BomContributionBackfillService {
             int sourcesCreated,
             int recordsAssigned,
             int contributionsCreated,
-            int componentsLeftUnattributed
+            int componentsLeftUnattributed,
+            /**
+             * Inventory components whose only BOM evidence is a non-software entry -- a model,
+             * dataset or cryptographic asset that predates type-aware ingestion and is still
+             * being correlated for CVEs. Reported, not corrected: retiring them closes live
+             * findings, and there is no close reason meaning "this was never software", so
+             * doing it silently would be the false remediation the reconciliation rules forbid.
+             */
+            int misclassifiedNonSoftwareComponents
     ) {
     }
 
@@ -167,7 +177,7 @@ public class BomContributionBackfillService {
     private AssetBackfillResult reconstruct(UUID tenantId, UUID assetId) {
         List<BomIngestionRecord> records = recordRepository.findByAssetId(assetId);
         if (records.isEmpty()) {
-            return new AssetBackfillResult(assetId, 0, 0, 0, 0);
+            return new AssetBackfillResult(assetId, 0, 0, 0, 0, 0);
         }
 
         Map<UUID, BomIngestionRecord> byId = new LinkedHashMap<>();
@@ -226,8 +236,16 @@ public class BomContributionBackfillService {
         if (!attributed.isEmpty()) {
             contributionService.recomputeEvidenceStates(assetId, attributed, Instant.now());
         }
+        int misclassified = countMisclassifiedNonSoftwareComponents(assetId, records);
+        if (misclassified > 0) {
+            log.warn("Asset {} has {} inventory component(s) whose only BOM evidence is a "
+                            + "non-software entry; these are still under CVE evaluation and need "
+                            + "a reviewed reclassification pass",
+                    assetId, misclassified);
+        }
         return new AssetBackfillResult(
-                assetId, sourcesCreated, recordsAssigned, contributionsCreated, unattributed);
+                assetId, sourcesCreated, recordsAssigned, contributionsCreated, unattributed,
+                misclassified);
     }
 
     private int rebuildContributions(
@@ -312,6 +330,53 @@ public class BomContributionBackfillService {
             }
         }
         return unattributed;
+    }
+
+    /**
+     * Counts inventory components that only ever had non-software BOM evidence.
+     *
+     * <p>Uses the type retained on bom_components, which survived even though the inventory
+     * path used to discard it. A component is only counted when no software-typed entry
+     * supports it, so anything an SBOM also reports as a library is left alone -- that is the
+     * "no independent software evidence" condition.
+     */
+    private int countMisclassifiedNonSoftwareComponents(UUID assetId, List<BomIngestionRecord> records) {
+        List<UUID> activeBomIds = records.stream()
+                .filter(record -> record.getStatus() == BomStatus.ACTIVE)
+                .map(BomIngestionRecord::getId)
+                .toList();
+        if (activeBomIds.isEmpty()) {
+            return 0;
+        }
+        Set<String> nonSoftwareKeys = new LinkedHashSet<>();
+        Set<String> softwareKeys = new LinkedHashSet<>();
+        for (com.prototype.vulnwatch.domain.BomComponent component
+                : bomComponentRepository.findByBomIdInAndActiveTrue(activeBomIds)) {
+            String key = nameVersionKey(component.getName(), component.getVersion());
+            if (categorizationService.entersSoftwareInventory(component.getComponentType())) {
+                softwareKeys.add(key);
+            } else {
+                nonSoftwareKeys.add(key);
+            }
+        }
+        if (nonSoftwareKeys.isEmpty()) {
+            return 0;
+        }
+        int misclassified = 0;
+        for (InventoryComponent component : inventoryComponentRepository.findByAssetId(assetId)) {
+            if (component.getComponentStatus() != InventoryComponentStatus.ACTIVE) {
+                continue;
+            }
+            String key = nameVersionKey(component.getPackageName(), component.getVersion());
+            if (nonSoftwareKeys.contains(key) && !softwareKeys.contains(key)) {
+                misclassified++;
+            }
+        }
+        return misclassified;
+    }
+
+    private static String nameVersionKey(String name, String version) {
+        return normalise(name) + "|" + normalise(version);
     }
 
     private static String identityKey(InventoryComponent component) {

@@ -43,6 +43,7 @@ class BomContributionBackfillServiceTest {
     private BomAssetBackfillStateRepository backfillStateRepository;
     private InventoryComponentRepository inventoryComponentRepository;
     private BomContributionService contributionService;
+    private com.prototype.vulnwatch.repo.BomComponentRepository bomComponentRepository;
     private BomContributionBackfillService service;
 
     private UUID tenantId;
@@ -56,11 +57,16 @@ class BomContributionBackfillServiceTest {
         backfillStateRepository = mock(BomAssetBackfillStateRepository.class);
         inventoryComponentRepository = mock(InventoryComponentRepository.class);
         contributionService = mock(BomContributionService.class);
+        bomComponentRepository = mock(com.prototype.vulnwatch.repo.BomComponentRepository.class);
         // The scheduled sweep's collaborators are not exercised here: these tests drive
         // backfillAsset directly, which is the unit that does the reconstruction.
+        // Argument order follows field declaration order, which is what
+        // @RequiredArgsConstructor generates.
         service = new BomContributionBackfillService(
                 recordRepository, sourceRepository, contributionRepository,
                 backfillStateRepository, inventoryComponentRepository, contributionService,
+                bomComponentRepository,
+                new BomComponentCategorizationService(),
                 mock(TenantService.class), mock(TenantSchemaExecutionService.class),
                 mock(org.springframework.transaction.support.TransactionTemplate.class));
         tenantId = UUID.randomUUID();
@@ -251,5 +257,63 @@ class BomContributionBackfillServiceTest {
         ArgumentCaptor<List<BomComponentContribution>> captor = ArgumentCaptor.forClass(List.class);
         verify(contributionRepository).saveAll(captor.capture());
         return captor;
+    }
+
+    private com.prototype.vulnwatch.domain.BomComponent bomComponent(
+            String name, String version, String componentType) {
+        com.prototype.vulnwatch.domain.BomComponent component =
+                new com.prototype.vulnwatch.domain.BomComponent();
+        component.setName(name);
+        component.setVersion(version);
+        component.setComponentType(componentType);
+        return component;
+    }
+
+    /**
+     * Components ingested before the inventory path knew about component types. The type
+     * survived on bom_components, so they can be identified and counted -- and they matter,
+     * because each one is a model or dataset still being correlated for CVEs.
+     */
+    @Test
+    void reportsInventoryComponentsWhoseOnlyBomEvidenceIsNonSoftware() {
+        UUID bomId = UUID.randomUUID();
+        BomIngestionRecord active = version(bomId, BomStatus.ACTIVE, null, null, UUID.randomUUID());
+        when(recordRepository.findByAssetId(assetId)).thenReturn(List.of(active));
+        when(bomComponentRepository.findByBomIdInAndActiveTrue(List.of(bomId))).thenReturn(List.of(
+                bomComponent("llama-3", "3.1", "machine-learning-model"),
+                bomComponent("transformers", "4.38.0", "library")));
+
+        InventoryComponent model = component(UUID.randomUUID(), InventoryComponentStatus.ACTIVE);
+        model.setPackageName("llama-3");
+        model.setVersion("3.1");
+        InventoryComponent library = component(UUID.randomUUID(), InventoryComponentStatus.ACTIVE);
+        library.setPackageName("transformers");
+        library.setVersion("4.38.0");
+        when(inventoryComponentRepository.findByAssetId(assetId)).thenReturn(List.of(model, library));
+
+        assertEquals(1, service.backfillAsset(tenantId, assetId).misclassifiedNonSoftwareComponents(),
+                "only the model counts; the library belongs in software inventory");
+    }
+
+    /**
+     * The "no independent software evidence" condition. A component an SBOM also reports as a
+     * library is legitimately software, whatever an AI-BOM calls it, so it must not be
+     * flagged for reclassification.
+     */
+    @Test
+    void aComponentAlsoReportedAsSoftwareIsNotFlagged() {
+        UUID bomId = UUID.randomUUID();
+        when(recordRepository.findByAssetId(assetId))
+                .thenReturn(List.of(version(bomId, BomStatus.ACTIVE, null, null, UUID.randomUUID())));
+        when(bomComponentRepository.findByBomIdInAndActiveTrue(List.of(bomId))).thenReturn(List.of(
+                bomComponent("torch", "2.1.0", "machine-learning-model"),
+                bomComponent("torch", "2.1.0", "library")));
+
+        InventoryComponent shared = component(UUID.randomUUID(), InventoryComponentStatus.ACTIVE);
+        shared.setPackageName("torch");
+        shared.setVersion("2.1.0");
+        when(inventoryComponentRepository.findByAssetId(assetId)).thenReturn(List.of(shared));
+
+        assertEquals(0, service.backfillAsset(tenantId, assetId).misclassifiedNonSoftwareComponents());
     }
 }
