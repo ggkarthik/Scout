@@ -44,6 +44,7 @@ class BomContributionBackfillServiceTest {
     private InventoryComponentRepository inventoryComponentRepository;
     private BomContributionService contributionService;
     private com.prototype.vulnwatch.repo.BomComponentRepository bomComponentRepository;
+    private com.prototype.vulnwatch.repo.FindingRepository findingRepository;
     private BomContributionBackfillService service;
 
     private UUID tenantId;
@@ -58,6 +59,7 @@ class BomContributionBackfillServiceTest {
         inventoryComponentRepository = mock(InventoryComponentRepository.class);
         contributionService = mock(BomContributionService.class);
         bomComponentRepository = mock(com.prototype.vulnwatch.repo.BomComponentRepository.class);
+        findingRepository = mock(com.prototype.vulnwatch.repo.FindingRepository.class);
         // The scheduled sweep's collaborators are not exercised here: these tests drive
         // backfillAsset directly, which is the unit that does the reconstruction.
         // Argument order follows field declaration order, which is what
@@ -67,6 +69,7 @@ class BomContributionBackfillServiceTest {
                 backfillStateRepository, inventoryComponentRepository, contributionService,
                 bomComponentRepository,
                 new BomComponentCategorizationService(),
+                findingRepository,
                 mock(TenantService.class), mock(TenantSchemaExecutionService.class),
                 mock(org.springframework.transaction.support.TransactionTemplate.class));
         tenantId = UUID.randomUUID();
@@ -315,5 +318,90 @@ class BomContributionBackfillServiceTest {
         when(inventoryComponentRepository.findByAssetId(assetId)).thenReturn(List.of(shared));
 
         assertEquals(0, service.backfillAsset(tenantId, assetId).misclassifiedNonSoftwareComponents());
+    }
+
+    private void assetIsBackfilled() {
+        BomAssetBackfillState state = new BomAssetBackfillState();
+        state.setState(BomBackfillState.BACKFILLED);
+        state.setBackfilledAt(java.time.Instant.now());
+        when(backfillStateRepository.findByAssetId(assetId)).thenReturn(Optional.of(state));
+    }
+
+    private InventoryComponent misclassifiedModelOnAsset() {
+        UUID bomId = UUID.randomUUID();
+        when(recordRepository.findByAssetId(assetId))
+                .thenReturn(List.of(version(bomId, BomStatus.ACTIVE, null, null, UUID.randomUUID())));
+        when(bomComponentRepository.findByBomIdInAndActiveTrue(List.of(bomId)))
+                .thenReturn(List.of(bomComponent("llama-3", "3.1", "machine-learning-model")));
+        InventoryComponent model = component(UUID.randomUUID(), InventoryComponentStatus.ACTIVE);
+        model.setPackageName("llama-3");
+        model.setVersion("3.1");
+        when(inventoryComponentRepository.findByAssetId(assetId)).thenReturn(List.of(model));
+        return model;
+    }
+
+    // The default. Reporting is safe; retiring inventory and closing findings is not something
+    // that should happen because a backfill ran.
+    @Test
+    void nothingIsRetiredUnlessTheCorrectionIsExplicitlyEnabled() {
+        assetIsBackfilled();
+        InventoryComponent model = misclassifiedModelOnAsset();
+
+        service.backfillAsset(tenantId, assetId);
+
+        assertEquals(InventoryComponentStatus.ACTIVE, model.getComponentStatus());
+        verify(findingRepository, never()).saveAll(any());
+    }
+
+    @Test
+    void whenEnabledAMisclassifiedComponentIsRetiredAndItsFindingClosedAsReclassified() {
+        ReflectionTestUtils.setField(service, "retireNonSoftware", true);
+        assetIsBackfilled();
+        InventoryComponent model = misclassifiedModelOnAsset();
+
+        com.prototype.vulnwatch.domain.Finding open = new com.prototype.vulnwatch.domain.Finding();
+        open.setStatus(com.prototype.vulnwatch.domain.FindingStatus.OPEN);
+        when(findingRepository.findByComponent_IdIn(List.of(model.getId()))).thenReturn(List.of(open));
+
+        service.backfillAsset(tenantId, assetId);
+
+        assertEquals(InventoryComponentStatus.RETIRED, model.getComponentStatus());
+        assertNotNull(model.getRetiredAt());
+        assertEquals(com.prototype.vulnwatch.domain.FindingStatus.AUTO_CLOSED, open.getStatus());
+        assertEquals(com.prototype.vulnwatch.domain.FindingCloseReason.AUTO_RECLASSIFIED_NOT_SOFTWARE,
+                open.getClosedReason(),
+                "a classification correction must not be recorded as remediation or as removal");
+        assertNotNull(open.getClosedAt());
+    }
+
+    // Before backfill, a component with no contribution rows is indistinguishable from one
+    // whose rows were never written, so nothing may be concluded about it.
+    @Test
+    void anAssetThatIsNotBackfilledIsNeverCorrectedEvenWhenEnabled() {
+        ReflectionTestUtils.setField(service, "retireNonSoftware", true);
+        when(backfillStateRepository.findByAssetId(assetId)).thenReturn(Optional.empty());
+        InventoryComponent model = misclassifiedModelOnAsset();
+
+        service.backfillAsset(tenantId, assetId);
+
+        assertEquals(InventoryComponentStatus.ACTIVE, model.getComponentStatus());
+    }
+
+    @Test
+    void alreadyClosedFindingsAreLeftUntouched() {
+        ReflectionTestUtils.setField(service, "retireNonSoftware", true);
+        assetIsBackfilled();
+        InventoryComponent model = misclassifiedModelOnAsset();
+
+        com.prototype.vulnwatch.domain.Finding resolved = new com.prototype.vulnwatch.domain.Finding();
+        resolved.setStatus(com.prototype.vulnwatch.domain.FindingStatus.RESOLVED);
+        java.time.Instant closedBefore = java.time.Instant.parse("2024-01-01T00:00:00Z");
+        resolved.setClosedAt(closedBefore);
+        when(findingRepository.findByComponent_IdIn(List.of(model.getId()))).thenReturn(List.of(resolved));
+
+        service.backfillAsset(tenantId, assetId);
+
+        assertEquals(com.prototype.vulnwatch.domain.FindingStatus.RESOLVED, resolved.getStatus());
+        assertEquals(closedBefore, resolved.getClosedAt(), "resolution history must survive");
     }
 }

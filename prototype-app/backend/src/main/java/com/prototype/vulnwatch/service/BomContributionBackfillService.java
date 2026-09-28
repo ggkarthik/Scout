@@ -65,12 +65,22 @@ public class BomContributionBackfillService {
     private final BomContributionService contributionService;
     private final com.prototype.vulnwatch.repo.BomComponentRepository bomComponentRepository;
     private final BomComponentCategorizationService categorizationService;
+    private final com.prototype.vulnwatch.repo.FindingRepository findingRepository;
     private final TenantService tenantService;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
     private final TransactionTemplate transactionTemplate;
 
     @Value("${app.bom.contribution-backfill.batch-size:25}")
     private int batchSize = 25;
+
+    /**
+     * Off by default, and that is the intended posture. Enabling it retires inventory rows and
+     * closes their findings, which is a one-way change to customer data driven by a heuristic
+     * over historical documents. It should be switched on deliberately, per environment, after
+     * reading the reported counts.
+     */
+    @Value("${app.bom.reclassification.retire-non-software:false}")
+    private boolean retireNonSoftware = false;
 
     private BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy =
             BackgroundTaskExecutionPolicy.allowAll();
@@ -242,6 +252,12 @@ public class BomContributionBackfillService {
                             + "non-software entry; these are still under CVE evaluation and need "
                             + "a reviewed reclassification pass",
                     assetId, misclassified);
+            if (retireNonSoftware) {
+                int corrected = retireNonSoftwareComponents(assetId, records);
+                log.warn("Reclassified {} component(s) on asset {} as not software and closed "
+                                + "their findings as AUTO_RECLASSIFIED_NOT_SOFTWARE",
+                        corrected, assetId);
+            }
         }
         return new AssetBackfillResult(
                 assetId, sourcesCreated, recordsAssigned, contributionsCreated, unattributed,
@@ -373,6 +389,83 @@ public class BomContributionBackfillService {
             }
         }
         return misclassified;
+    }
+
+    /**
+     * Retires components whose only BOM evidence is a non-software entry and closes their
+     * findings as a classification correction.
+     *
+     * <p>Findings are closed here rather than left to the ordinary removal sweep, which would
+     * label them AUTO_COMPONENT_REMOVED and so report a still-unremediated vulnerability as
+     * having gone away. Nothing was fixed; the subject was never software. Resolution
+     * timestamps of already-closed findings are left alone.
+     *
+     * <p>Gated on the asset being backfilled: before that, a component with no contribution
+     * rows is indistinguishable from one whose rows were never written.
+     */
+    private int retireNonSoftwareComponents(UUID assetId, List<BomIngestionRecord> records) {
+        boolean backfilled = backfillStateRepository.findByAssetId(assetId)
+                .map(BomAssetBackfillState::getState)
+                .filter(state -> state == BomBackfillState.BACKFILLED)
+                .isPresent();
+        if (!backfilled) {
+            return 0;
+        }
+        List<UUID> activeBomIds = records.stream()
+                .filter(record -> record.getStatus() == BomStatus.ACTIVE)
+                .map(BomIngestionRecord::getId)
+                .toList();
+        if (activeBomIds.isEmpty()) {
+            return 0;
+        }
+        Set<String> nonSoftwareKeys = new LinkedHashSet<>();
+        Set<String> softwareKeys = new LinkedHashSet<>();
+        for (com.prototype.vulnwatch.domain.BomComponent component
+                : bomComponentRepository.findByBomIdInAndActiveTrue(activeBomIds)) {
+            String key = nameVersionKey(component.getName(), component.getVersion());
+            if (categorizationService.entersSoftwareInventory(component.getComponentType())) {
+                softwareKeys.add(key);
+            } else {
+                nonSoftwareKeys.add(key);
+            }
+        }
+
+        Instant now = Instant.now();
+        List<InventoryComponent> toRetire = new ArrayList<>();
+        for (InventoryComponent component : inventoryComponentRepository.findByAssetId(assetId)) {
+            if (component.getComponentStatus() != InventoryComponentStatus.ACTIVE) {
+                continue;
+            }
+            String key = nameVersionKey(component.getPackageName(), component.getVersion());
+            if (nonSoftwareKeys.contains(key) && !softwareKeys.contains(key)) {
+                component.setComponentStatus(InventoryComponentStatus.RETIRED);
+                component.setRetiredAt(now);
+                toRetire.add(component);
+            }
+        }
+        if (toRetire.isEmpty()) {
+            return 0;
+        }
+        inventoryComponentRepository.saveAll(toRetire);
+
+        List<UUID> retiredIds = toRetire.stream().map(InventoryComponent::getId).toList();
+        List<com.prototype.vulnwatch.domain.Finding> toClose = new ArrayList<>();
+        for (com.prototype.vulnwatch.domain.Finding finding
+                : findingRepository.findByComponent_IdIn(retiredIds)) {
+            if (finding.getStatus() != com.prototype.vulnwatch.domain.FindingStatus.OPEN) {
+                continue;
+            }
+            finding.setStatus(com.prototype.vulnwatch.domain.FindingStatus.AUTO_CLOSED);
+            finding.setClosedReason(
+                    com.prototype.vulnwatch.domain.FindingCloseReason.AUTO_RECLASSIFIED_NOT_SOFTWARE);
+            finding.setClosedBy("bom-reclassification");
+            finding.setClosedAt(now);
+            toClose.add(finding);
+        }
+        if (!toClose.isEmpty()) {
+            findingRepository.saveAll(toClose);
+        }
+        return toRetire.size();
     }
 
     private static String nameVersionKey(String name, String version) {

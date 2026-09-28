@@ -73,6 +73,9 @@ class BomLifecycleAcceptancePostgresIntegrationTest {
     @Autowired
     private BomComponentContributionRepository contributionRepository;
 
+    @Autowired
+    private com.prototype.vulnwatch.repo.BomComponentRelationshipRepository relationshipRepository;
+
     private static byte[] cycloneDx(String... purls) {
         StringBuilder components = new StringBuilder();
         for (int i = 0; i < purls.length; i++) {
@@ -267,5 +270,68 @@ class BomLifecycleAcceptancePostgresIntegrationTest {
                 .map(InventoryComponent::getPurl)
                 .toList();
         assertEquals(List.of("pkg:npm/lodash@4.17.20"), purls);
+    }
+
+    /** A CycloneDX entry with no purl at all, described only by name and version. */
+    private static byte[] cycloneDxWithoutPurl(String name, String version) {
+        String document = "{\"bomFormat\":\"CycloneDX\",\"specVersion\":\"1.5\","
+                + "\"serialNumber\":\"urn:uuid:" + UUID.randomUUID() + "\",\"version\":1,"
+                + "\"components\":[{\"type\":\"library\",\"name\":\"" + name
+                + "\",\"version\":\"" + version + "\"}]}";
+        return document.getBytes(StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Plan: "PURL versus non-PURL descriptions may remain separate components and findings.
+     * The deduplication guarantee applies to the same resolved identity."
+     *
+     * <p>So this asserts the documented behaviour rather than asserting they merge. Identity
+     * resolution keys on the purl when one is present, and a document that omits it resolves
+     * to a different identity -- two components, not one. Pinning it down matters because the
+     * natural assumption is that name and version alone should match, and quietly "fixing"
+     * that would merge components a customer described differently on purpose.
+     */
+    @Test
+    void aComponentDescribedWithAndWithoutAPurlResolvesToSeparateIdentities() throws Exception {
+        Tenant tenant = tenantService.getDefaultTenant();
+        String asset = "acceptance-purl-divergence-" + SEQUENCE.incrementAndGet();
+
+        upload(tenant, BomType.SBOM, asset, cycloneDx("pkg:npm/lodash@4.17.20"));
+        upload(tenant, BomType.SBOM, asset, cycloneDxWithoutPurl("lodash", "4.17.20"));
+
+        List<InventoryComponent> components = activeComponents(asset);
+        assertEquals(2, components.size(),
+                "a purl-described and a coordinate-described component are separate resolved "
+                        + "identities, got " + components.stream().map(InventoryComponent::getPurl).toList());
+        assertTrue(components.stream().anyMatch(c -> "pkg:npm/lodash@4.17.20".equals(c.getPurl())));
+        assertTrue(components.stream().anyMatch(c -> c.getPurl() != null
+                        && !"pkg:npm/lodash@4.17.20".equals(c.getPurl())),
+                "the coordinate-only entry gets its own synthesised identity");
+    }
+
+    /**
+     * The document's declared structure survives ingestion, and a model-to-dataset edge stays
+     * a plain dependency. Recording it as training provenance would invent a claim the
+     * document never made, which policy would then act on.
+     */
+    @Test
+    void declaredDependencyEdgesAreRecordedWithoutInferringTrainingUsage() throws Exception {
+        Tenant tenant = tenantService.getDefaultTenant();
+        String asset = "acceptance-edges-" + SEQUENCE.incrementAndGet();
+        String document = "{\"bomFormat\":\"CycloneDX\",\"specVersion\":\"1.5\","
+                + "\"serialNumber\":\"urn:uuid:" + UUID.randomUUID() + "\",\"version\":1,"
+                + "\"components\":["
+                + "{\"type\":\"machine-learning-model\",\"bom-ref\":\"model\",\"name\":\"llama-3\",\"version\":\"3.1\",\"purl\":\"pkg:huggingface/llama-3@3.1\"},"
+                + "{\"type\":\"data\",\"bom-ref\":\"corpus\",\"name\":\"training-corpus\",\"version\":\"2024.1\",\"purl\":\"pkg:generic/training-corpus@2024.1\"}],"
+                + "\"dependencies\":[{\"ref\":\"model\",\"dependsOn\":[\"corpus\"]}]}";
+
+        upload(tenant, BomType.AI_BOM, asset, document.getBytes(StandardCharsets.UTF_8));
+
+        List<String> types = relationshipRepository.findAll().stream()
+                .map(com.prototype.vulnwatch.domain.BomComponentRelationship::getRelationshipType)
+                .toList();
+        assertTrue(types.contains("DEPENDS_ON"), "the declared edge must be recorded, got " + types);
+        assertTrue(types.stream().noneMatch(t -> t.contains("TRAIN") || t.contains("SERV")),
+                "no training or serving semantics may be invented, got " + types);
     }
 }

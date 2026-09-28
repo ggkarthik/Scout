@@ -15,5 +15,12 @@ public enum FindingCloseReason {
     AUTO_POLICY_PLATFORM_DEPRECATED,
     AUTO_POLICY_TENANT_DISABLED,
     AUTO_POLICY_VERSION_SUPERSEDED,
-    AUTO_SUPPRESSED_BY_RULE
+    AUTO_SUPPRESSED_BY_RULE,
+    /**
+     * The subject was reclassified as not software, so it was never eligible for software
+     * vulnerability evaluation. Deliberately distinct from AUTO_COMPONENT_REMOVED, which
+     * asserts the component went away, and from VERIFIED_REMEDIATION: nothing was fixed, and
+     * labelling a classification correction as remediation would misreport security posture.
+     */
+    AUTO_RECLASSIFIED_NOT_SOFTWARE
 }
