@@ -69,6 +69,7 @@ public class BomInventoryReadService {
     private final ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository;
     private final EolReleaseRepository eolReleaseRepository;
     private final FindingRepository findingRepository;
+    private final BomContributionService bomContributionService;
 
     public BomInventoryReadService(
             BomIngestionRecordRepository bomRecordRepository,
@@ -81,7 +82,8 @@ public class BomInventoryReadService {
             InventoryComponentRepository inventoryComponentRepository,
             ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository,
             EolReleaseRepository eolReleaseRepository,
-            FindingRepository findingRepository
+            FindingRepository findingRepository,
+            BomContributionService bomContributionService
     ) {
         this.bomRecordRepository = bomRecordRepository;
         this.bomComponentRepository = bomComponentRepository;
@@ -94,6 +96,7 @@ public class BomInventoryReadService {
         this.componentVulnerabilityStateRepository = componentVulnerabilityStateRepository;
         this.eolReleaseRepository = eolReleaseRepository;
         this.findingRepository = findingRepository;
+        this.bomContributionService = bomContributionService;
     }
 
     @Transactional(readOnly = true)
@@ -287,6 +290,10 @@ public class BomInventoryReadService {
                 .filter(r -> r.getTenant().getId().equals(tenant.getId()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOM record not found"));
         bomComponentRepository.softDeleteByBomId(bomId);
+        // Withdraw the evidence this document carried, without inferring that anything is
+        // absent. Finding status deliberately survives: deleting the document that reported a
+        // vulnerable component is not evidence the vulnerability was remediated.
+        bomContributionService.withdrawForDeletedDocument(record);
         record.setStatus(BomStatus.SUPERSEDED);
         bomRecordRepository.save(record);
     }

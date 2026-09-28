@@ -97,6 +97,7 @@ public class BomIngestionOrchestrator {
     private final CbomIngestionService cbomIngestionService;
     private final ObjectMapper objectMapper;
     private final BomSourceService bomSourceService;
+    private final BomContributionService bomContributionService;
 
     public BomIngestionOrchestrator(
             SbomEndpointFetchService sbomEndpointFetchService,
@@ -116,7 +117,8 @@ public class BomIngestionOrchestrator {
             CpeDimensionService cpeDimensionService,
             CbomIngestionService cbomIngestionService,
             ObjectMapper objectMapper,
-            BomSourceService bomSourceService
+            BomSourceService bomSourceService,
+            BomContributionService bomContributionService
     ) {
         this.sbomEndpointFetchService = sbomEndpointFetchService;
         this.sbomContentIngestionService = sbomContentIngestionService;
@@ -136,6 +138,7 @@ public class BomIngestionOrchestrator {
         this.cbomIngestionService = cbomIngestionService;
         this.objectMapper = objectMapper;
         this.bomSourceService = bomSourceService;
+        this.bomContributionService = bomContributionService;
     }
 
     @Transactional
@@ -819,6 +822,11 @@ public class BomIngestionOrchestrator {
             bomComponentWorkflowRepository.saveAll(workflows);
         }
         bomComponentRepository.saveAll(components);
+
+        // Record what this source now vouches for, and withdraw the claims it has stopped
+        // making. The inventory matches were already resolved above, so this costs no extra
+        // queries against the component set.
+        bomContributionService.syncContributions(record, inventoryMatchesByComponentId);
     }
 
     private List<InventoryComponent> resolveInventoryMatches(BomIngestionRecord record, Tenant tenant, BomComponent component) {

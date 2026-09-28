@@ -19,6 +19,9 @@ public interface BomComponentContributionRepository
 
     List<BomComponentContribution> findBySourceId(UUID sourceId);
 
+    /** Claims carried by one document version, for when that document is deleted. */
+    List<BomComponentContribution> findByBomId(UUID bomId);
+
     List<BomComponentContribution> findByInventoryComponentId(UUID inventoryComponentId);
 
     /**
