@@ -59,6 +59,12 @@ public record FindingResponse(
         String closedBy,
         FindingCloseReason closedReason,
         UUID closedRuleId,
-        java.util.Map<String, String> ownership
+        java.util.Map<String, String> ownership,
+        /**
+         * Declared AI-BOM resources (models/datasets) this finding transitively affects, per
+         * {@code ai_bom_resource_vulnerability_links}. Empty for the vast majority of findings;
+         * batch-loaded per page, never per-row.
+         */
+        java.util.List<AffectedAiResourceSummary> affectedAiResources
 ) {
 }

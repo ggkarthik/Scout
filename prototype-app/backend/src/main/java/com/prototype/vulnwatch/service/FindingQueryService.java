@@ -10,6 +10,7 @@ import com.prototype.vulnwatch.domain.FindingStatus;
 import com.prototype.vulnwatch.domain.InventoryComponent;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.domain.Vulnerability;
+import com.prototype.vulnwatch.dto.AffectedAiResourceSummary;
 import com.prototype.vulnwatch.dto.FindingsFilter;
 import com.prototype.vulnwatch.dto.FindingFilterValuesResponse;
 import com.prototype.vulnwatch.dto.FindingPageResponse;
@@ -41,6 +42,7 @@ public class FindingQueryService {
     private final RiskPolicyService riskPolicyService;
     private final TenantSchemaExecutionService tenantSchemaExecutionService;
     private final FindingListProjectionService findingListProjectionService;
+    private final AiBomAffectedResourceSummaryService affectedResourceSummaryService;
 
     public FindingQueryService(
             FindingRepository findingRepository,
@@ -48,7 +50,8 @@ public class FindingQueryService {
             FindingsScoreService findingsScoreService,
             RiskPolicyService riskPolicyService,
             TenantSchemaExecutionService tenantSchemaExecutionService,
-            FindingListProjectionService findingListProjectionService
+            FindingListProjectionService findingListProjectionService,
+            AiBomAffectedResourceSummaryService affectedResourceSummaryService
     ) {
         this.findingRepository = findingRepository;
         this.objectMapper = objectMapper;
@@ -56,6 +59,7 @@ public class FindingQueryService {
         this.riskPolicyService = riskPolicyService;
         this.tenantSchemaExecutionService = tenantSchemaExecutionService;
         this.findingListProjectionService = findingListProjectionService;
+        this.affectedResourceSummaryService = affectedResourceSummaryService;
     }
 
     public FindingPageResponse listByTenantPage(
@@ -70,8 +74,14 @@ public class FindingQueryService {
 
         Specification<Finding> specification = FindingFilterSpecifications.byFilter(tenant, filter);
         Page<Finding> findings = tenantSchemaExecutionService.run(tenant, () -> findingRepository.findAll(specification, pageable));
+        // Affected-resource summaries are loaded once for this already-paginated page, not
+        // per finding and never via a join into the specification above.
+        Map<UUID, List<AffectedAiResourceSummary>> affectedAiResourcesByFindingId =
+                affectedResourceSummaryService.summarize(findings.getContent().stream().map(Finding::getId).toList());
         return new FindingPageResponse(
-                findings.getContent().stream().map(this::toResponse).toList(),
+                findings.getContent().stream()
+                        .map(finding -> toResponse(finding, affectedAiResourcesByFindingId.get(finding.getId())))
+                        .toList(),
                 findings.getNumber(),
                 findings.getSize(),
                 findings.getTotalElements(),
@@ -92,10 +102,13 @@ public class FindingQueryService {
         Map<UUID, Finding> findingsById = tenantSchemaExecutionService.run(tenant, () -> findingRepository.findAllById(projectionPage.findingIds()))
                 .stream()
                 .collect(Collectors.toMap(Finding::getId, finding -> finding, (left, right) -> left, LinkedHashMap::new));
+        // Loaded once for this already-paginated page's ids, same as the offset-page path.
+        Map<UUID, List<AffectedAiResourceSummary>> affectedAiResourcesByFindingId =
+                affectedResourceSummaryService.summarize(projectionPage.findingIds());
         List<FindingResponse> items = projectionPage.findingIds().stream()
                 .map(findingsById::get)
                 .filter(Objects::nonNull)
-                .map(this::toResponse)
+                .map(finding -> toResponse(finding, affectedAiResourcesByFindingId.get(finding.getId())))
                 .toList();
         int totalPages = projectionPage.totalItems() == 0
                 ? 0
@@ -221,6 +234,10 @@ public class FindingQueryService {
     }
 
     public FindingResponse toResponse(Finding finding) {
+        return toResponse(finding, null);
+    }
+
+    public FindingResponse toResponse(Finding finding, List<AffectedAiResourceSummary> affectedAiResources) {
         Vulnerability vulnerability = finding.getVulnerability();
         InventoryComponent component = finding.getComponent();
         Asset asset = finding.getAsset() != null ? finding.getAsset() : component != null ? component.getAsset() : null;
@@ -287,7 +304,8 @@ public class FindingQueryService {
                 asset == null ? Map.of("displayName", "Unassigned") : Map.of(
                         "displayName", hasText(asset.getOwnerTeam()) ? asset.getOwnerTeam().trim()
                                 : hasText(asset.getOwnerEmail()) ? asset.getOwnerEmail().trim() : "Unassigned",
-                        "supportGroup", asset.getSupportGroup() == null ? "" : asset.getSupportGroup()));
+                        "supportGroup", asset.getSupportGroup() == null ? "" : asset.getSupportGroup()),
+                affectedAiResources == null ? List.of() : affectedAiResources);
     }
 
     private Double safeFindingsScore(String scoreConfig, Finding finding) {
