@@ -175,6 +175,21 @@ public class Finding {
     @Column(name = "incident_provider", length = 32)
     private String incidentProvider;
 
+    /**
+     * The finding status already reflected on the ticket.
+     *
+     * <p>This is the loop breaker for bidirectional sync. The push side only acts when
+     * {@link #status} differs from this value, and both directions write it: when a resolved
+     * ticket closes the finding, the pull side records the status here in the same
+     * transaction, so the push side does not immediately echo that same change back to the
+     * ticket that caused it.
+     */
+    @Column(name = "incident_pushed_status", length = 32)
+    private String incidentPushedStatus;
+
+    @Column(name = "incident_pushed_at")
+    private Instant incidentPushedAt;
+
     @Column
     private Instant firstObservedAt = Instant.now();
 
@@ -521,6 +536,22 @@ public class Finding {
 
     public void setIncidentProvider(String incidentProvider) {
         this.incidentProvider = incidentProvider;
+    }
+
+    public String getIncidentPushedStatus() {
+        return incidentPushedStatus;
+    }
+
+    public void setIncidentPushedStatus(String incidentPushedStatus) {
+        this.incidentPushedStatus = incidentPushedStatus;
+    }
+
+    public Instant getIncidentPushedAt() {
+        return incidentPushedAt;
+    }
+
+    public void setIncidentPushedAt(Instant incidentPushedAt) {
+        this.incidentPushedAt = incidentPushedAt;
     }
 
     public String getSeverityOverride() {

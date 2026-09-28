@@ -21,6 +21,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpEntity;
@@ -130,7 +131,7 @@ public class JiraTicketingProvider implements TicketingProvider {
     }
 
     @Override
-    public Optional<String> fetchStatus(Tenant tenant, String externalKey) {
+    public Optional<TicketStatus> fetchStatus(Tenant tenant, String externalKey) {
         if (externalKey == null || externalKey.isBlank()) {
             return Optional.empty();
         }
@@ -157,12 +158,248 @@ public class JiraTicketingProvider implements TicketingProvider {
                                     : new RuntimeException("Jira status fetch failed: "
                                             + context.error().getMessage(), context.error())));
             JsonNode status = parse(response, "Jira issue status fetch").path("fields").path("status");
-            return Optional.ofNullable(text(status.path("name")));
+            String label = text(status.path("name"));
+            if (label == null) {
+                return Optional.empty();
+            }
+            // statusCategory is Jira's stable notion of completion. Status *names* are freely
+            // renameable per workflow, so matching on them would misread any customised board.
+            boolean resolved = "done".equalsIgnoreCase(
+                    String.valueOf(text(status.path("statusCategory").path("key"))));
+            return Optional.of(new TicketStatus(label, resolved));
         } catch (RuntimeException ex) {
             // Leave the last known status in place rather than blanking it on a transient outage.
             log.warn("Failed to fetch Jira status for issue {}: {}", externalKey, ex.getMessage());
             return Optional.empty();
         }
+    }
+
+    @Override
+    public TicketRef createForCve(Tenant tenant, CveTicketRequest request) {
+        JiraRuntimeConfig config = requireConfig(tenant);
+        String body = serialize(buildCveCreatePayload(config, request));
+        HttpHeaders headers = JiraTicketingConfigService.authHeaders(config);
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        ResponseEntity<String> response = outboundHttpClient.exchange(
+                config.baseUrl() + "/rest/api/3/issue",
+                HttpMethod.POST,
+                new HttpEntity<>(body, headers),
+                String.class,
+                "Jira CVE issue creation",
+                outboundPolicyFactory.forProvider(JiraTicketingConfigService.PROVIDER_KEY, 0L, null, null),
+                context -> new OutboundFailureDecision<RuntimeException>(
+                        context.isRetryableByDefault(), context.retryAfterDelayMs(),
+                        context.error() instanceof RuntimeException rte ? rte
+                                : new RuntimeException("Jira CVE issue creation failed: "
+                                + context.error().getMessage(), context.error())));
+
+        JsonNode result = parse(response, "Jira CVE issue creation");
+        String issueKey = text(result.path("key"));
+        if (issueKey == null) {
+            throw new ResponseStatusException(BAD_GATEWAY,
+                    "Jira returned an unexpected response — issue key missing");
+        }
+        return new TicketRef(
+                TicketingSystem.JIRA, issueKey, text(result.path("id")),
+                config.baseUrl() + "/browse/" + issueKey, "Open",
+                "Issue " + issueKey + " created successfully in Jira");
+    }
+
+    /**
+     * Records the change as a comment and, for state changes, moves the issue through the
+     * project's workflow.
+     *
+     * <p>Jira has no direct "set status" call — an issue can only move along transitions its
+     * workflow defines. When no transition leads to the target category, the comment still
+     * lands and the push counts as applied: retrying forever would never find a transition and
+     * would repost the comment on every run.
+     */
+    @Override
+    public boolean pushFindingStatus(Tenant tenant, String externalKey, TicketPush push) {
+        if (externalKey == null || externalKey.isBlank() || push == null) {
+            return false;
+        }
+        Optional<JiraRuntimeConfig> configOpt = jiraTicketingConfigService.resolveRuntimeConfig(tenant);
+        if (configOpt.isEmpty() || !configOpt.get().enabled()) {
+            return false;
+        }
+        JiraRuntimeConfig config = configOpt.get();
+        String note = push.note() == null || push.note().isBlank() ? "Updated by Scout" : push.note();
+
+        if (!addComment(config, externalKey, note)) {
+            return false;
+        }
+        if (push.action() == TicketPush.Action.COMMENT) {
+            return true;
+        }
+        Optional<String> transitionId = findTransition(config, externalKey,
+                push.action() == TicketPush.Action.RESOLVE
+                        ? Set.of("done")
+                        : Set.of("new", "indeterminate"));
+        if (transitionId.isEmpty()) {
+            log.info("Jira issue {} has no workflow transition to {} — comment recorded instead",
+                    externalKey, push.action());
+            return true;
+        }
+        return applyTransition(config, externalKey, transitionId.get());
+    }
+
+    private boolean addComment(JiraRuntimeConfig config, String issueKey, String note) {
+        HttpHeaders headers = JiraTicketingConfigService.authHeaders(config);
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        String body = serialize(Map.of("body", adfDocument(note)));
+        try {
+            ResponseEntity<String> response = outboundHttpClient.exchange(
+                    config.baseUrl() + "/rest/api/3/issue/"
+                            + URLEncoder.encode(issueKey.trim(), StandardCharsets.UTF_8) + "/comment",
+                    HttpMethod.POST,
+                    new HttpEntity<>(body, headers),
+                    String.class,
+                    "Jira issue comment",
+                    outboundPolicyFactory.forProvider(JiraTicketingConfigService.PROVIDER_KEY, 0L, null, null),
+                    context -> new OutboundFailureDecision<RuntimeException>(
+                            context.isRetryableByDefault(), context.retryAfterDelayMs(),
+                            context.error() instanceof RuntimeException rte ? rte
+                                    : new RuntimeException("Jira comment failed: "
+                                    + context.error().getMessage(), context.error())));
+            return response.getStatusCode().is2xxSuccessful();
+        } catch (RuntimeException ex) {
+            log.warn("Failed to comment on Jira issue {}: {}", issueKey, ex.getMessage());
+            return false;
+        }
+    }
+
+    /** First available transition whose destination falls in one of the target categories. */
+    private Optional<String> findTransition(JiraRuntimeConfig config, String issueKey, Set<String> targetCategories) {
+        try {
+            ResponseEntity<String> response = outboundHttpClient.exchange(
+                    config.baseUrl() + "/rest/api/3/issue/"
+                            + URLEncoder.encode(issueKey.trim(), StandardCharsets.UTF_8) + "/transitions",
+                    HttpMethod.GET,
+                    new HttpEntity<Void>(JiraTicketingConfigService.authHeaders(config)),
+                    String.class,
+                    "Jira issue transitions",
+                    outboundPolicyFactory.forProvider(JiraTicketingConfigService.PROVIDER_KEY, 0L, null, null),
+                    context -> new OutboundFailureDecision<RuntimeException>(
+                            context.isRetryableByDefault(), context.retryAfterDelayMs(),
+                            context.error() instanceof RuntimeException rte ? rte
+                                    : new RuntimeException("Jira transition lookup failed: "
+                                    + context.error().getMessage(), context.error())));
+            JsonNode transitions = parse(response, "Jira issue transitions").path("transitions");
+            if (!transitions.isArray()) {
+                return Optional.empty();
+            }
+            for (JsonNode transition : transitions) {
+                String category = text(transition.path("to").path("statusCategory").path("key"));
+                if (category != null && targetCategories.contains(category.toLowerCase(Locale.ROOT))) {
+                    return Optional.ofNullable(text(transition.path("id")));
+                }
+            }
+        } catch (RuntimeException ex) {
+            log.warn("Failed to read transitions for Jira issue {}: {}", issueKey, ex.getMessage());
+        }
+        return Optional.empty();
+    }
+
+    private boolean applyTransition(JiraRuntimeConfig config, String issueKey, String transitionId) {
+        HttpHeaders headers = JiraTicketingConfigService.authHeaders(config);
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        String body = serialize(Map.of("transition", Map.of("id", transitionId)));
+        try {
+            ResponseEntity<String> response = outboundHttpClient.exchange(
+                    config.baseUrl() + "/rest/api/3/issue/"
+                            + URLEncoder.encode(issueKey.trim(), StandardCharsets.UTF_8) + "/transitions",
+                    HttpMethod.POST,
+                    new HttpEntity<>(body, headers),
+                    String.class,
+                    "Jira issue transition",
+                    outboundPolicyFactory.forProvider(JiraTicketingConfigService.PROVIDER_KEY, 0L, null, null),
+                    context -> new OutboundFailureDecision<RuntimeException>(
+                            context.isRetryableByDefault(), context.retryAfterDelayMs(),
+                            context.error() instanceof RuntimeException rte ? rte
+                                    : new RuntimeException("Jira transition failed: "
+                                    + context.error().getMessage(), context.error())));
+            return response.getStatusCode().is2xxSuccessful();
+        } catch (RuntimeException ex) {
+            log.warn("Failed to transition Jira issue {}: {}", issueKey, ex.getMessage());
+            return false;
+        }
+    }
+
+    private Map<String, Object> buildCveCreatePayload(JiraRuntimeConfig config, CveTicketRequest request) {
+        String severity = firstNonBlank(request.severity(), "MEDIUM");
+        Map<String, Object> fields = new LinkedHashMap<>();
+        fields.put("project", Map.of("key", config.projectKey()));
+        fields.put("summary", request.cveId() + ": remediate "
+                + request.safeAssets().size() + " affected asset(s)"
+                + (request.assignmentGroup() == null || request.assignmentGroup().isBlank()
+                        ? "" : " — " + request.assignmentGroup().trim()));
+        fields.put("description", adfDocument(buildCveDescription(request, severity)));
+        if (config.issueTypeId() != null) {
+            fields.put("issuetype", Map.of("id", config.issueTypeId()));
+        } else {
+            fields.put("issuetype", Map.of("name", config.issueTypeName()));
+        }
+        if (config.includePriority()) {
+            String priorityName = PRIORITY_NAMES.get(
+                    firstNonBlank(request.priority(), severity, "MEDIUM").toUpperCase(Locale.ROOT));
+            if (priorityName != null) {
+                fields.put("priority", Map.of("name", priorityName));
+            }
+        }
+        if (request.dueDate() != null && !request.dueDate().isBlank()) {
+            fields.put("duedate", request.dueDate().trim());
+        }
+        if (request.assignee() != null && !request.assignee().isBlank()) {
+            fields.put("assignee", Map.of("id", request.assignee().trim()));
+        }
+        List<String> labels = new ArrayList<>();
+        labels.add("scout");
+        labels.add(sanitizeLabel(request.cveId()));
+        if (config.defaultLabels() != null) {
+            for (String candidate : config.defaultLabels().split(",")) {
+                String label = sanitizeLabel(candidate);
+                if (!label.isEmpty() && !labels.contains(label)) {
+                    labels.add(label);
+                }
+            }
+        }
+        fields.put("labels", labels);
+        return Map.of("fields", fields);
+    }
+
+    private String buildCveDescription(CveTicketRequest request, String severity) {
+        StringBuilder text = new StringBuilder();
+        text.append("Scout correlated ").append(request.cveId()).append(" to this group's inventory.").append('\n');
+        text.append("Severity: ").append(severity).append('\n');
+        if (request.assignmentGroup() != null && !request.assignmentGroup().isBlank()) {
+            text.append("Assignment group: ").append(request.assignmentGroup().trim()).append('\n');
+        }
+        if (request.dueDate() != null && !request.dueDate().isBlank()) {
+            text.append("Remediation due: ").append(request.dueDate().trim()).append('\n');
+        }
+        if (!request.safeAssets().isEmpty()) {
+            text.append('\n').append("Affected assets:").append('\n');
+            for (TicketAsset asset : request.safeAssets()) {
+                text.append("- ").append(firstNonBlank(asset.assetName(), asset.assetIdentifier(), "unknown asset"));
+                String pkg = firstNonBlank(asset.packageName(), null);
+                if (pkg != null) {
+                    text.append(" — ").append(pkg);
+                    if (asset.packageVersion() != null && !asset.packageVersion().isBlank()) {
+                        text.append(' ').append(asset.packageVersion().trim());
+                    }
+                }
+                text.append('\n');
+            }
+        }
+        if (request.notes() != null && !request.notes().isBlank()) {
+            text.append('\n').append(request.notes().trim()).append('\n');
+        }
+        if (request.solutionInfo() != null && !request.solutionInfo().isBlank()) {
+            text.append('\n').append("Remediation guidance:").append('\n').append(request.solutionInfo().trim()).append('\n');
+        }
+        return text.toString();
     }
 
     private JiraRuntimeConfig requireConfig(Tenant tenant) {

@@ -117,8 +117,18 @@ class TicketingProviderRegistryTest {
         }
 
         @Override
-        public Optional<String> fetchStatus(Tenant tenant, String externalKey) {
+        public TicketRef createForCve(Tenant tenant, CveTicketRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Optional<TicketStatus> fetchStatus(Tenant tenant, String externalKey) {
             return Optional.empty();
+        }
+
+        @Override
+        public boolean pushFindingStatus(Tenant tenant, String externalKey, TicketPush push) {
+            throw new UnsupportedOperationException();
         }
     }
 }

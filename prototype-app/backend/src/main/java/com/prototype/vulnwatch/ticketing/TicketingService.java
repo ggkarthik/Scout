@@ -4,7 +4,11 @@ import com.prototype.vulnwatch.domain.Finding;
 import com.prototype.vulnwatch.domain.FindingStatus;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.repo.FindingRepository;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -27,6 +31,9 @@ import static org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE;
 public class TicketingService {
 
     private static final Logger log = LoggerFactory.getLogger(TicketingService.class);
+
+    /** Group key for assets that have neither an assignment group nor a package name. */
+    private static final String UNGROUPED_PACKAGE_KEY = "__ungrouped__";
 
     private final TicketingProviderRegistry registry;
     private final FindingRepository findingRepository;
@@ -60,6 +67,110 @@ public class TicketingService {
         return ref;
     }
 
+    /**
+     * Raises tickets for a CVE across the assets it affects, and links the matching findings.
+     *
+     * <p>Grouping is provider-neutral and lives here, so a provider only ever renders one
+     * ticket for one group:
+     * <ol>
+     *   <li>assets with a known assignment group are consolidated into one ticket per group;</li>
+     *   <li>assets without one are grouped by software package, each under the default group.</li>
+     * </ol>
+     *
+     * <p>Routing obeys the same precedence as single-finding ticketing, which is what makes the
+     * Jira override apply to the CVE workflow rather than only to findings.
+     */
+    @Transactional
+    public List<TicketRef> createTicketsForCve(Tenant tenant, String cveId, CveTicketRequest request) {
+        TicketingProvider provider = registry.activeProvider(tenant)
+                .orElseThrow(() -> new ResponseStatusException(SERVICE_UNAVAILABLE,
+                        "No ticketing system is configured for this tenant. Configure the Jira or "
+                                + "ServiceNow connector under Incident & Ticketing Tools first."));
+
+        List<TicketRef> refs = new ArrayList<>();
+        for (AssetGroup group : groupAssets(request.safeAssets())) {
+            CveTicketRequest groupRequest = new CveTicketRequest(
+                    cveId,
+                    group.assignmentGroup(),
+                    request.severity(),
+                    request.priority(),
+                    request.dueDate(),
+                    request.assignee(),
+                    request.notes(),
+                    request.solutionInfo(),
+                    group.assets());
+            TicketRef ref = provider.createForCve(tenant, groupRequest);
+            refs.add(ref);
+            linkFindingsForCve(cveId, group.assets(), ref);
+        }
+        return refs;
+    }
+
+    /**
+     * Partitions a CVE's assets the way the ServiceNow integration always has: by assignment
+     * group where one is known, otherwise by package. Preserves input order so ticket contents
+     * are stable across runs.
+     */
+    private List<AssetGroup> groupAssets(List<TicketAsset> assets) {
+        Map<String, List<TicketAsset>> byGroup = new LinkedHashMap<>();
+        Map<String, List<TicketAsset>> byPackage = new LinkedHashMap<>();
+        for (TicketAsset asset : assets) {
+            if (asset.assignmentGroup() != null && !asset.assignmentGroup().isBlank()) {
+                byGroup.computeIfAbsent(asset.assignmentGroup().trim(), ignored -> new ArrayList<>()).add(asset);
+            } else {
+                String key = asset.packageName() == null || asset.packageName().isBlank()
+                        ? UNGROUPED_PACKAGE_KEY
+                        : asset.packageName().trim();
+                byPackage.computeIfAbsent(key, ignored -> new ArrayList<>()).add(asset);
+            }
+        }
+        List<AssetGroup> groups = new ArrayList<>();
+        byGroup.forEach((group, groupAssets) -> groups.add(new AssetGroup(group, groupAssets)));
+        byPackage.forEach((ignored, packageAssets) -> groups.add(new AssetGroup(null, packageAssets)));
+        if (groups.isEmpty()) {
+            // A CVE with no correlated assets still warrants one ticket for the default group.
+            groups.add(new AssetGroup(null, List.of()));
+        }
+        return groups;
+    }
+
+    /**
+     * Links every finding for this CVE on the group's components to the new ticket.
+     *
+     * <p>Writes the same four fields as the single-finding path — id, status, provider and the
+     * push watermark — so a CVE-raised ticket is indistinguishable to the sync job from one
+     * raised on a finding.
+     */
+    private void linkFindingsForCve(String cveId, List<TicketAsset> assets, TicketRef ref) {
+        List<UUID> componentIds = assets.stream()
+                .map(TicketAsset::componentId)
+                .filter(id -> id != null && !id.isBlank())
+                .map(id -> {
+                    try {
+                        return UUID.fromString(id.trim());
+                    } catch (IllegalArgumentException ex) {
+                        return null;
+                    }
+                })
+                .filter(id -> id != null)
+                .toList();
+        if (componentIds.isEmpty()) {
+            return;
+        }
+        List<Finding> findings =
+                findingRepository.findByComponentIdInAndVulnerabilityCveId(componentIds, cveId);
+        for (Finding finding : findings) {
+            link(finding, ref);
+        }
+        if (!findings.isEmpty()) {
+            findingRepository.saveAll(findings);
+            log.info("Linked {} finding(s) for {} to {} ticket {}",
+                    findings.size(), cveId, ref.system().key(), ref.externalKey());
+        }
+    }
+
+    private record AssetGroup(String assignmentGroup, List<TicketAsset> assets) {}
+
     /** Where new tickets will go, and which configured systems are outranked. */
     @Transactional(readOnly = true)
     public TicketingStatus status(Tenant tenant) {
@@ -90,6 +201,10 @@ public class TicketingService {
         finding.setIncidentId(ref.externalKey());
         finding.setIncidentStatus(ref.status());
         finding.setIncidentProvider(ref.system().key());
+        // Seed the watermark: the ticket was just created from this finding's current status,
+        // so there is nothing for the push side to reflect yet.
+        finding.setIncidentPushedStatus(finding.getStatus() == null ? null : finding.getStatus().name());
+        finding.setIncidentPushedAt(Instant.now());
         finding.touch();
     }
 

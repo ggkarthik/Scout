@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import com.prototype.vulnwatch.domain.Finding;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.repo.FindingRepository;
+import com.prototype.vulnwatch.ticketing.TicketStatus;
 import com.prototype.vulnwatch.ticketing.TicketingProvider;
 import com.prototype.vulnwatch.ticketing.TicketingProviderRegistry;
 import com.prototype.vulnwatch.ticketing.TicketingService;
@@ -30,6 +31,7 @@ class FindingIncidentSyncServiceProviderRoutingTest {
     private final FindingRepository findings = mock(FindingRepository.class);
     private final Tenant tenant = mock(Tenant.class);
     private final TenantWorkRunner tenantWorkRunner = mock(TenantWorkRunner.class);
+    private final FindingWorkflowService findingWorkflowService = mock(FindingWorkflowService.class);
 
     @Test
     void pollsEachTicketAgainstTheSystemThatRaisedIt() {
@@ -42,9 +44,9 @@ class FindingIncidentSyncServiceProviderRoutingTest {
 
         TicketingProvider jira = provider(TicketingSystem.JIRA);
         TicketingProvider serviceNow = provider(TicketingSystem.SERVICENOW);
-        when(jira.fetchStatus(tenant, "SEC-42")).thenReturn(Optional.of("In Progress"));
-        when(serviceNow.fetchStatus(tenant, "INC0010005")).thenReturn(Optional.of("Resolved"));
-        when(serviceNow.fetchStatus(tenant, "INC0000001")).thenReturn(Optional.of("Closed"));
+        when(jira.fetchStatus(tenant, "SEC-42")).thenReturn(Optional.of(new TicketStatus("In Progress", false)));
+        when(serviceNow.fetchStatus(tenant, "INC0010005")).thenReturn(Optional.of(new TicketStatus("Resolved", false)));
+        when(serviceNow.fetchStatus(tenant, "INC0000001")).thenReturn(Optional.of(new TicketStatus("Closed", false)));
 
         FindingIncidentSyncService.SyncResult result = runSync(jira, serviceNow);
 
@@ -85,7 +87,7 @@ class FindingIncidentSyncServiceProviderRoutingTest {
         TicketingProvider jira = provider(TicketingSystem.JIRA);
         TicketingProvider serviceNow = provider(TicketingSystem.SERVICENOW);
         when(jira.fetchStatus(tenant, "SEC-42")).thenThrow(new RuntimeException("connection reset"));
-        when(serviceNow.fetchStatus(tenant, "INC0010005")).thenReturn(Optional.of("Resolved"));
+        when(serviceNow.fetchStatus(tenant, "INC0010005")).thenReturn(Optional.of(new TicketStatus("Resolved", false)));
 
         FindingIncidentSyncService.SyncResult result = runSync(jira, serviceNow);
 
@@ -111,7 +113,7 @@ class FindingIncidentSyncServiceProviderRoutingTest {
         when(findings.findAllWithIncidentId()).thenReturn(List.of(finding));
 
         TicketingProvider jira = provider(TicketingSystem.JIRA);
-        when(jira.fetchStatus(tenant, "SEC-42")).thenReturn(Optional.of("In Progress"));
+        when(jira.fetchStatus(tenant, "SEC-42")).thenReturn(Optional.of(new TicketStatus("In Progress", false)));
 
         FindingIncidentSyncService.SyncResult result = runSync(jira);
 
@@ -124,7 +126,8 @@ class FindingIncidentSyncServiceProviderRoutingTest {
         TicketingProviderRegistry registry = new TicketingProviderRegistry(List.of(providers));
         TicketingService ticketingService = new TicketingService(registry, findings);
         FindingIncidentSyncService service =
-                new FindingIncidentSyncService(findings, registry, ticketingService, tenantWorkRunner);
+                new FindingIncidentSyncService(findings, registry, ticketingService,
+                        findingWorkflowService, tenantWorkRunner);
 
         doAnswer(invocation -> {
             invocation.getArgument(0, Consumer.class).accept(tenant);

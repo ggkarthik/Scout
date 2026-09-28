@@ -20,6 +20,7 @@ import com.prototype.vulnwatch.domain.JiraAuthType;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.service.JiraTicketingConfigService;
 import com.prototype.vulnwatch.service.JiraTicketingConfigService.JiraRuntimeConfig;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -157,11 +158,27 @@ class JiraTicketingProviderTest {
     @Test
     void readsTheWorkflowStatusName() throws Exception {
         givenConfig(config(true, null, "Task", null));
-        when(outbound.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(String.class),
-                anyString(), any(), any()))
-                .thenReturn(ResponseEntity.ok("{\"fields\":{\"status\":{\"name\":\"In Progress\"}}}"));
+        givenStatusResponse("In Progress", "indeterminate");
 
-        assertEquals("In Progress", provider.fetchStatus(tenant, "SEC-42").orElseThrow());
+        TicketStatus status = provider.fetchStatus(tenant, "SEC-42").orElseThrow();
+
+        assertEquals("In Progress", status.label());
+        assertFalse(status.resolved());
+    }
+
+    /**
+     * Jira status names are renameable per workflow, so completion has to come from the stable
+     * statusCategory. A board that calls its final column "Shipped" must still read as resolved.
+     */
+    @Test
+    void treatsTheDoneStatusCategoryAsResolvedWhateverTheColumnIsCalled() throws Exception {
+        givenConfig(config(true, null, "Task", null));
+        givenStatusResponse("Shipped", "done");
+
+        TicketStatus status = provider.fetchStatus(tenant, "SEC-42").orElseThrow();
+
+        assertEquals("Shipped", status.label());
+        assertTrue(status.resolved());
     }
 
     /** A transient outage must leave the last known status in place, not blank it. */
@@ -205,6 +222,13 @@ class JiraTicketingProviderTest {
         return (ArgumentCaptor<HttpEntity<?>>) (ArgumentCaptor<?>) ArgumentCaptor.forClass(HttpEntity.class);
     }
 
+    private void givenStatusResponse(String name, String categoryKey) throws Exception {
+        when(outbound.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(String.class),
+                anyString(), any(), any()))
+                .thenReturn(ResponseEntity.ok("{\"fields\":{\"status\":{\"name\":\"" + name
+                        + "\",\"statusCategory\":{\"key\":\"" + categoryKey + "\"}}}}"));
+    }
+
     private void givenConfig(JiraRuntimeConfig config) {
         when(configs.resolveRuntimeConfig(tenant)).thenReturn(Optional.of(config));
     }
@@ -212,6 +236,96 @@ class JiraTicketingProviderTest {
     private void givenCreateResponse(String body) throws Exception {
         when(outbound.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class),
                 anyString(), any(), any())).thenReturn(ResponseEntity.ok(body));
+    }
+
+    @Test
+    void createsOneCveIssueCoveringTheGroupsAssets() throws Exception {
+        givenConfig(config(true, null, "Task", null));
+        givenCreateResponse("{\"id\":\"10050\",\"key\":\"SEC-50\"}");
+
+        TicketRef ref = provider.createForCve(tenant, new CveTicketRequest(
+                "CVE-2026-1234", "Platform Team", "HIGH", "HIGH", "2026-10-01", null, null, null,
+                List.of(new TicketAsset("c1", "web-01", "sys-1", "HOST", "openssl", "1.1.1", "Platform Team"))));
+
+        assertEquals("SEC-50", ref.externalKey());
+        assertEquals("https://acme.atlassian.net/browse/SEC-50", ref.url());
+    }
+
+    @Test
+    void cveIssueNamesTheCveAndListsTheAffectedAssets() throws Exception {
+        givenConfig(config(true, null, "Task", null));
+        givenCreateResponse("{\"id\":\"1\",\"key\":\"SEC-1\"}");
+
+        provider.createForCve(tenant, new CveTicketRequest(
+                "CVE-2026-1234", "Platform Team", "HIGH", null, null, null, null, null,
+                List.of(new TicketAsset("c1", "web-01", "sys-1", "HOST", "openssl", "1.1.1", "Platform Team"))));
+
+        ArgumentCaptor<HttpEntity<?>> captor = captor();
+        org.mockito.Mockito.verify(outbound).exchange(anyString(), eq(HttpMethod.POST), captor.capture(),
+                eq(String.class), anyString(), any(), any());
+        String body = String.valueOf(captor.getValue().getBody());
+
+        assertTrue(body.contains("CVE-2026-1234"), body);
+        assertTrue(body.contains("web-01"), body);
+        assertTrue(body.contains("openssl"), body);
+    }
+
+    /** Jira cannot be told to "set status" — resolution has to travel a workflow transition. */
+    @Test
+    void resolvesByTakingTheTransitionIntoTheDoneCategory() throws Exception {
+        givenConfig(config(true, null, "Task", null));
+        when(outbound.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(String.class),
+                anyString(), any(), any()))
+                .thenReturn(ResponseEntity.ok("{\"transitions\":["
+                        + "{\"id\":\"11\",\"to\":{\"statusCategory\":{\"key\":\"indeterminate\"}}},"
+                        + "{\"id\":\"31\",\"to\":{\"statusCategory\":{\"key\":\"done\"}}}]}"));
+        when(outbound.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class),
+                anyString(), any(), any())).thenReturn(ResponseEntity.ok("{}"));
+
+        assertTrue(provider.pushFindingStatus(tenant, "SEC-42", TicketPush.resolve("remediated")));
+
+        ArgumentCaptor<HttpEntity<?>> captor = captor();
+        org.mockito.Mockito.verify(outbound, org.mockito.Mockito.atLeastOnce())
+                .exchange(anyString(), eq(HttpMethod.POST), captor.capture(), eq(String.class),
+                        anyString(), any(), any());
+        assertTrue(captor.getAllValues().stream()
+                        .anyMatch(entity -> String.valueOf(entity.getBody()).contains("\"id\":\"31\"")),
+                "expected the done-category transition to be applied");
+    }
+
+    /**
+     * A workflow with no route to done must not wedge the sync into retrying forever, so the
+     * note still lands and the push counts as applied.
+     */
+    @Test
+    void recordsACommentWhenNoTransitionReachesDone() throws Exception {
+        givenConfig(config(true, null, "Task", null));
+        when(outbound.exchange(anyString(), eq(HttpMethod.GET), any(HttpEntity.class), eq(String.class),
+                anyString(), any(), any()))
+                .thenReturn(ResponseEntity.ok("{\"transitions\":["
+                        + "{\"id\":\"11\",\"to\":{\"statusCategory\":{\"key\":\"indeterminate\"}}}]}"));
+        when(outbound.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class),
+                anyString(), any(), any())).thenReturn(ResponseEntity.ok("{}"));
+
+        assertTrue(provider.pushFindingStatus(tenant, "SEC-42", TicketPush.resolve("remediated")));
+    }
+
+    @Test
+    void reportsFailureWhenTheCommentCannotBePosted() throws Exception {
+        givenConfig(config(true, null, "Task", null));
+        when(outbound.exchange(anyString(), eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class),
+                anyString(), any(), any())).thenThrow(new RuntimeException("connection reset"));
+
+        assertFalse(provider.pushFindingStatus(tenant, "SEC-42", TicketPush.comment("note")));
+    }
+
+    @Test
+    void refusesToPushWhenTheConnectorIsDisabled() {
+        when(configs.resolveRuntimeConfig(tenant)).thenReturn(Optional.of(new JiraRuntimeConfig(
+                "https://acme.atlassian.net", JiraAuthType.BASIC, "bot@acme.test", "token",
+                "SEC", null, "Task", null, true, false)));
+
+        assertFalse(provider.pushFindingStatus(tenant, "SEC-42", TicketPush.resolve("remediated")));
     }
 
     private static JiraRuntimeConfig config(boolean includePriority, String issueTypeId,
