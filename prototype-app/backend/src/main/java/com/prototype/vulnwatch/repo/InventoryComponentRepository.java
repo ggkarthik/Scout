@@ -88,6 +88,8 @@ public interface InventoryComponentRepository extends JpaRepository<InventoryCom
 
     List<InventoryComponent> findByAssetId(UUID assetId);
 
+    long countByIdInAndComponentStatus(Collection<UUID> ids, InventoryComponentStatus status);
+
     /**
      * Components credited to one uploaded document. This is the only link back from an
      * inventory component to the BOM that produced it, and it is single-valued: re-ingesting
