@@ -413,7 +413,8 @@ public class BomInventoryReadService {
                     toApplicationRiskLevel(score),
                     findingCount,
                     criticalFindingCount,
-                    highFindingCount
+                    highFindingCount,
+                    c.getBomEvidenceState() == null ? null : c.getBomEvidenceState().name()
             ));
         });
 
@@ -464,7 +465,11 @@ public class BomInventoryReadService {
                     vulnerabilityCount > 0 ? "HIGH" : "NONE",
                     workflowCountByComponent.getOrDefault(component.getId(), 0),
                     0,
-                    0
+                    0,
+                    // A BOM component that resolved to no inventory component has no evidence
+                    // state: the state describes a component's presence, and this row is a
+                    // document entry that was never mapped to one.
+                    null
             ));
         });
 

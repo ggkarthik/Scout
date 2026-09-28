@@ -23,5 +23,10 @@ public record BomComponentSummaryResponse(
         String riskLevel,
         int findingCount,
         int criticalFindingCount,
-        int highFindingCount
+        int highFindingCount,
+        // What BOM evidence says about this component's presence: SUPPORTED, CONFLICTING,
+        // WITHDRAWN or LEGACY_UNKNOWN. Distinct from its ACTIVE/RETIRED status, which is
+        // presence itself. CONFLICTING in particular needs a human to adjudicate, so it has
+        // to be visible.
+        String bomEvidenceState
 ) {}

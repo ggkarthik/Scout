@@ -15,6 +15,7 @@ function buildComponent(overrides: Partial<BomComponentSummaryItem> = {}): BomCo
     assetId: 'asset-1',
     assetName: 'kanra-mobile',
     bomTypes: ['SBOM'],
+    bomEvidenceState: 'SUPPORTED',
     isEol: false,
     eolDate: null,
     criticalCveCount: 0,

@@ -14,11 +14,13 @@ import com.prototype.vulnwatch.dto.BomFetchRequest;
 import com.prototype.vulnwatch.dto.BomIngestionResultResponse;
 import com.prototype.vulnwatch.dto.BomInventoryItemResponse;
 import com.prototype.vulnwatch.dto.BomLineageItemResponse;
+import com.prototype.vulnwatch.dto.BomSourceResponse;
 import com.prototype.vulnwatch.dto.BomSourceSelector;
 import com.prototype.vulnwatch.dto.BomSupportMatrixResponse;
 import com.prototype.vulnwatch.dto.IngestionJobAcceptedResponse;
 import com.prototype.vulnwatch.service.BomIngestionOrchestrator;
 import com.prototype.vulnwatch.service.BomInventoryReadService;
+import com.prototype.vulnwatch.service.BomSourceReadService;
 import com.prototype.vulnwatch.service.IngestionJobService;
 import com.prototype.vulnwatch.service.RequestActor;
 import com.prototype.vulnwatch.service.RequestActorService;
@@ -50,19 +52,22 @@ public class BomController {
     private final BomInventoryReadService bomInventoryReadService;
     private final IngestionJobService ingestionJobService;
     private final RequestActorService requestActorService;
+    private final BomSourceReadService bomSourceReadService;
 
     public BomController(
             WorkspaceService workspaceService,
             BomIngestionOrchestrator bomIngestionOrchestrator,
             BomInventoryReadService bomInventoryReadService,
             IngestionJobService ingestionJobService,
-            RequestActorService requestActorService
+            RequestActorService requestActorService,
+            BomSourceReadService bomSourceReadService
     ) {
         this.workspaceService = workspaceService;
         this.bomIngestionOrchestrator = bomIngestionOrchestrator;
         this.bomInventoryReadService = bomInventoryReadService;
         this.ingestionJobService = ingestionJobService;
         this.requestActorService = requestActorService;
+        this.bomSourceReadService = bomSourceReadService;
     }
 
     /**
@@ -125,6 +130,22 @@ public class BomController {
                 tenant, bomType, assetType, assetName, assetIdentifier,
                 supplier, file.getBytes(), file.getOriginalFilename(), selector
         );
+    }
+
+    /**
+     * GET /api/bom/sources
+     * Logical BOM sources, optionally for one asset.
+     *
+     * <p>Replacement is explicit now, so a client that wants to replace a source has to be
+     * able to discover which sources exist and what each currently claims.
+     */
+    @GetMapping("/sources")
+    @PreAuthorize("hasAnyRole('SECURITY_ANALYST','INVENTORY_ADMIN','TENANT_ADMIN','CREATOR','OPERATOR')")
+    public List<BomSourceResponse> listBomSources(
+            @RequestParam(required = false) UUID assetId
+    ) {
+        Tenant tenant = workspaceService.getWorkspace();
+        return bomSourceReadService.listSources(tenant, assetId);
     }
 
     /**

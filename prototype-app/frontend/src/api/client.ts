@@ -261,6 +261,30 @@ export type BomComponentSummaryItem = {
   findingCount: number;
   criticalFindingCount: number;
   highFindingCount: number;
+  // What BOM evidence says about the component's presence, as opposed to its ACTIVE/RETIRED
+  // status. CONFLICTING means one source asserts it is gone while another still reports it,
+  // which needs a human to adjudicate. Null for a BOM entry that mapped to no component.
+  bomEvidenceState: 'SUPPORTED' | 'CONFLICTING' | 'WITHDRAWN' | 'LEGACY_UNKNOWN' | null;
+};
+
+/** A logical BOM source: the thing a replacement upload names. */
+export type BomSource = {
+  id: string;
+  assetId: string | null;
+  bomType: string;
+  supplier: string | null;
+  sourceKey: string | null;
+  sourceReference: string | null;
+  currentBomId: string | null;
+  revision: number;
+  completeness: 'PARTIAL' | 'COMPLETE_ASSET_SOFTWARE';
+  state: 'ACTIVE' | 'HELD_ENTITLEMENT' | 'DEFERRED';
+  createdAt: string | null;
+  updatedAt: string | null;
+  supportedComponentCount: number;
+  withdrawnComponentCount: number;
+  latestAssertionBy: string | null;
+  latestAssertionAt: string | null;
 };
 
 export type ApplicationCveItem = {
@@ -2125,6 +2149,8 @@ export const api = {
     if (!response.ok) throw await parseApiError(response);
     return response.json() as Promise<BomIngestionResult>;
   },
+  listBomSources: (assetId?: string) =>
+    request<BomSource[]>(`/bom/sources${assetId ? `?assetId=${encodeURIComponent(assetId)}` : ''}`),
   getApplicationRisk: () =>
     request<ApplicationRiskSummary[]>('/bom/application-risk'),
   listBomComponents: (page = 0, size = 2000) =>
