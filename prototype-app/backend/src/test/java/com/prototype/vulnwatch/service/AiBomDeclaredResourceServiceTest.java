@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -30,6 +31,7 @@ class AiBomDeclaredResourceServiceTest {
 
     private AiBomDeclaredResourceRepository repository;
     private AiSecurityMetadataSanitizer metadataSanitizer;
+    private AiBomDeploymentLinkingService deploymentLinkingService;
     private AiBomDeclaredResourceService service;
 
     private Tenant tenant;
@@ -42,10 +44,11 @@ class AiBomDeclaredResourceServiceTest {
         metadataSanitizer = mock(AiSecurityMetadataSanitizer.class);
         when(metadataSanitizer.sanitize(any(), any(), any()))
                 .thenReturn(new AiSecurityMetadataSanitizer.Result(java.util.Map.of(), List.of()));
+        deploymentLinkingService = mock(AiBomDeploymentLinkingService.class);
 
         service = new AiBomDeclaredResourceService(
                 repository, new AiBomDeclaredResourceIdentityResolver(new ObjectMapper()),
-                metadataSanitizer, new ObjectMapper());
+                metadataSanitizer, new ObjectMapper(), deploymentLinkingService);
 
         tenant = new Tenant();
         tenant.setId(UUID.randomUUID());
@@ -125,6 +128,30 @@ class AiBomDeclaredResourceServiceTest {
                 "a re-upload must never be able to undo a reviewed/matched link");
         assertEquals(originalFirstDeclared, saved.getFirstDeclaredAt());
         assertNotNull(saved.getLastDeclaredAt());
+        verifyNoInteractions(deploymentLinkingService);
+    }
+
+    @Test
+    void aNewUnverifiedDeclarationIsOfferedToTheDeploymentLinker() {
+        when(repository.findBySourceIdAndIdentityValue(any(), any())).thenReturn(Optional.empty());
+
+        service.recordDeclarations(record, source, tenant, List.of(modelComponent()));
+
+        verify(deploymentLinkingService).attemptLink(eq(tenant), any(AiBomDeclaredResource.class));
+    }
+
+    @Test
+    void anAmbiguousDeclarationIsReofferedToTheDeploymentLinkerOnRefresh() {
+        AiBomDeclaredResource existing = new AiBomDeclaredResource();
+        existing.setId(UUID.randomUUID());
+        existing.setDeploymentState(AiBomDeploymentState.AMBIGUOUS);
+        existing.setFirstDeclaredAt(java.time.Instant.now().minusSeconds(3600));
+        existing.setLastDeclaredAt(java.time.Instant.now().minusSeconds(3600));
+        when(repository.findBySourceIdAndIdentityValue(any(), any())).thenReturn(Optional.of(existing));
+
+        service.recordDeclarations(record, source, tenant, List.of(modelComponent()));
+
+        verify(deploymentLinkingService).attemptLink(eq(tenant), any(AiBomDeclaredResource.class));
     }
 
     @Test
@@ -154,7 +181,7 @@ class AiBomDeclaredResourceServiceTest {
     void withTheRealSanitizerTheComponentsBomFieldsAreActuallyStored() {
         AiBomDeclaredResourceService realService = new AiBomDeclaredResourceService(
                 repository, new AiBomDeclaredResourceIdentityResolver(new ObjectMapper()),
-                new AiSecurityMetadataSanitizer(), new ObjectMapper());
+                new AiSecurityMetadataSanitizer(), new ObjectMapper(), deploymentLinkingService);
         when(repository.findBySourceIdAndIdentityValue(any(), any())).thenReturn(Optional.empty());
 
         BomComponent model = modelComponent();

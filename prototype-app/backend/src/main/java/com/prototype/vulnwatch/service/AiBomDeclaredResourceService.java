@@ -32,16 +32,19 @@ public class AiBomDeclaredResourceService {
     private final AiBomDeclaredResourceIdentityResolver identityResolver;
     private final AiSecurityMetadataSanitizer metadataSanitizer;
     private final ObjectMapper objectMapper;
+    private final AiBomDeploymentLinkingService deploymentLinkingService;
 
     public AiBomDeclaredResourceService(
             AiBomDeclaredResourceRepository repository,
             AiBomDeclaredResourceIdentityResolver identityResolver,
             AiSecurityMetadataSanitizer metadataSanitizer,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            AiBomDeploymentLinkingService deploymentLinkingService) {
         this.repository = repository;
         this.identityResolver = identityResolver;
         this.metadataSanitizer = metadataSanitizer;
         this.objectMapper = objectMapper;
+        this.deploymentLinkingService = deploymentLinkingService;
     }
 
     /**
@@ -89,6 +92,14 @@ public class AiBomDeclaredResourceService {
             declared.setFirstDeclaredAt(now);
             declared.setDeploymentState(AiBomDeploymentState.UNVERIFIED);
         }
+
+        // A declaration is never re-evaluated once it's LINKED -- whether matched here or
+        // reviewed by a person -- so a later re-upload can never undo it.
+        if (declared.getDeploymentState() == AiBomDeploymentState.UNVERIFIED
+                || declared.getDeploymentState() == AiBomDeploymentState.AMBIGUOUS) {
+            deploymentLinkingService.attemptLink(tenant, declared);
+        }
+
         repository.save(declared);
     }
 
