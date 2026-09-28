@@ -24,6 +24,9 @@ import { BomManagementPage } from './BomManagementPage';
 import { AiSecurityConnectorPage } from './AiSecurityConnectorPage';
 import { AiSecurityAzureConnectorPage } from './AiSecurityAzureConnectorPage';
 import { CopilotStudioConnectorPage } from './CopilotStudioConnectorPage';
+import { SccmPatchConnectorPage } from './SccmPatchConnectorPage';
+import { BigFixPatchConnectorPage } from './BigFixPatchConnectorPage';
+import { TaniumPatchConnectorPage } from './TaniumPatchConnectorPage';
 import { canUseEntitlement } from '../features/auth/entitlements';
 
 type ConnectorId =
@@ -45,7 +48,10 @@ type ConnectorId =
   | 'advisory-feed'
   | 'endoflife-date'
   | 'euvd-feed'
-  | 'jvn-feed';
+  | 'jvn-feed'
+  | 'sccm-patch'
+  | 'bigfix-patch'
+  | 'tanium-patch';
 
 type ConnectView = 'sources' | 'run-history';
 
@@ -105,6 +111,14 @@ const IconDesktop = (
 const IconCloud = (
   <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <path d="M5.5 15.5a3.5 3.5 0 0 1-.4-6.97 5.5 5.5 0 0 1 10.64 1.22A3 3 0 0 1 15 15.5H5.5Z" />
+  </svg>
+);
+
+const IconPatch = (
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="4" width="14" height="12" rx="2" />
+    <path d="M10 8v4" />
+    <path d="M8 10h4" />
   </svg>
 );
 
@@ -299,6 +313,24 @@ const CONNECTORS: ConnectorDefinition[] = [
     name: 'JVN Vulnerability Database',
     summary: 'Ingest Japan Vulnerability Notes (JVNdb) records via the MyJVN API and sync JVNDB-to-CVE correlations.',
     icon: IconJvn
+  },
+  {
+    id: 'sccm-patch',
+    name: 'SCCM / MECM Patch',
+    summary: 'Track Microsoft Configuration Manager patch deployment state for vulnerability remediation.',
+    icon: IconDesktop
+  },
+  {
+    id: 'bigfix-patch',
+    name: 'BigFix',
+    summary: 'IBM BigFix patch and endpoint management deployment tracking.',
+    icon: IconPatch
+  },
+  {
+    id: 'tanium-patch',
+    name: 'Tanium',
+    summary: 'Tanium endpoint platform patch management deployment tracking.',
+    icon: IconPatch
   }
 ];
 
@@ -324,6 +356,8 @@ const CLOUD_CONNECTOR_IDS: ConnectorId[] = [
 ];
 
 const AI_CONNECTOR_IDS: ConnectorId[] = ['ai-security-aws', 'ai-security-azure', 'ai-security-copilot'];
+
+const PATCH_CONNECTOR_IDS: ConnectorId[] = ['sccm-patch', 'bigfix-patch', 'tanium-patch'];
 
 function formatInstantConnect(iso?: string): string {
   if (!iso) return 'Never';
@@ -536,6 +570,15 @@ type ConnectorDetailsProps = {
 };
 
 function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
+  if (connectorId === 'sccm-patch') {
+    return <SccmPatchConnectorPage />;
+  }
+  if (connectorId === 'bigfix-patch') {
+    return <BigFixPatchConnectorPage />;
+  }
+  if (connectorId === 'tanium-patch') {
+    return <TaniumPatchConnectorPage />;
+  }
   if (connectorId === 'sbom-endpoint') {
     return (
       <IngestionPage
@@ -734,6 +777,8 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
     .filter((connector) => CLOUD_CONNECTOR_IDS.includes(connector.id));
   const aiConnectors = CONNECTORS
     .filter((connector) => AI_CONNECTOR_IDS.includes(connector.id) && canUseEntitlement(actor, 'ai.security'));
+  const patchConnectors = CONNECTORS
+    .filter((connector) => PATCH_CONNECTOR_IDS.includes(connector.id));
 
   const visibleSections = [
     {
@@ -753,6 +798,12 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
       title: 'Inventory — AI',
       connectors: aiConnectors,
       caption: 'Read-only AI estate discovery and deterministic configuration assessment.',
+    },
+    {
+      key: 'patch-management' as const,
+      title: 'Patch Management',
+      connectors: patchConnectors,
+      caption: 'Patch deployment tracking from SCCM, BigFix and Tanium, used to resolve findings once a patch lands.',
     }
   ];
 
