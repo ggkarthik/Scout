@@ -63,7 +63,12 @@ public final class AiSecurityFieldContract {
             "referencedBy", "region", "resourceGroup", "retrievalMode", "roleDefinitionId", "s3Buckets", "s3Public",
             "promptLength", "promptType", "roleArn", "routedVersions", "runtimeId", "scaleType", "scopeKey", "searchLocalAuthEnabled", "sensitivity", "sensitiveRegexCount", "signature", "source", "state", "trustConditionsPresent", "type",
             "sourceType", "stableMembershipObserved", "stableRuntimeArnObserved", "status", "storeType", "tags", "toolType", "traffic", "updatedAt", "version",
-            "versionUpgradeOption", "vpcId", "aclSupport");
+            "versionUpgradeOption", "vpcId", "aclSupport",
+            // Standard SBOM/CycloneDX component metadata surfaced on an AI-BOM's declared
+            // resources (AiBomDeclaredResourceService). Not secrets: these are the same
+            // package-coordinate fields already returned by the BOM APIs, just carried onto a
+            // declared model/dataset's attributes.
+            "purl", "cpe", "license", "supplier");
 
     private AiSecurityFieldContract() { }
 

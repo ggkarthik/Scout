@@ -165,6 +165,15 @@ class AiBomDeclaredInventoryPostgresIntegrationTest {
                 "a declaration is not a deployment until something verifies it");
         assertEquals(1, declared.stream().filter(r -> r.getResourceKind() == AiBomDeclaredResourceKind.MODEL).count());
         assertEquals(1, declared.stream().filter(r -> r.getResourceKind() == AiBomDeclaredResourceKind.DATASET).count());
+
+        AiBomDeclaredResource model = declared.stream()
+                .filter(r -> r.getResourceKind() == AiBomDeclaredResourceKind.MODEL)
+                .findFirst().orElseThrow();
+        // Postgres round-trips jsonb through its own canonical text form (e.g. a space after
+        // ':'), so this checks content rather than assuming Jackson's exact compact spacing.
+        assertTrue(model.getAttributesJson().contains("\"purl\"")
+                        && model.getAttributesJson().contains("pkg:huggingface/llama-3@3.1"),
+                "the sanitized BOM purl must be stored on the declared resource, got " + model.getAttributesJson());
     }
 
     /**

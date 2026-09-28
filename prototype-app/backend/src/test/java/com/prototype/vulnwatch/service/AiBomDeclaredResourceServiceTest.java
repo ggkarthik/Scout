@@ -149,4 +149,27 @@ class AiBomDeclaredResourceServiceTest {
 
         verify(metadataSanitizer).sanitize(eq("AI_BOM"), eq("AI_BOM_DECLARED_DATASET"), any());
     }
+
+    @Test
+    void withTheRealSanitizerTheComponentsBomFieldsAreActuallyStored() {
+        AiBomDeclaredResourceService realService = new AiBomDeclaredResourceService(
+                repository, new AiBomDeclaredResourceIdentityResolver(new ObjectMapper()),
+                new AiSecurityMetadataSanitizer(), new ObjectMapper());
+        when(repository.findBySourceIdAndIdentityValue(any(), any())).thenReturn(Optional.empty());
+
+        BomComponent model = modelComponent();
+        model.setLicense("Apache-2.0");
+        model.setSupplier("Meta");
+
+        realService.recordDeclarations(record, source, tenant, List.of(model));
+
+        var captor = org.mockito.ArgumentCaptor.forClass(AiBomDeclaredResource.class);
+        verify(repository).save(captor.capture());
+        String attributesJson = captor.getValue().getAttributesJson();
+
+        assertEquals(true, attributesJson.contains("\"purl\":\"pkg:huggingface/llama-3@3.1\""), attributesJson);
+        assertEquals(true, attributesJson.contains("\"license\":\"Apache-2.0\""), attributesJson);
+        assertEquals(true, attributesJson.contains("\"supplier\":\"Meta\""), attributesJson);
+        assertEquals(true, attributesJson.contains("\"version\":\"3.1\""), attributesJson);
+    }
 }
