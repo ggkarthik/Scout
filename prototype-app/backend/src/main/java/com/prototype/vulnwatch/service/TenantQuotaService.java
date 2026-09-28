@@ -5,6 +5,7 @@ import com.prototype.vulnwatch.repo.AuditEventRepository;
 import com.prototype.vulnwatch.repo.AwsDiscoveryConfigRepository;
 import com.prototype.vulnwatch.repo.AwsDiscoveryTargetRepository;
 import com.prototype.vulnwatch.repo.IngestionJobRepository;
+import com.prototype.vulnwatch.repo.JiraTicketingConfigRepository;
 import com.prototype.vulnwatch.repo.SccmCmdbConfigRepository;
 import com.prototype.vulnwatch.repo.ServiceAccountRepository;
 import com.prototype.vulnwatch.repo.ServiceNowCmdbConfigRepository;
@@ -24,6 +25,7 @@ public class TenantQuotaService {
     private final AwsDiscoveryTargetRepository awsDiscoveryTargetRepository;
     private final SccmCmdbConfigRepository sccmCmdbConfigRepository;
     private final ServiceNowCmdbConfigRepository serviceNowCmdbConfigRepository;
+    private final JiraTicketingConfigRepository jiraTicketingConfigRepository;
     private final ServiceAccountRepository serviceAccountRepository;
     private final AuditEventRepository auditEventRepository;
     private final IngestionJobRepository ingestionJobRepository;
@@ -40,6 +42,7 @@ public class TenantQuotaService {
             AwsDiscoveryTargetRepository awsDiscoveryTargetRepository,
             SccmCmdbConfigRepository sccmCmdbConfigRepository,
             ServiceNowCmdbConfigRepository serviceNowCmdbConfigRepository,
+            JiraTicketingConfigRepository jiraTicketingConfigRepository,
             ServiceAccountRepository serviceAccountRepository,
             AuditEventRepository auditEventRepository,
             IngestionJobRepository ingestionJobRepository,
@@ -55,6 +58,7 @@ public class TenantQuotaService {
         this.awsDiscoveryTargetRepository = awsDiscoveryTargetRepository;
         this.sccmCmdbConfigRepository = sccmCmdbConfigRepository;
         this.serviceNowCmdbConfigRepository = serviceNowCmdbConfigRepository;
+        this.jiraTicketingConfigRepository = jiraTicketingConfigRepository;
         this.serviceAccountRepository = serviceAccountRepository;
         this.auditEventRepository = auditEventRepository;
         this.ingestionJobRepository = ingestionJobRepository;
@@ -188,6 +192,9 @@ public class TenantQuotaService {
                         + awsDiscoveryTargetRepository.countByTenant_Id(tenant.getId())
                         + (sccmCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "sccm").isPresent() ? 1L : 0L)
                         + (serviceNowCmdbConfigRepository.findByTenant_IdAndSourceSystemIgnoreCase(tenant.getId(), "servicenow").isPresent() ? 1L : 0L)
+                        // Ticketing connectors consume the tenant's connector allowance too;
+                        // omitting Jira here would let a tenant at its limit add one for free.
+                        + jiraTicketingConfigRepository.countByTenant_Id(tenant.getId())
         );
     }
 
