@@ -37,11 +37,13 @@ public class IngestionJobService {
     public static final String JOB_TYPE_AI_SECURITY_AZURE_DISCOVERY = "AI_SECURITY_AZURE_DISCOVERY";
     public static final String JOB_TYPE_AI_SECURITY_COPILOT_STUDIO = "AI_SECURITY_COPILOT_STUDIO";
     public static final String JOB_TYPE_AI_GRID_RUNTIME_ADAPTER = "AI_GRID_RUNTIME_ADAPTER";
+    public static final String JOB_TYPE_AI_GRID_BOM_PROJECTION = "AI_GRID_BOM_PROJECTION";
     private static final List<String> AI_SECURITY_JOB_TYPES = List.of(
             JOB_TYPE_AI_SECURITY_AWS_BEDROCK,
             JOB_TYPE_AI_SECURITY_AZURE_DISCOVERY,
             JOB_TYPE_AI_SECURITY_COPILOT_STUDIO,
-            JOB_TYPE_AI_GRID_RUNTIME_ADAPTER);
+            JOB_TYPE_AI_GRID_RUNTIME_ADAPTER,
+            JOB_TYPE_AI_GRID_BOM_PROJECTION);
     public static final String STATUS_QUEUED = "QUEUED";
     public static final String STATUS_RUNNING = "RUNNING";
     public static final String STATUS_SUCCEEDED = "SUCCEEDED";
@@ -243,6 +245,24 @@ public class IngestionJobService {
                 receiptId.toString(),
                 producerId,
                 new RuntimeAdapterJobPayload(producerId, receiptId, batch)
+        );
+    }
+
+    /**
+     * One active projection job per source at a time -- {@code enqueueJob}'s own dedupe key
+     * ({@code jobType + ":" + sourceId}) already makes a second upload arriving while a job for
+     * this source is still QUEUED a no-op rather than a pile-up. The worker always reads the
+     * source's current state when it runs, so that single job still ends up covering the
+     * latest revision.
+     */
+    public IngestionJobAcceptedResponse enqueueAiGridBomProjectionJob(Tenant tenant, UUID sourceId) {
+        return enqueueJob(
+                tenant,
+                JOB_TYPE_AI_GRID_BOM_PROJECTION,
+                "ai-grid-bom-projection",
+                sourceId.toString(),
+                "system:ai-bom-ingestion",
+                new AiGridBomProjectionJobPayload(sourceId)
         );
     }
 
@@ -509,5 +529,8 @@ public class IngestionJobService {
 
     public record RuntimeAdapterJobPayload(String producerId, UUID receiptId,
                                            com.fasterxml.jackson.databind.JsonNode batch) {
+    }
+
+    public record AiGridBomProjectionJobPayload(UUID sourceId) {
     }
 }

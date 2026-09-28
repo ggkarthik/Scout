@@ -100,6 +100,7 @@ public class BomIngestionOrchestrator {
     private final BomContributionService bomContributionService;
     private final BomRelationshipParsingService bomRelationshipParsingService;
     private final AiBomDeclaredResourceService aiBomDeclaredResourceService;
+    private final IngestionJobService ingestionJobService;
 
     public BomIngestionOrchestrator(
             SbomEndpointFetchService sbomEndpointFetchService,
@@ -122,7 +123,8 @@ public class BomIngestionOrchestrator {
             BomSourceService bomSourceService,
             BomContributionService bomContributionService,
             BomRelationshipParsingService bomRelationshipParsingService,
-            AiBomDeclaredResourceService aiBomDeclaredResourceService
+            AiBomDeclaredResourceService aiBomDeclaredResourceService,
+            IngestionJobService ingestionJobService
     ) {
         this.sbomEndpointFetchService = sbomEndpointFetchService;
         this.sbomContentIngestionService = sbomContentIngestionService;
@@ -145,6 +147,7 @@ public class BomIngestionOrchestrator {
         this.bomContributionService = bomContributionService;
         this.bomRelationshipParsingService = bomRelationshipParsingService;
         this.aiBomDeclaredResourceService = aiBomDeclaredResourceService;
+        this.ingestionJobService = ingestionJobService;
     }
 
     @Transactional
@@ -514,6 +517,14 @@ public class BomIngestionOrchestrator {
             findingsGenerated = inventoryResult.findingsGenerated();
             record.setComponentCount(componentCount);
             bomRecordRepository.save(record);
+        }
+
+        if (bomType == BomType.AI_BOM) {
+            // Persisted in this same transaction: the job row is invisible to the scheduled
+            // worker (a separate connection) until this transaction commits, which is exactly
+            // "persist projection intent in the ingestion transaction; process after commit"
+            // with no extra plumbing needed.
+            ingestionJobService.enqueueAiGridBomProjectionJob(tenant, source.getId());
         }
 
         String action = existingOpt.isPresent() ? "REPLACED" : "CREATED";
