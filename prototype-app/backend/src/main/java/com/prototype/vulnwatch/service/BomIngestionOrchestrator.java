@@ -98,6 +98,7 @@ public class BomIngestionOrchestrator {
     private final ObjectMapper objectMapper;
     private final BomSourceService bomSourceService;
     private final BomContributionService bomContributionService;
+    private final BomRelationshipParsingService bomRelationshipParsingService;
 
     public BomIngestionOrchestrator(
             SbomEndpointFetchService sbomEndpointFetchService,
@@ -118,7 +119,8 @@ public class BomIngestionOrchestrator {
             CbomIngestionService cbomIngestionService,
             ObjectMapper objectMapper,
             BomSourceService bomSourceService,
-            BomContributionService bomContributionService
+            BomContributionService bomContributionService,
+            BomRelationshipParsingService bomRelationshipParsingService
     ) {
         this.sbomEndpointFetchService = sbomEndpointFetchService;
         this.sbomContentIngestionService = sbomContentIngestionService;
@@ -139,6 +141,7 @@ public class BomIngestionOrchestrator {
         this.objectMapper = objectMapper;
         this.bomSourceService = bomSourceService;
         this.bomContributionService = bomContributionService;
+        this.bomRelationshipParsingService = bomRelationshipParsingService;
     }
 
     @Transactional
@@ -500,6 +503,10 @@ public class BomIngestionOrchestrator {
                 throw new IOException("No BOM components could be extracted from the submitted document");
             }
             persistEvidenceAndCorrelations(record, tenant, components);
+            // Structure the document declared between its own components, stored verbatim.
+            // Nothing is inferred from these edges: a dependsOn is not a training or serving
+            // claim, and treating it as one would invent provenance for policy to act on.
+            bomRelationshipParsingService.recordRelationships(record, root, components);
             componentCount = components.size();
             findingsGenerated = inventoryResult.findingsGenerated();
             record.setComponentCount(componentCount);

@@ -55,6 +55,36 @@ function CorrelationPill({ state }: { state: BomComponentSummaryItem['correlatio
   return <span className={map[state] ?? 'status-pill'}>{label[state] ?? state}</span>;
 }
 
+/**
+ * What BOM evidence says about the component's presence, which is distinct from its
+ * ACTIVE/RETIRED status. CONFLICTING is the one that needs a person: one source asserted the
+ * component is gone while another still reports it, and the system deliberately refuses to
+ * pick a winner. WITHDRAWN means no source vouches for it any more -- presence unknown, not
+ * disproved. LEGACY_UNKNOWN covers components predating contribution tracking.
+ */
+function EvidencePill({ state }: { state: BomComponentSummaryItem['bomEvidenceState'] }) {
+  if (!state) return <span style={{ color: 'var(--muted)' }}>—</span>;
+  const map: Record<string, string> = {
+    SUPPORTED:      'status-pill inv-status-applicable',
+    CONFLICTING:    'status-pill status-unknown',
+    WITHDRAWN:      'status-pill status-suppressed',
+    LEGACY_UNKNOWN: 'status-pill status-auto_closed',
+  };
+  const label: Record<string, string> = {
+    SUPPORTED:      'SUPPORTED',
+    CONFLICTING:    'CONFLICTING',
+    WITHDRAWN:      'WITHDRAWN',
+    LEGACY_UNKNOWN: 'UNKNOWN',
+  };
+  const title: Record<string, string> = {
+    SUPPORTED:      'At least one BOM source currently reports this component.',
+    CONFLICTING:    'One source asserted this component is absent while another still reports it. Needs review.',
+    WITHDRAWN:      'No source vouches for this component any more. Its presence is unknown, not disproved.',
+    LEGACY_UNKNOWN: 'Ingested before per-source evidence was tracked, so presence cannot be attributed.',
+  };
+  return <span className={map[state] ?? 'status-pill'} title={title[state] ?? ''}>{label[state] ?? state}</span>;
+}
+
 type WidgetFilter = 'all' | 'bom_mapped' | 'unmapped' | 'vulnerable' | 'eol' | 'ai_bom' | 'cbom';
 
 function WidgetRow({
@@ -429,6 +459,7 @@ export function BomComponents() {
                   <th>CVEs</th>
                   <th>Findings</th>
                   <th>Correlation</th>
+                  <th>BOM Evidence</th>
                   <th>EOL</th>
                   <th>License</th>
                 </tr>
@@ -474,6 +505,7 @@ export function BomComponents() {
                         />
                       </td>
                       <td><CorrelationPill state={c.correlationState} /></td>
+                      <td><EvidencePill state={c.bomEvidenceState} /></td>
                       <td>
                         {c.isEol ? (
                           <div>

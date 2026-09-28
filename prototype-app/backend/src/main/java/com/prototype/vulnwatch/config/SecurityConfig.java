@@ -36,6 +36,12 @@ public class SecurityConfig {
             @Value("${app.security.headers.permissions-policy:camera=(), microphone=(), geolocation=(), payment=()}") String permissionsPolicy
     ) throws Exception {
         http
+                // Without this, Spring Security rejects a request before the MVC CORS handling
+                // runs, so 401 and 403 responses carry no Access-Control-Allow-Origin. A browser
+                // then blocks the response body and reports a generic network failure, so every
+                // auth problem surfaces in the UI as "Failed to fetch" with the real reason
+                // invisible. Reuses the origins configured in WebConfig; it adds no permissions.
+                .cors(org.springframework.security.config.Customizer.withDefaults())
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
                         .requireCsrfProtectionMatcher(request ->

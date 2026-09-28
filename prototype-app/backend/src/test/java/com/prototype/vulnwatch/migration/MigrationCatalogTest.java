@@ -29,7 +29,7 @@ class MigrationCatalogTest {
         PackagedMigrationCatalog.Targets targets = PackagedMigrationCatalog.resolve();
 
         assertEquals(5, targets.platformTarget());
-        assertEquals(5, targets.tenantTarget());
+        assertEquals(6, targets.tenantTarget());
     }
 
     @Test
