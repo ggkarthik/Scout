@@ -29,6 +29,7 @@ class AiBomLifecycleV4MigrationPostgresIntegrationTest {
     private static final String ASSET_ID = "00000000-0000-0000-0000-0000000004a1";
     private static final String UPLOAD_ID = "00000000-0000-0000-0000-0000000004b1";
     private static final String COMPONENT_ID = "00000000-0000-0000-0000-0000000004c1";
+    private static final String BOM_RECORD_ID = "00000000-0000-0000-0000-0000000004aa";
     private static final String CBOM_COMPONENT_ID = "00000000-0000-0000-0000-0000000004d1";
     private static final String CBOM_FINDING_ID = "00000000-0000-0000-0000-0000000004e1";
     private static final String SOURCE_ID = "00000000-0000-0000-0000-0000000004f1";
@@ -80,6 +81,11 @@ class AiBomLifecycleV4MigrationPostgresIntegrationTest {
         assertNull(queryTextAsTenant(UPGRADE_DB, "select withdrawn_at from tenant_default.cbom_risk_findings where id='"
                         + CBOM_FINDING_ID + "'"),
                 "an untouched finding has not been withdrawn");
+
+        assertEquals("PARTIAL",
+                queryTextAsTenant(UPGRADE_DB, "select completeness from tenant_default.bom_ingestion_records where id='"
+                        + BOM_RECORD_ID + "'"),
+                "a pre-existing document version defaults to PARTIAL, never claiming completeness");
 
         try (Connection connection = connection(UPGRADE_DB)) {
             assertEquals(TenantSchemaFingerprint.of(connection, "tenant_fresh"),
@@ -138,7 +144,7 @@ class AiBomLifecycleV4MigrationPostgresIntegrationTest {
         execute(db, """
                 insert into tenant_default.sbom_uploads
                     (id,tenant_id,format,original_filename,status,uploaded_at)
-                values ('%s','%s','CYCLONEDX','legacy.json','COMPLETED',now())
+                values ('%s','%s','CYCLONEDX','legacy.json','SUCCESS',now())
                 on conflict (id) do nothing
                 """.formatted(UPLOAD_ID, UPGRADE_TENANT_ID));
         execute(db, """
@@ -152,11 +158,19 @@ class AiBomLifecycleV4MigrationPostgresIntegrationTest {
     }
 
     private void seedLegacyCbomFinding(LocalPostgresTestDatabase.DatabaseConfig db) throws Exception {
+        // cbom_components.source_bom_id is a real FK onto bom_ingestion_records, so the
+        // document version has to exist. Seeding it at V3 also means V4's ADD COLUMN runs
+        // against a populated bom_ingestion_records rather than an empty one.
+        execute(db, """
+                insert into tenant_default.bom_ingestion_records
+                    (id,tenant_id,bom_type,supplier,status)
+                values ('%s','%s','CBOM','legacy-supplier','ACTIVE')
+                """.formatted(BOM_RECORD_ID, UPGRADE_TENANT_ID));
         execute(db, """
                 insert into tenant_default.cbom_components
                     (id,tenant_id,source_bom_id,component_fingerprint,name,asset_type)
-                values ('%s','%s','00000000-0000-0000-0000-00000000aaaa','fp-legacy','rsa-2048','ALGORITHM')
-                """.formatted(CBOM_COMPONENT_ID, UPGRADE_TENANT_ID));
+                values ('%s','%s','%s','fp-legacy','rsa-2048','ALGORITHM')
+                """.formatted(CBOM_COMPONENT_ID, UPGRADE_TENANT_ID, BOM_RECORD_ID));
         execute(db, """
                 insert into tenant_default.cbom_risk_findings
                     (id,tenant_id,cbom_component_id,rule_id,finding_fingerprint,risk_class,
