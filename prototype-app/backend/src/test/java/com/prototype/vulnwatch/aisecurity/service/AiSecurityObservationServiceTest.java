@@ -62,6 +62,34 @@ class AiSecurityObservationServiceTest {
                 tenant, envelope(tenant, "CONFIGURED-ENTRA-TENANT")));
     }
 
+    /**
+     * Regression: provider_resource_id is a provider-native identifier, not a global one.
+     * Resolving a relationship endpoint by that id alone -- across every provider a tenant has
+     * connected -- risks matching an unrelated resource from a different provider that happens
+     * to share the same id string. The lookup must also filter by provider.
+     */
+    @Test
+    void resolvesAlreadyPersistedRelationshipEndpointsScopedByProviderNotJustResourceId() throws Exception {
+        Tenant tenant = tenant();
+        @SuppressWarnings("unchecked")
+        org.mockito.ArgumentCaptor<Map<String, Object>> paramsCaptor =
+                org.mockito.ArgumentCaptor.forClass(Map.class);
+        when(jdbc.query(
+                anyString(),
+                paramsCaptor.capture(),
+                org.mockito.ArgumentMatchers.<RowMapper<UUID>>any()))
+                .thenReturn(List.of());
+
+        java.lang.reflect.Method resolveArtifactId = AiSecurityObservationService.class.getDeclaredMethod(
+                "resolveArtifactId", Tenant.class, String.class, Map.class, String.class);
+        resolveArtifactId.setAccessible(true);
+        resolveArtifactId.invoke(service, tenant, "AWS", Map.of(), "shared-resource-id");
+
+        Map<String, Object> capturedParams = paramsCaptor.getValue();
+        assertEquals("AWS", capturedParams.get("provider"),
+                "the relationship-endpoint lookup must be scoped by provider, not just provider_resource_id");
+    }
+
     @Test
     void defaultsKnowledgeAndDataSensitivityToUnknown() {
         var source = new ArtifactObservation("source-1", "DATA_SOURCE", "AZURE_SEARCH_DATA_SOURCES",

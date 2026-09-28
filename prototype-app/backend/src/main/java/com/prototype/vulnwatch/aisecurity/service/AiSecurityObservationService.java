@@ -143,8 +143,10 @@ public class AiSecurityObservationService {
                         envelope.runId().toString()));
                 continue;
             }
-            UUID sourceId = resolveArtifactId(tenant, artifactIds, relationship.sourceProviderResourceId());
-            UUID targetId = resolveArtifactId(tenant, artifactIds, relationship.targetProviderResourceId());
+            UUID sourceId = resolveArtifactId(
+                    tenant, envelope.provider(), artifactIds, relationship.sourceProviderResourceId());
+            UUID targetId = resolveArtifactId(
+                    tenant, envelope.provider(), artifactIds, relationship.targetProviderResourceId());
             if (sourceId != null && targetId != null) {
                 upsertRelationship(tenant, envelope, relationship, sourceId, targetId);
             }
@@ -431,15 +433,23 @@ public class AiSecurityObservationService {
                 """, params);
     }
 
-    /** Relationships may span independently collected scopes; resolve already-persisted endpoints safely. */
-    private UUID resolveArtifactId(Tenant tenant, Map<String, UUID> currentArtifacts, String providerResourceId) {
+    /**
+     * Relationships may span independently collected scopes; resolve already-persisted
+     * endpoints safely. {@code provider_resource_id} is a provider-native identifier, not a
+     * global one -- without scoping by provider too, an AWS and an Azure resource that happen
+     * to share an id string would resolve to whichever row Postgres returns first.
+     */
+    private UUID resolveArtifactId(
+            Tenant tenant, String provider, Map<String, UUID> currentArtifacts, String providerResourceId) {
         UUID current = currentArtifacts.get(providerResourceId);
         if (current != null) return current;
         List<UUID> persisted = jdbc.query("""
                 select id from ai_security_artifacts
-                 where tenant_id = :tenantId and provider_resource_id = :providerResourceId and active = true
+                 where tenant_id = :tenantId and provider = :provider
+                   and provider_resource_id = :providerResourceId and active = true
                  limit 1
-                """, Map.of("tenantId", tenant.getId(), "providerResourceId", providerResourceId),
+                """, Map.of("tenantId", tenant.getId(), "provider", provider,
+                        "providerResourceId", providerResourceId),
                 (rs, rowNum) -> rs.getObject("id", UUID.class));
         return persisted.isEmpty() ? null : persisted.get(0);
     }
