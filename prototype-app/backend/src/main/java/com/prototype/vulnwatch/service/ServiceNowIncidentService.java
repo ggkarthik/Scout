@@ -150,20 +150,50 @@ public class ServiceNowIncidentService {
             UUID findingId,
             CreateServiceNowIncidentRequest request
     ) {
-        ServiceNowCmdbConfigService.ServiceNowRuntimeConfig config =
-                serviceNowCmdbConfigService.resolveRuntimeConfig(tenant)
-                        .orElseThrow(() -> new ResponseStatusException(
-                                SERVICE_UNAVAILABLE,
-                                "ServiceNow is not configured for this tenant. Configure the ServiceNow connector first."
-                        ));
+        ServiceNowCmdbConfigService.ServiceNowRuntimeConfig config = resolveIncidentConfig(tenant);
         Finding finding = findingRepository.findById(findingId)
                 .orElseThrow(() -> new org.springframework.web.server.ResponseStatusException(
                         org.springframework.http.HttpStatus.NOT_FOUND, "Finding not found"));
+        assertFindingEligibleForIncident(finding);
+
+        ServiceNowIncidentResponse response = createFindingIncidentRemote(config, finding, request);
+        finding.setIncidentId(response.incidentNumber());
+        finding.setIncidentStatus("New");
+        finding.touch();
+        findingRepository.save(finding);
+        return response;
+    }
+
+    /** Resolves the tenant's ServiceNow connector, or fails with the operator-facing 503. */
+    public ServiceNowCmdbConfigService.ServiceNowRuntimeConfig resolveIncidentConfig(Tenant tenant) {
+        return serviceNowCmdbConfigService.resolveRuntimeConfig(tenant)
+                .orElseThrow(() -> new ResponseStatusException(
+                        SERVICE_UNAVAILABLE,
+                        "ServiceNow is not configured for this tenant. Configure the ServiceNow connector first."
+                ));
+    }
+
+    /** A closed finding must not acquire a fresh incident — the remediation is already done. */
+    public void assertFindingEligibleForIncident(Finding finding) {
         if (finding.getStatus() == com.prototype.vulnwatch.domain.FindingStatus.RESOLVED
                 || finding.getStatus() == com.prototype.vulnwatch.domain.FindingStatus.AUTO_CLOSED) {
             throw new ResponseStatusException(CONFLICT, "Closed findings are not eligible for a new incident");
         }
+    }
 
+    /**
+     * Raises the incident in ServiceNow and returns it <em>without</em> writing to the finding.
+     *
+     * <p>Split out so {@link com.prototype.vulnwatch.ticketing.ServiceNowTicketingProvider} can
+     * reuse the exact payload and error handling while
+     * {@link com.prototype.vulnwatch.ticketing.TicketingService} owns the finding update — that
+     * keeps the incident id, status and originating system written together for every provider.
+     */
+    public ServiceNowIncidentResponse createFindingIncidentRemote(
+            ServiceNowCmdbConfigService.ServiceNowRuntimeConfig config,
+            Finding finding,
+            CreateServiceNowIncidentRequest request
+    ) {
         String severity = text(request.severity(), finding.getSeverityOverride(), riskSeverity(finding.getRiskScore()));
         String priorityLabel = text(request.priority(), severity, "MEDIUM");
         int priority = PRIORITY_MAP.getOrDefault(priorityLabel.toUpperCase(Locale.ROOT), 3);
@@ -217,10 +247,6 @@ public class ServiceNowIncidentService {
         if (sysId != null && !sysId.isBlank() && taskDueDate != null) {
             createTaskSla(config, sysId, taskDueDate);
         }
-        finding.setIncidentId(incidentNumber);
-        finding.setIncidentStatus("New");
-        finding.touch();
-        findingRepository.save(finding);
         return new ServiceNowIncidentResponse(incidentNumber, sysId,
                 config.baseUrl() + "/incident.do?sys_id=" + sysId, "created",
                 "Incident " + incidentNumber + " created successfully in ServiceNow");

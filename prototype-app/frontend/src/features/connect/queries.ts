@@ -71,6 +71,24 @@ export function useGithubSbomSourcesQuery() {
   });
 }
 
+export function useJiraTicketingConfigQuery() {
+  return useQuery({
+    queryKey: ['jira-ticketing-config'],
+    queryFn: api.getJiraTicketingConfig
+  });
+}
+
+/**
+ * Which ticketing system new tickets go to. Drives the override notice on both ticketing
+ * connectors, so it must refetch after either connector is saved.
+ */
+export function useTicketingProviderStatusQuery() {
+  return useQuery({
+    queryKey: ['ticketing-provider-status'],
+    queryFn: api.getTicketingProviderStatus
+  });
+}
+
 export function useServiceNowCmdbConfigQuery() {
   return useQuery({
     queryKey: ['service-now-cmdb-config'],

@@ -303,7 +303,7 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
             """)
     List<String> findDistinctVexProvidersByTenant(@Param("tenant") Tenant tenant);
 
-    /** Findings that already have a linked ServiceNow incident (for daily status sync). */
+    /** Findings that already have a linked ticket in any system (for daily status sync). */
     @Query("select f from Finding f where f.incidentId is not null")
     List<Finding> findAllWithIncidentId();
 

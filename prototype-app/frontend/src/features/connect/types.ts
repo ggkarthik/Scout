@@ -183,6 +183,78 @@ export type ServiceNowCmdbConnectionTest = {
   testedAt: string;
 };
 
+export type JiraAuthType = 'BASIC' | 'BEARER';
+
+export type JiraTicketingConfig = {
+  id?: string;
+  configured: boolean;
+  baseUrl: string;
+  authType: JiraAuthType;
+  username: string;
+  hasCredentialSecret: boolean;
+  projectKey: string;
+  issueTypeId: string;
+  issueTypeName: string;
+  defaultLabels: string;
+  includePriority: boolean;
+  enabled: boolean;
+  lastTestStatus?: string;
+  lastTestMessage?: string;
+  lastTestedAt?: string;
+};
+
+export type JiraTicketingConfigRequest = {
+  baseUrl: string;
+  authType: JiraAuthType;
+  username?: string;
+  /** Write-only: omit to keep the stored token. */
+  credentialSecret?: string;
+  projectKey: string;
+  issueTypeId?: string;
+  issueTypeName?: string;
+  defaultLabels?: string;
+  includePriority: boolean;
+  enabled: boolean;
+};
+
+export type JiraConnectionTest = {
+  status: 'SUCCESS' | 'FAILED';
+  message: string;
+  credentialsValid: boolean;
+  projectReachable: boolean;
+  testedAt: string;
+};
+
+/** Provider-neutral ticket request; omitted fields are derived from the finding. */
+export type CreateFindingTicketRequest = {
+  title?: string;
+  severity?: string;
+  priority?: string;
+  dueDate?: string;
+  assignee?: string;
+  assignmentGroup?: string;
+  notes?: string;
+  solutionInfo?: string;
+};
+
+export type FindingTicketResponse = {
+  provider: string;
+  providerName: string;
+  ticketKey: string;
+  ticketId?: string;
+  url?: string;
+  status?: string;
+  message?: string;
+};
+
+/** Which ticketing system new tickets go to, and which configured ones it outranks. */
+export type TicketingProviderStatus = {
+  activeProvider: string | null;
+  activeProviderName: string | null;
+  configuredProviders: string[];
+  overridden: string[];
+};
+
 export type SccmAuthType = 'SQL_AUTH' | 'WINDOWS_AUTH';
 
 export type SccmCmdbConfig = {

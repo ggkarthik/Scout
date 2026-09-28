@@ -63,8 +63,14 @@ import type {
   SccmCmdbConfig,
   SccmCmdbConfigRequest,
   SccmConnectionTestResponse,
+  CreateFindingTicketRequest,
+  FindingTicketResponse,
+  JiraConnectionTest,
+  JiraTicketingConfig,
+  JiraTicketingConfigRequest,
   ServiceNowCmdbConfig,
   ServiceNowCmdbConfigRequest,
+  TicketingProviderStatus,
   ServiceNowCmdbConnectionTest,
   SyncRun,
   SyncTriggerResponse,
@@ -1210,6 +1216,26 @@ export const api = {
   triggerServiceNowCmdbSync: () => request<SyncTriggerResponse>('/connectors/servicenow-cmdb/sync', {
     method: 'POST'
   }),
+  getJiraTicketingConfig: () => request<JiraTicketingConfig>('/connectors/jira-ticketing'),
+  saveJiraTicketingConfig: (payload: JiraTicketingConfigRequest) =>
+    request<JiraTicketingConfig>('/connectors/jira-ticketing', {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }),
+  testJiraTicketingConnection: () => request<JiraConnectionTest>('/connectors/jira-ticketing/test', {
+    method: 'POST'
+  }),
+  getTicketingProviderStatus: () => request<TicketingProviderStatus>('/ticketing/status'),
+  /**
+   * Raises a ticket in whichever system the tenant has active, and names it in the response.
+   * Prefer this over createFindingIncident, whose ServiceNow-shaped response cannot say which
+   * system actually holds the ticket.
+   */
+  createFindingTicket: (findingId: string, payload: CreateFindingTicketRequest) =>
+    request<FindingTicketResponse>(`/findings/${encodeURIComponent(findingId)}/ticket`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
   getSccmCmdbConfig: () => request<SccmCmdbConfig>('/connectors/sccm-cmdb'),
   saveSccmCmdbConfig: (payload: SccmCmdbConfigRequest) => request<SccmCmdbConfig>('/connectors/sccm-cmdb', {
     method: 'PUT',

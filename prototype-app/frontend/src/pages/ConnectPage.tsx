@@ -13,6 +13,7 @@ import type { VulnIntelSourceStatus, VulnIntelSourcesSummary } from '../api/clie
 import {
   useAwsDiscoveryConfigQuery,
   useAzureDiscoveryConfigQuery,
+  useJiraTicketingConfigQuery,
   useSccmCmdbConfigQuery,
   useServiceNowCmdbConfigQuery
 } from '../features/connect/queries';
@@ -27,6 +28,8 @@ import { CopilotStudioConnectorPage } from './CopilotStudioConnectorPage';
 import { SccmPatchConnectorPage } from './SccmPatchConnectorPage';
 import { BigFixPatchConnectorPage } from './BigFixPatchConnectorPage';
 import { TaniumPatchConnectorPage } from './TaniumPatchConnectorPage';
+import { JiraTicketingConnectorPage } from './JiraTicketingConnectorPage';
+import { ServiceNowTicketingConnectorPage } from './ServiceNowTicketingConnectorPage';
 import { canUseEntitlement } from '../features/auth/entitlements';
 
 type ConnectorId =
@@ -51,7 +54,9 @@ type ConnectorId =
   | 'jvn-feed'
   | 'sccm-patch'
   | 'bigfix-patch'
-  | 'tanium-patch';
+  | 'tanium-patch'
+  | 'servicenow-ticketing'
+  | 'jira-ticketing';
 
 type ConnectView = 'sources' | 'run-history';
 
@@ -69,6 +74,8 @@ type InventoryConnectorStatus = {
   isFailed: boolean;
   demoDisabled: boolean;
   lastSyncAt?: string;
+  /** Overrides the default sync-oriented dot tooltip for connectors that never sync. */
+  label?: string;
 };
 
 /* ── Inline SVG connector icons ─────────────────────────────────────────────
@@ -150,6 +157,14 @@ const IconTanium = (
     <path d="M20 5.6A14.4 14.4 0 1 1 5.6 20V5.6Z" fill="#E4002B" />
     <path d="M10.4 15.2h19.2" fill="none" stroke="#ffffff" strokeWidth="5" strokeLinecap="butt" />
     <path d="M20 15.2v14.2" fill="none" stroke="#ffffff" strokeWidth="5" strokeLinecap="butt" />
+  </svg>
+);
+
+// Jira: the brand's nested chevron rhombus in Atlassian blue, the lower-left half lighter.
+const IconJira = (
+  <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
+    <path d="M20 2.6 37.4 20 20 37.4l-6.8-6.8L27 16.8l-7-7Z" fill="#2684FF" />
+    <path d="M20 2.6 2.6 20l6.8 6.8L20 16.2Z" fill="#2684FF" opacity="0.55" />
   </svg>
 );
 
@@ -362,6 +377,18 @@ const CONNECTORS: ConnectorDefinition[] = [
     name: 'Tanium',
     summary: 'Tanium endpoint platform patch management integration.',
     icon: IconTanium
+  },
+  {
+    id: 'servicenow-ticketing',
+    name: 'ServiceNow',
+    summary: 'Raise remediation incidents for findings and sync their state back.',
+    icon: IconServiceNowBrand
+  },
+  {
+    id: 'jira-ticketing',
+    name: 'Jira',
+    summary: 'Raise remediation issues for findings in a Jira project. Overrides ServiceNow ticketing.',
+    icon: IconJira
   }
 ];
 
@@ -389,6 +416,8 @@ const INVENTORY_CONNECTOR_IDS: ConnectorId[] = [
 const BOM_CONNECTOR_IDS: ConnectorId[] = ['sbom-endpoint', 'bom-management'];
 
 const PATCH_CONNECTOR_IDS: ConnectorId[] = ['sccm-patch', 'bigfix-patch', 'tanium-patch'];
+
+const TICKETING_CONNECTOR_IDS: ConnectorId[] = ['servicenow-ticketing', 'jira-ticketing'];
 
 // The AI connectors are entitlement-gated, so they drop out of Inventory rather than
 // leaving an empty section behind.
@@ -600,6 +629,39 @@ function buildInventoryConnectorStatus(config: {
   };
 }
 
+/**
+ * Health for a ticketing connector.
+ *
+ * <p>These never run an inventory sync, so a missing last-sync timestamp is normal rather than a
+ * warning. What matters is whether credentials are saved and whether the last connection test
+ * passed.
+ */
+function buildTicketingConnectorStatus(config: {
+  configured?: boolean;
+  enabled?: boolean;
+  lastTestStatus?: string;
+  lastTestedAt?: string;
+} | null, demoDisabled: boolean): InventoryConnectorStatus {
+  const lastTestStatus = config?.lastTestStatus?.trim().toUpperCase();
+  const configured = Boolean(config?.configured);
+  const isFailed = lastTestStatus === 'FAILED';
+  const label = !configured
+    ? 'Not configured'
+    : isFailed
+      ? 'Last connection test failed'
+      : config?.enabled === false
+        ? 'Configured but disabled'
+        : lastTestStatus === 'SUCCESS'
+          ? 'Connection test passed'
+          : 'Configured — not yet tested';
+  return {
+    hasSynced: configured && !isFailed && config?.enabled !== false,
+    isFailed,
+    demoDisabled,
+    label,
+  };
+}
+
 type ConnectorDetailsProps = {
   connectorId: ConnectorId;
 };
@@ -613,6 +675,12 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
   }
   if (connectorId === 'tanium-patch') {
     return <TaniumPatchConnectorPage />;
+  }
+  if (connectorId === 'servicenow-ticketing') {
+    return <ServiceNowTicketingConnectorPage />;
+  }
+  if (connectorId === 'jira-ticketing') {
+    return <JiraTicketingConnectorPage />;
   }
   if (connectorId === 'sbom-endpoint') {
     return (
@@ -767,10 +835,12 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
   const sccmConfigQuery = useSccmCmdbConfigQuery();
   const awsConfigQuery = useAwsDiscoveryConfigQuery();
   const azureConfigQuery = useAzureDiscoveryConfigQuery();
+  const jiraTicketingConfigQuery = useJiraTicketingConfigQuery();
   const snConfig = serviceNowConfigQuery.data ?? null;
   const sccmConfig = sccmConfigQuery.data ?? null;
   const awsConfig = awsConfigQuery.data ?? null;
   const azureConfig = azureConfigQuery.data ?? null;
+  const jiraTicketingConfig = jiraTicketingConfigQuery.data ?? null;
 
   React.useEffect(() => {
     setActiveView(initialView);
@@ -816,6 +886,9 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
   const patchConnectors = PATCH_CONNECTOR_IDS
     .map((id) => CONNECTORS.find((connector) => connector.id === id))
     .filter((connector): connector is ConnectorDefinition => Boolean(connector));
+  const ticketingConnectors = TICKETING_CONNECTOR_IDS
+    .map((id) => CONNECTORS.find((connector) => connector.id === id))
+    .filter((connector): connector is ConnectorDefinition => Boolean(connector));
 
   const visibleSections = [
     {
@@ -835,6 +908,12 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
       title: 'Patch Management',
       connectors: patchConnectors,
       caption: 'Patch deployment tracking from SCCM, BigFix, and Tanium for vulnerability remediation.',
+    },
+    {
+      key: 'incident-ticketing' as const,
+      title: 'Incident & Ticketing Tools',
+      connectors: ticketingConnectors,
+      caption: 'Raise remediation tickets for findings. When Jira is enabled it overrides ServiceNow for new tickets.',
     }
   ];
 
@@ -881,6 +960,8 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
                           connector.id === 'sccm-cmdb' ? buildInventoryConnectorStatus(sccmConfig, inventoryConnectorsDisabledForDemo) :
                           connector.id === 'aws-discovery' ? buildInventoryConnectorStatus(awsConfig, inventoryConnectorsDisabledForDemo) :
                           connector.id === 'azure-discovery' ? buildInventoryConnectorStatus(azureConfig, inventoryConnectorsDisabledForDemo) :
+                          connector.id === 'servicenow-ticketing' ? buildTicketingConnectorStatus(snConfig, inventoryConnectorsDisabledForDemo) :
+                          connector.id === 'jira-ticketing' ? buildTicketingConnectorStatus(jiraTicketingConfig, inventoryConnectorsDisabledForDemo) :
                           buildInventoryConnectorStatus(null, inventoryConnectorsDisabledForDemo);
                         const lastSync = timeAgo(status.lastSyncAt);
 
@@ -888,6 +969,7 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
                                          status.hasSynced ? 'connect-source-dot--ok' :
                                          'connect-source-dot--warn';
                         const statusTitle = status.demoDisabled ? 'Unavailable in 7-day demo'
+                          : status.label ? status.label
                           : status.isFailed ? `Last sync failed${lastSync ? ` · ${lastSync}` : ''}`
                           : lastSync ? `Last sync · ${lastSync}`
                           : 'Not configured';

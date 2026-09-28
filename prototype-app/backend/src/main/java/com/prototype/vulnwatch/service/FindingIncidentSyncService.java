@@ -3,8 +3,14 @@ package com.prototype.vulnwatch.service;
 import com.prototype.vulnwatch.domain.Finding;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.repo.FindingRepository;
+import com.prototype.vulnwatch.ticketing.TicketingProvider;
+import com.prototype.vulnwatch.ticketing.TicketingProviderRegistry;
+import com.prototype.vulnwatch.ticketing.TicketingService;
+import com.prototype.vulnwatch.ticketing.TicketingSystem;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,10 +18,15 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 /**
- * Daily job that polls ServiceNow for the current status of every incident
- * that was linked to a finding, and writes the result back to {@code findings.incident_status}.
+ * Daily job that refreshes {@code findings.incident_status} from whichever ticketing system
+ * raised each ticket.
  *
- * <p>Runs once per day at 07:00 (configurable via the cron expression).
+ * <p>Routing is per finding, not per tenant: a tenant that moved from ServiceNow to Jira still
+ * has findings holding ServiceNow incident numbers, and asking Jira about {@code INC0010005}
+ * would fail every time. {@link TicketingService#owningSystem(Finding)} decides where each
+ * ticket is polled.
+ *
+ * <p>Runs once per day at 07:00.
  */
 @Service
 public class FindingIncidentSyncService {
@@ -23,20 +34,20 @@ public class FindingIncidentSyncService {
     private static final Logger log = LoggerFactory.getLogger(FindingIncidentSyncService.class);
 
     private final FindingRepository findingRepository;
-    private final ServiceNowIncidentService serviceNowIncidentService;
-    private final ServiceNowCmdbConfigService serviceNowCmdbConfigService;
+    private final TicketingProviderRegistry ticketingProviderRegistry;
+    private final TicketingService ticketingService;
     private final TenantWorkRunner tenantWorkRunner;
     private BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy = BackgroundTaskExecutionPolicy.allowAll();
 
     public FindingIncidentSyncService(
             FindingRepository findingRepository,
-            ServiceNowIncidentService serviceNowIncidentService,
-            ServiceNowCmdbConfigService serviceNowCmdbConfigService,
+            TicketingProviderRegistry ticketingProviderRegistry,
+            TicketingService ticketingService,
             TenantWorkRunner tenantWorkRunner
     ) {
         this.findingRepository = findingRepository;
-        this.serviceNowIncidentService = serviceNowIncidentService;
-        this.serviceNowCmdbConfigService = serviceNowCmdbConfigService;
+        this.ticketingProviderRegistry = ticketingProviderRegistry;
+        this.ticketingService = ticketingService;
         this.tenantWorkRunner = tenantWorkRunner;
     }
 
@@ -47,17 +58,17 @@ public class FindingIncidentSyncService {
                 : backgroundTaskExecutionPolicy;
     }
 
-    /** Scheduled daily at 07:00 to sync ServiceNow incident statuses back to findings. */
+    /** Scheduled daily at 07:00 to sync ticket statuses back to findings. */
     @Scheduled(cron = "0 0 7 * * *")
     public void syncIncidentStatuses() {
         if (!backgroundTaskExecutionPolicy.allowsBackgroundTask("finding-incident-sync.sync-incident-statuses")) {
             return;
         }
-        log.info("Starting ServiceNow incident status sync for all linked findings");
+        log.info("Starting ticket status sync for all linked findings");
         try {
             syncAll();
         } catch (Exception e) {
-            log.error("ServiceNow incident status sync failed", e);
+            log.error("Ticket status sync failed", e);
         }
     }
 
@@ -66,7 +77,7 @@ public class FindingIncidentSyncService {
         SyncAccumulator accumulator = new SyncAccumulator();
         tenantWorkRunner.forEachActiveTenant(tenant -> accumulator.add(syncCurrentTenant()));
         SyncResult result = accumulator.toResult();
-        log.info("ServiceNow incident status sync complete — updated={}, unchanged={}, failed={}",
+        log.info("Ticket status sync complete — updated={}, unchanged={}, failed={}",
                 result.updated(), result.unchanged(), result.failed());
         return result;
     }
@@ -74,56 +85,94 @@ public class FindingIncidentSyncService {
     private SyncResult syncCurrentTenant() {
         List<Finding> findingsWithIncident = findingRepository.findAllWithIncidentId();
         if (findingsWithIncident.isEmpty()) {
-            log.info("No findings with linked ServiceNow incidents — nothing to sync");
+            log.info("No findings with linked tickets — nothing to sync");
             return new SyncResult(0, 0, 0);
         }
 
-        // Group by tenant to resolve one config per tenant
         Map<Tenant, List<Finding>> byTenant = findingsWithIncident.stream()
                 .collect(Collectors.groupingBy(Finding::getTenant));
 
+        SyncAccumulator accumulator = new SyncAccumulator();
+        for (Map.Entry<Tenant, List<Finding>> tenantEntry : byTenant.entrySet()) {
+            accumulator.add(syncTenantFindings(tenantEntry.getKey(), tenantEntry.getValue()));
+        }
+        return accumulator.toResult();
+    }
+
+    private SyncResult syncTenantFindings(Tenant tenant, List<Finding> tenantFindings) {
+        // Group by the system that raised each ticket, so a tenant with both connectors polls
+        // each ticket against the system that actually knows about it.
+        Map<TicketingSystem, List<Finding>> bySystem = new LinkedHashMap<>();
+        int unroutable = 0;
+        for (Finding finding : tenantFindings) {
+            Optional<TicketingSystem> system = ticketingService.owningSystem(finding);
+            if (system.isEmpty()) {
+                unroutable++;
+                continue;
+            }
+            bySystem.computeIfAbsent(system.get(), ignored -> new java.util.ArrayList<>()).add(finding);
+        }
+
+        SyncAccumulator accumulator = new SyncAccumulator();
+        accumulator.add(new SyncResult(0, 0, unroutable));
+
+        for (Map.Entry<TicketingSystem, List<Finding>> entry : bySystem.entrySet()) {
+            TicketingSystem system = entry.getKey();
+            List<Finding> systemFindings = entry.getValue();
+
+            Optional<TicketingProvider> providerOpt = ticketingProviderRegistry.providerFor(system);
+            if (providerOpt.isEmpty()) {
+                log.warn("No provider registered for ticketing system {} — skipping {} findings for tenant {}",
+                        system.key(), systemFindings.size(), tenant.getId());
+                accumulator.add(new SyncResult(0, 0, systemFindings.size()));
+                continue;
+            }
+            accumulator.add(syncWithProvider(tenant, providerOpt.get(), systemFindings));
+        }
+        return accumulator.toResult();
+    }
+
+    private SyncResult syncWithProvider(Tenant tenant, TicketingProvider provider, List<Finding> findings) {
         int synced = 0;
         int unchanged = 0;
         int failed = 0;
 
-        for (Map.Entry<Tenant, List<Finding>> entry : byTenant.entrySet()) {
-            Tenant tenant = entry.getKey();
-            List<Finding> tenantFindings = entry.getValue();
+        // Several findings can share one ticket; poll it once.
+        Map<String, List<Finding>> byTicket = findings.stream()
+                .collect(Collectors.groupingBy(Finding::getIncidentId));
 
-            var configOpt = serviceNowCmdbConfigService.resolveRuntimeConfig(tenant);
-            if (configOpt.isEmpty()) {
-                log.warn("ServiceNow not configured for tenant {} — skipping {} findings",
-                        tenant.getId(), tenantFindings.size());
-                failed += tenantFindings.size();
+        for (Map.Entry<String, List<Finding>> entry : byTicket.entrySet()) {
+            String ticketKey = entry.getKey();
+            List<Finding> ticketFindings = entry.getValue();
+
+            Optional<String> newStatus;
+            try {
+                newStatus = provider.fetchStatus(tenant, ticketKey);
+            } catch (RuntimeException ex) {
+                log.warn("Failed to fetch {} status for ticket {}: {}",
+                        provider.system().key(), ticketKey, ex.getMessage());
+                newStatus = Optional.empty();
+            }
+
+            if (newStatus.isEmpty()) {
+                // Leave the last known status in place — a transient outage must not look like
+                // a status change.
+                log.warn("Could not fetch {} status for ticket {} — skipping", provider.system().key(), ticketKey);
+                failed += ticketFindings.size();
                 continue;
             }
-            var config = configOpt.get();
 
-            // Group by incident ID to avoid redundant API calls for the same incident
-            Map<String, List<Finding>> byIncident = tenantFindings.stream()
-                    .collect(Collectors.groupingBy(Finding::getIncidentId));
-
-            for (Map.Entry<String, List<Finding>> incEntry : byIncident.entrySet()) {
-                String incidentNumber = incEntry.getKey();
-                String newStatus = serviceNowIncidentService.getIncidentStatus(config, incidentNumber);
-
-                if (newStatus == null) {
-                    log.warn("Could not fetch status for incident {} — skipping", incidentNumber);
-                    failed += incEntry.getValue().size();
-                    continue;
+            String status = newStatus.get();
+            for (Finding finding : ticketFindings) {
+                if (!status.equals(finding.getIncidentStatus())) {
+                    finding.setIncidentStatus(status);
+                    finding.touch();
+                    synced++;
+                } else {
+                    unchanged++;
                 }
-
-                for (Finding f : incEntry.getValue()) {
-                    if (!newStatus.equals(f.getIncidentStatus())) {
-                        f.setIncidentStatus(newStatus);
-                        f.touch();
-                        synced++;
-                    } else {
-                        unchanged++;
-                    }
-                }
-                findingRepository.saveAll(incEntry.getValue());
             }
+            findingRepository.saveAll(ticketFindings);
         }
 
         return new SyncResult(synced, unchanged, failed);

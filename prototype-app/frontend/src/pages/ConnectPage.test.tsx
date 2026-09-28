@@ -24,6 +24,59 @@ function renderConnectPage(actor: ActorContext) {
   );
 }
 
+function mockInventoryConnectors() {
+  vi.spyOn(api, 'getServiceNowCmdbConfig').mockResolvedValue({
+    sourceSystem: 'servicenow',
+    configured: false,
+    baseUrl: '',
+    authType: 'BASIC',
+    username: '',
+    hasCredentialSecret: false,
+    installTable: 'cmdb_sam_sw_install',
+    discoveryModelTable: 'cmdb_sam_sw_discovery_model',
+    ciTable: 'cmdb_ci',
+    installQuery: '',
+    discoveryQuery: '',
+    installFields: 'sys_id',
+    discoveryFields: 'sys_id',
+    pageSize: 1000,
+    enabled: true,
+    autoSyncEnabled: false,
+    intervalMinutes: 1440
+  });
+  vi.spyOn(api, 'getSccmCmdbConfig').mockResolvedValue({
+    sourceSystem: 'sccm',
+    configured: false,
+    jdbcUrl: '',
+    authType: 'SQL_AUTH',
+    username: '',
+    hasCredential: false,
+    siteCode: '',
+    databaseName: 'CM_P01',
+    fetchSize: 500,
+    queryTimeoutSeconds: 120,
+    mockMode: false,
+    enabled: true,
+    autoSyncEnabled: false,
+    intervalMinutes: 1440
+  });
+  vi.spyOn(api, 'getAwsDiscoveryConfig').mockResolvedValue({
+    sourceSystem: 'aws',
+    configured: false,
+    authType: 'INSTANCE_METADATA',
+    accessKeyId: '',
+    hasCredential: false,
+    crossAccountRoleArn: '',
+    externalId: '',
+    awsAccountId: undefined,
+    regionsJson: '["us-east-1"]',
+    resourceTypesJson: '["EC2"]',
+    enabled: true,
+    autoSyncEnabled: false,
+    intervalMinutes: 1440
+  });
+}
+
 describe('ConnectPage', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -88,7 +141,63 @@ describe('ConnectPage', () => {
     renderConnectPage(TENANT_ADMIN);
 
     expect(await screen.findByLabelText(/last sync failed/i)).toBeInTheDocument();
-    expect(screen.getByText('ServiceNow')).toBeInTheDocument();
+    // ServiceNow appears twice by design: once as an inventory source and once as a ticketing
+    // tool, which are separate connector cards over the same instance credentials.
+    expect(screen.getAllByText('ServiceNow')).toHaveLength(2);
+  });
+
+  it('offers both ticketing connectors and says Jira overrides ServiceNow', async () => {
+    mockInventoryConnectors();
+    vi.spyOn(api, 'getJiraTicketingConfig').mockResolvedValue({
+      configured: true,
+      baseUrl: 'https://acme.atlassian.net',
+      authType: 'BASIC',
+      username: 'svc-scout@acme.test',
+      hasCredentialSecret: true,
+      projectKey: 'SEC',
+      issueTypeId: '',
+      issueTypeName: 'Task',
+      defaultLabels: '',
+      includePriority: true,
+      enabled: true,
+      lastTestStatus: 'SUCCESS',
+      lastTestedAt: '2026-09-20T09:00:00Z'
+    });
+
+    renderConnectPage(TENANT_ADMIN);
+
+    expect(await screen.findByText('Incident & Ticketing Tools')).toBeInTheDocument();
+    expect(screen.getByText('Jira')).toBeInTheDocument();
+    expect(screen.getByText(/Overrides ServiceNow ticketing/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/When Jira is enabled it overrides ServiceNow for new tickets/i)
+    ).toBeInTheDocument();
+  });
+
+  it('marks a Jira connector whose last connection test failed', async () => {
+    mockInventoryConnectors();
+    vi.spyOn(api, 'getJiraTicketingConfig').mockResolvedValue({
+      configured: true,
+      baseUrl: 'https://acme.atlassian.net',
+      authType: 'BASIC',
+      username: 'svc-scout@acme.test',
+      hasCredentialSecret: true,
+      projectKey: 'SEC',
+      issueTypeId: '',
+      issueTypeName: 'Task',
+      defaultLabels: '',
+      includePriority: true,
+      enabled: true,
+      lastTestStatus: 'FAILED',
+      lastTestMessage: 'project unreachable',
+      lastTestedAt: '2026-09-20T09:00:00Z'
+    });
+
+    renderConnectPage(TENANT_ADMIN);
+
+    // A ticketing connector never syncs inventory, so its health reads as a test result rather
+    // than a missing last-sync timestamp.
+    expect(await screen.findByLabelText(/last connection test failed/i)).toBeInTheDocument();
   });
 
   it('keeps platform-owned vulnerability connector management hidden from tenant users', async () => {
