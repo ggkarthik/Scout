@@ -92,6 +92,28 @@ class BomLifecycleAcceptancePostgresIntegrationTest {
         return document.getBytes(StandardCharsets.UTF_8);
     }
 
+    /** Builds a document whose entries carry explicit CycloneDX types. */
+    private static byte[] cycloneDxTyped(String... typeThenPurlPairs) {
+        StringBuilder components = new StringBuilder();
+        for (int i = 0; i < typeThenPurlPairs.length; i += 2) {
+            String type = typeThenPurlPairs[i];
+            String purl = typeThenPurlPairs[i + 1];
+            String name = purl.substring(purl.indexOf('/') + 1, purl.indexOf('@'));
+            String version = purl.substring(purl.indexOf('@') + 1);
+            if (i > 0) {
+                components.append(',');
+            }
+            components.append("{\"type\":\"").append(type)
+                    .append("\",\"name\":\"").append(name)
+                    .append("\",\"version\":\"").append(version)
+                    .append("\",\"purl\":\"").append(purl).append("\"}");
+        }
+        String document = "{\"bomFormat\":\"CycloneDX\",\"specVersion\":\"1.5\","
+                + "\"serialNumber\":\"urn:uuid:" + UUID.randomUUID() + "\",\"version\":1,"
+                + "\"components\":[" + components + "]}";
+        return document.getBytes(StandardCharsets.UTF_8);
+    }
+
     private void upload(Tenant tenant, BomType bomType, String assetIdentifier, byte[] content)
             throws Exception {
         orchestrator.ingestFromUpload(
@@ -204,5 +226,46 @@ class BomLifecycleAcceptancePostgresIntegrationTest {
 
         assertEquals(BomEvidenceState.SUPPORTED,
                 inventoryComponentRepository.findById(componentId).orElseThrow().getBomEvidenceState());
+    }
+
+    /**
+     * A model is not software: it has no CPE and no CVEs, so correlating one produces
+     * findings against an artifact that was never a package. Its software dependencies are a
+     * different matter -- surfacing a dependency CVE against a declared model is the reason
+     * to ingest an AI-BOM at all, so those must still enter inventory.
+     */
+    @Test
+    void anAiBomsModelStaysOutOfSoftwareInventoryWhileItsDependencyEntersIt() throws Exception {
+        Tenant tenant = tenantService.getDefaultTenant();
+        String asset = "acceptance-classify-" + SEQUENCE.incrementAndGet();
+
+        upload(tenant, BomType.AI_BOM, asset, cycloneDxTyped(
+                "machine-learning-model", "pkg:huggingface/llama-3@3.1",
+                "data", "pkg:generic/training-corpus@2024.1",
+                "library", "pkg:pypi/transformers@4.38.0"));
+
+        List<String> purls = activeComponents(asset).stream()
+                .map(InventoryComponent::getPurl)
+                .sorted()
+                .toList();
+        assertEquals(1, purls.size(),
+                "only the software dependency belongs in software inventory, got " + purls);
+        assertTrue(purls.contains("pkg:pypi/transformers@4.38.0"), purls.toString());
+    }
+
+    /** Cryptographic assets have their own evaluator and findings store. */
+    @Test
+    void cryptographicAssetsStayOutOfSoftwareInventory() throws Exception {
+        Tenant tenant = tenantService.getDefaultTenant();
+        String asset = "acceptance-crypto-" + SEQUENCE.incrementAndGet();
+
+        upload(tenant, BomType.SBOM, asset, cycloneDxTyped(
+                "cryptographic-asset", "pkg:generic/rsa-2048@1.0",
+                "library", "pkg:npm/lodash@4.17.20"));
+
+        List<String> purls = activeComponents(asset).stream()
+                .map(InventoryComponent::getPurl)
+                .toList();
+        assertEquals(List.of("pkg:npm/lodash@4.17.20"), purls);
     }
 }

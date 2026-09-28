@@ -249,7 +249,9 @@ public class SbomParserService {
 
         cpes = augmentCpesWithPurlDerivation(cpes, resolvedPurl, packageName);
 
-        return new ParsedComponent(ecosystem, packageName, resolvedVersion, resolvedPurl, digest, cpes, group, license, scope);
+        // CycloneDX XML carries the type as an attribute on <component type="...">.
+        String componentType = nullIfBlank(comp.getAttribute("type"));
+        return new ParsedComponent(ecosystem, packageName, resolvedVersion, resolvedPurl, digest, cpes, group, license, scope, componentType);
     }
 
     Document buildXmlDocument(byte[] content) throws Exception {
@@ -360,6 +362,7 @@ public class SbomParserService {
             String group = nullIfBlank(component.path("group").asText(null));
             String license = extractLicenseFromCycloneDx(component);
             String scope = nullIfBlank(component.path("scope").asText(null));
+            String componentType = nullIfBlank(component.path("type").asText(null));
             components.add(new ParsedComponent(
                     ecosystem,
                     packageName,
@@ -369,7 +372,8 @@ public class SbomParserService {
                     cpes,
                     group,
                     license,
-                    scope
+                    scope,
+                    componentType
             ));
         }
         return components;
@@ -412,7 +416,9 @@ public class SbomParserService {
                     cpes,
                     null,
                     spdxLicense,
-                    null
+                    null,
+                    // SPDX has no component-type equivalent; an SPDX package is software.
+                    "library"
             ));
         }
         return components;

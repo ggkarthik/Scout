@@ -86,7 +86,8 @@ class SbomContentIngestionServiceTest {
                 softwareInventorySyncService,
                 findingDeltaQueueService,
                 softwareIdentitySummaryProjectionService,
-                sbomUploadSupportService
+                sbomUploadSupportService,
+                new com.prototype.vulnwatch.service.BomComponentCategorizationService()
         );
         ReflectionTestUtils.setField(service, "entityManager", entityManager);
 
@@ -207,7 +208,8 @@ class SbomContentIngestionServiceTest {
                     softwareInventorySyncService,
                     findingDeltaQueueService,
                     softwareIdentitySummaryProjectionService,
-                    sbomUploadSupportService
+                    sbomUploadSupportService,
+                    new com.prototype.vulnwatch.service.BomComponentCategorizationService()
             );
             ReflectionTestUtils.setField(service, "entityManager", entityManager);
         }

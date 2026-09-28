@@ -41,6 +41,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class SbomContentIngestionService {
 
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(SbomContentIngestionService.class);
+
     private final SbomParserService sbomParserService;
     private final SbomUploadRepository sbomUploadRepository;
     private final InventoryComponentRepository inventoryComponentRepository;
@@ -50,6 +53,7 @@ public class SbomContentIngestionService {
     private final FindingDeltaQueueService findingDeltaQueueService;
     private final SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService;
     private final SbomUploadSupportService sbomUploadSupportService;
+    private final com.prototype.vulnwatch.service.BomComponentCategorizationService categorizationService;
 
     @PersistenceContext
     private EntityManager entityManager;
@@ -63,7 +67,8 @@ public class SbomContentIngestionService {
             SoftwareInventorySyncService softwareInventorySyncService,
             FindingDeltaQueueService findingDeltaQueueService,
             SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService,
-            SbomUploadSupportService sbomUploadSupportService
+            SbomUploadSupportService sbomUploadSupportService,
+            com.prototype.vulnwatch.service.BomComponentCategorizationService categorizationService
     ) {
         this.sbomParserService = sbomParserService;
         this.sbomUploadRepository = sbomUploadRepository;
@@ -74,6 +79,7 @@ public class SbomContentIngestionService {
         this.findingDeltaQueueService = findingDeltaQueueService;
         this.softwareIdentitySummaryProjectionService = softwareIdentitySummaryProjectionService;
         this.sbomUploadSupportService = sbomUploadSupportService;
+        this.categorizationService = categorizationService;
     }
 
     public SbomIngestionResponse ingestBytes(
@@ -144,8 +150,22 @@ public class SbomContentIngestionService {
             SbomFormat format = sbomParserService.detectFormat(content);
             List<ParsedComponent> components = sbomParserService.parse(content);
 
+            // Models, datasets and cryptographic assets are not software: they have no CPE and
+            // no CVEs, so correlating them produces false findings against artifacts that were
+            // never packages. They belong to the declared AI inventory and the CBOM evaluator
+            // respectively. This is keyed on each component's own type, so an AI-BOM's software
+            // dependencies still enter inventory and still get correlated.
+            List<ParsedComponent> softwareComponents = components.stream()
+                    .filter(parsed -> categorizationService.entersSoftwareInventory(parsed.componentType()))
+                    .toList();
+            int nonSoftwareSkipped = components.size() - softwareComponents.size();
+            if (nonSoftwareSkipped > 0) {
+                log.info("Skipped {} non-software component(s) for asset {} during software inventory ingestion",
+                        nonSoftwareSkipped, asset.getIdentifier());
+            }
+
             Map<String, ParsedComponent> parsedByKey = new LinkedHashMap<>();
-            for (ParsedComponent parsed : components) {
+            for (ParsedComponent parsed : softwareComponents) {
                 parsedByKey.put(componentKey(parsed.ecosystem(), parsed.packageName(), parsed.version(), parsed.purl()), parsed);
             }
 
@@ -259,7 +279,7 @@ public class SbomContentIngestionService {
             upload.setFindingsGenerated(0);
             upload.setStatus(SbomIngestionStatus.SUCCESS);
             sbomUploadRepository.save(upload);
-            return new SbomIngestionResponse(asset.getId(), upload.getId(), components.size(), 0);
+            return new SbomIngestionResponse(asset.getId(), upload.getId(), softwareComponents.size(), 0);
         } catch (IOException ioException) {
             sbomUploadSupportService.markUploadFailed(upload, ioException.getMessage());
             throw ioException;
