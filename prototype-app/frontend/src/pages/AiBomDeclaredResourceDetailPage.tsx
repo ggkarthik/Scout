@@ -101,6 +101,7 @@ export function AiBomDeclaredResourceDetailPage({ resourceId }: AiBomDeclaredRes
           <KVRow label="Deployment state">{resource.deploymentState}</KVRow>
           <KVRow label="Identity kind">{resource.identityKind}</KVRow>
           <KVRow label="Identity value">{resource.identityValue}</KVRow>
+          <KVRow label="Declaring BOM version">{resource.bomId}</KVRow>
           <KVRow label="First declared">{fmtDt(resource.firstDeclaredAt)}</KVRow>
           <KVRow label="Last declared">{fmtDt(resource.lastDeclaredAt)}</KVRow>
         </Panel>
