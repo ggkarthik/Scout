@@ -35,7 +35,9 @@ import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityRepository;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
@@ -152,8 +154,14 @@ class SbomUploadPostgresIntegrationTest {
         riskPolicyRepository.save(policy);
     }
 
+    // /api/sbom-fetch always resolves its BomSource via BomSourceSelector.keyed(...), which is
+    // documented as "Always PARTIAL: completeness is an audited human assertion, never something
+    // a scheduled job claims on its own" (see BomSourceSelector). A PARTIAL source never implies
+    // absence, so re-fetching a newer version on this path adds it as further evidence without
+    // retiring the previous version - only a source explicitly asserted COMPLETE_ASSET_SOFTWARE
+    // (e.g. via POST /api/bom/upload's completeness param) can trigger retirement.
     @Test
-    void sbomReuploadRetiresPreviousComponentOnRealPostgres() throws Exception {
+    void sbomEndpointReuploadKeepsBothVersionsActiveOnRealPostgres() throws Exception {
         ingestAdvisory();
 
         JsonNode initialUpload = fetchSbom(
@@ -192,10 +200,11 @@ class SbomUploadPostgresIntegrationTest {
                 .findByAssetAndComponentStatus(asset, InventoryComponentStatus.ACTIVE);
         List<InventoryComponent> retiredComponents = inventoryComponentRepository
                 .findByAssetAndComponentStatus(asset, InventoryComponentStatus.RETIRED);
-        assertEquals(1, activeComponents.size());
-        assertEquals("2.17.2", activeComponents.get(0).getVersion());
-        assertEquals(1, retiredComponents.size());
-        assertEquals("2.14.1", retiredComponents.get(0).getVersion());
+        assertEquals(2, activeComponents.size());
+        assertEquals(
+                Set.of("2.14.1", "2.17.2"),
+                activeComponents.stream().map(InventoryComponent::getVersion).collect(Collectors.toSet()));
+        assertEquals(0, retiredComponents.size());
         List<SbomUpload> uploads = sbomUploadRepository.findByAssetOrderByUploadedAtDesc(asset);
         assertEquals(2, uploads.size());
         assertTrue(uploads.stream().allMatch(upload -> upload.getStatus() == SbomIngestionStatus.SUCCESS));
