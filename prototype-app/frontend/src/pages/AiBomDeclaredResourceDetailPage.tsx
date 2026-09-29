@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
-import { pathForAiBomDeclaredResources, pathForFindingDetail } from '../app/routes';
+import { pathForAiBomDeclaredResources, pathForFindingDetail, pathForInventoryAiAsset } from '../app/routes';
 import { useActor } from '../features/auth/context';
 import { hasAnyRole } from '../features/auth/roles';
 import { InventoryShell } from '../features/inventory/InventoryShell';
@@ -145,7 +145,11 @@ export function AiBomDeclaredResourceDetailPage({ resourceId }: AiBomDeclaredRes
       <Panel title="Deployment Mapping">
         {resource.deploymentState === 'LINKED' ? (
           <>
-            <KVRow label="Linked artifact">{resource.linkedArtifactId}</KVRow>
+            <KVRow label="Linked artifact">
+              {resource.linkedArtifactId ? (
+                <Link to={pathForInventoryAiAsset(resource.linkedArtifactId)}>{resource.linkedArtifactId}</Link>
+              ) : null}
+            </KVRow>
             <KVRow label="Link method">{resource.linkMethod}</KVRow>
             <KVRow label="Reviewed by">{resource.linkReviewedBy}</KVRow>
             <KVRow label="Reviewed at">{fmtDt(resource.linkReviewedAt)}</KVRow>
@@ -157,7 +161,11 @@ export function AiBomDeclaredResourceDetailPage({ resourceId }: AiBomDeclaredRes
           </>
         ) : resource.proposedArtifactId ? (
           <>
-            <KVRow label="Proposed artifact">{resource.proposedArtifactId}</KVRow>
+            <KVRow label="Proposed artifact">
+              {resource.proposedArtifactId ? (
+                <Link to={pathForInventoryAiAsset(resource.proposedArtifactId)}>{resource.proposedArtifactId}</Link>
+              ) : null}
+            </KVRow>
             <KVRow label="Proposed by">{resource.proposedBy}</KVRow>
             <KVRow label="Proposed at">{fmtDt(resource.proposedAt)}</KVRow>
             {canApproveOrRemove ? (
