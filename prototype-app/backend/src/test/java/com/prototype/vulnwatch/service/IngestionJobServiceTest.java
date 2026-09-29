@@ -188,14 +188,16 @@ class IngestionJobServiceTest {
                         IngestionJobService.JOB_TYPE_AI_SECURITY_AWS_BEDROCK,
                         IngestionJobService.JOB_TYPE_AI_SECURITY_AZURE_DISCOVERY,
                         IngestionJobService.JOB_TYPE_AI_SECURITY_COPILOT_STUDIO,
-                        IngestionJobService.JOB_TYPE_AI_GRID_RUNTIME_ADAPTER)
+                        IngestionJobService.JOB_TYPE_AI_GRID_RUNTIME_ADAPTER,
+                        IngestionJobService.JOB_TYPE_AI_GRID_BOM_PROJECTION)
         )).thenReturn(0L);
         when(ingestionJobRepository.pollPendingExcludingJobTypes(
                 List.of(
                         IngestionJobService.JOB_TYPE_AI_SECURITY_AWS_BEDROCK,
                         IngestionJobService.JOB_TYPE_AI_SECURITY_AZURE_DISCOVERY,
                         IngestionJobService.JOB_TYPE_AI_SECURITY_COPILOT_STUDIO,
-                        IngestionJobService.JOB_TYPE_AI_GRID_RUNTIME_ADAPTER),
+                        IngestionJobService.JOB_TYPE_AI_GRID_RUNTIME_ADAPTER,
+                        IngestionJobService.JOB_TYPE_AI_GRID_BOM_PROJECTION),
                 2
         )).thenReturn(List.of(first, second));
 
