@@ -99,6 +99,14 @@ class AiSecurityFieldContractTest {
         assertEquals(Map.of("team", "AI Platform", "environment", "production"), safe.get("tags"));
     }
 
+    @Test
+    void permitsStandardBomComponentFieldsOnDeclaredAiResources() {
+        for (String field : java.util.List.of("purl", "cpe", "license", "supplier")) {
+            assertTrue(AiSecurityFieldContract.allows(field, AiSecurityFieldContract.Tier.STORAGE_ALLOWED), field);
+            assertTrue(AiSecurityFieldContract.allows(field, AiSecurityFieldContract.Tier.RESPONSE_ALLOWED), field);
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private static Object nestedValue(Map<String, Object> value, String collection, String field) {
         return ((List<Map<String, Object>>) value.get(collection)).get(0).get(field);

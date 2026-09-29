@@ -99,6 +99,8 @@ public class BomIngestionOrchestrator {
     private final BomSourceService bomSourceService;
     private final BomContributionService bomContributionService;
     private final BomRelationshipParsingService bomRelationshipParsingService;
+    private final AiBomDeclaredResourceService aiBomDeclaredResourceService;
+    private final AiBomProjectionSchedulingService aiBomProjectionSchedulingService;
 
     public BomIngestionOrchestrator(
             SbomEndpointFetchService sbomEndpointFetchService,
@@ -120,7 +122,9 @@ public class BomIngestionOrchestrator {
             ObjectMapper objectMapper,
             BomSourceService bomSourceService,
             BomContributionService bomContributionService,
-            BomRelationshipParsingService bomRelationshipParsingService
+            BomRelationshipParsingService bomRelationshipParsingService,
+            AiBomDeclaredResourceService aiBomDeclaredResourceService,
+            AiBomProjectionSchedulingService aiBomProjectionSchedulingService
     ) {
         this.sbomEndpointFetchService = sbomEndpointFetchService;
         this.sbomContentIngestionService = sbomContentIngestionService;
@@ -142,6 +146,8 @@ public class BomIngestionOrchestrator {
         this.bomSourceService = bomSourceService;
         this.bomContributionService = bomContributionService;
         this.bomRelationshipParsingService = bomRelationshipParsingService;
+        this.aiBomDeclaredResourceService = aiBomDeclaredResourceService;
+        this.aiBomProjectionSchedulingService = aiBomProjectionSchedulingService;
     }
 
     @Transactional
@@ -502,7 +508,7 @@ public class BomIngestionOrchestrator {
                 bomRecordRepository.save(record);
                 throw new IOException("No BOM components could be extracted from the submitted document");
             }
-            persistEvidenceAndCorrelations(record, tenant, components);
+            persistEvidenceAndCorrelations(record, source, tenant, components);
             // Structure the document declared between its own components, stored verbatim.
             // Nothing is inferred from these edges: a dependsOn is not a training or serving
             // claim, and treating it as one would invent provenance for policy to act on.
@@ -511,6 +517,16 @@ public class BomIngestionOrchestrator {
             findingsGenerated = inventoryResult.findingsGenerated();
             record.setComponentCount(componentCount);
             bomRecordRepository.save(record);
+        }
+
+        if (bomType == BomType.AI_BOM) {
+            // Persisted in this same transaction when the source is entitled and under its
+            // queue cap: the job row is invisible to the scheduled worker (a separate
+            // connection) until this transaction commits, which is exactly "persist projection
+            // intent in the ingestion transaction; process after commit" with no extra
+            // plumbing needed. Otherwise the source is marked HELD_ENTITLEMENT/DEFERRED and
+            // picked up later by the reconciliation sweep.
+            aiBomProjectionSchedulingService.scheduleOrDefer(tenant, source);
         }
 
         String action = existingOpt.isPresent() ? "REPLACED" : "CREATED";
@@ -764,7 +780,8 @@ public class BomIngestionOrchestrator {
         return (s == null || s.isBlank()) ? null : s.trim();
     }
 
-    private void persistEvidenceAndCorrelations(BomIngestionRecord record, Tenant tenant, List<BomComponent> components) {
+    private void persistEvidenceAndCorrelations(
+            BomIngestionRecord record, BomSource source, Tenant tenant, List<BomComponent> components) {
         if (record == null || tenant == null || components == null || components.isEmpty()) {
             return;
         }
@@ -834,6 +851,11 @@ public class BomIngestionOrchestrator {
         // making. The inventory matches were already resolved above, so this costs no extra
         // queries against the component set.
         bomContributionService.syncContributions(record, inventoryMatchesByComponentId);
+
+        // Give the models and datasets this source declares a home. They were excluded from
+        // software inventory above precisely because they are not software; without this they
+        // would land nowhere at all.
+        aiBomDeclaredResourceService.recordDeclarations(record, source, tenant, components);
     }
 
     private List<InventoryComponent> resolveInventoryMatches(BomIngestionRecord record, Tenant tenant, BomComponent component) {
