@@ -110,6 +110,11 @@ export function AiBomDeclaredResourceDetailPage({ resourceId }: AiBomDeclaredRes
           <KVRow label="BOM type">{detail.sourceBomType}</KVRow>
           <KVRow label="Source state">{detail.sourceState}</KVRow>
           <KVRow label="Revision">{detail.sourceRevision}</KVRow>
+          <KVRow label="Evidence state">
+            {detail.currentInLatestRevision
+              ? 'Current — declared by the latest BOM revision'
+              : 'Stale — a later revision was ingested without re-declaring this resource'}
+          </KVRow>
           <KVRow label="Completeness">{detail.completeness?.completeness}</KVRow>
           <KVRow label="Asserted by">{detail.completeness?.assertedBy}</KVRow>
           <KVRow label="Asserted at">{fmtDt(detail.completeness?.assertedAt)}</KVRow>

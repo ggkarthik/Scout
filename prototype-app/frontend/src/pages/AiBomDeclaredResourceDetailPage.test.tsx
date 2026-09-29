@@ -70,6 +70,7 @@ function buildDetail(overrides: Partial<AiBomDeclaredResourceDetail> = {}): AiBo
     sourceBomType: 'AI_BOM',
     sourceState: 'ACTIVE',
     sourceRevision: 1,
+    currentInLatestRevision: true,
     component: {
       componentId: 'component-1',
       name: 'llama-3',

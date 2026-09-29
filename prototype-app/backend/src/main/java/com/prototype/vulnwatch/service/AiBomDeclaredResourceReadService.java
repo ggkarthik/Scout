@@ -87,6 +87,7 @@ public class AiBomDeclaredResourceReadService {
                 source.getBomType() == null ? null : source.getBomType().name(),
                 source.getState() == null ? null : source.getState().name(),
                 source.getRevision(),
+                resource.getBomId().equals(source.getCurrentBomId()),
                 component == null ? null : new AiBomDeclaredResourceDetailResponse.Component(
                         component.getId(), component.getName(), component.getVersion(),
                         component.getPurl(), component.getLicense(), component.getScope(),

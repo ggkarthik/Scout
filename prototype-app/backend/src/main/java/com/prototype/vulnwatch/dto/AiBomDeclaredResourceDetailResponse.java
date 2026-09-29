@@ -13,6 +13,13 @@ public record AiBomDeclaredResourceDetailResponse(
         String sourceBomType,
         String sourceState,
         long sourceRevision,
+        /**
+         * Whether the resource's own {@code bomId} is still the source's current document.
+         * {@code false} means a later replacement was ingested without re-declaring this
+         * resource -- it may have been dropped, and its evidence is stale, not necessarily
+         * wrong.
+         */
+        boolean currentInLatestRevision,
         Component component,
         Completeness completeness,
         Projection projection

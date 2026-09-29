@@ -501,6 +501,8 @@ export type AiBomDeclaredResourceDetail = {
   sourceBomType: string | null;
   sourceState: string | null;
   sourceRevision: number;
+  /** false = a later BOM replacement was ingested without re-declaring this resource. */
+  currentInLatestRevision: boolean;
   component: {
     componentId: string;
     name: string;
