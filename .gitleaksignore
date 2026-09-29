@@ -124,3 +124,10 @@
 72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4582
 72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4583
 72307b34097f9ec2a1d197c2f98cf15b508ddcbb:prototype-app/backend/src/main/resources/db/migration/postgres_reset/V1__platform_schema.sql:generic-api-key:4770
+
+# Local dev placeholder credentials (local-dev-key, local-creator) documented in a
+# handover doc (plan.md) that was removed in a follow-up commit; these exact
+# historical fingerprints remain because pull-request scanning includes the
+# original commit.
+182ab75818b2452dc47ebe79b97d319865dc2944:plan.md:curl-auth-header:136
+182ab75818b2452dc47ebe79b97d319865dc2944:plan.md:generic-api-key:62
