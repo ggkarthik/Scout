@@ -22,6 +22,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.prototype.vulnwatch.repo.SoftwareIdentityRepository;
 
 @Service
 @Slf4j
@@ -31,6 +32,7 @@ public class OsvPlatformService {
   private final OsvApiClient osvApiClient;
   private final OsvAdvisoryRepository osvAdvisoryRepository;
   private final AdvisoryEquivalenceRepository equivalenceRepository;
+  private final SoftwareIdentityRepository softwareIdentityRepository;
   private final ObjectMapper objectMapper;
 
   @Autowired
@@ -44,7 +46,6 @@ public class OsvPlatformService {
     this.objectMapper = new ObjectMapper();
   }
 
-  @Scheduled(cron = "0 45 2 * * *")
   @Transactional
   public void syncOsvAdvisories() {
     log.info("Starting OSV advisory sync");
@@ -72,8 +73,58 @@ public class OsvPlatformService {
   private void syncEcosystemPackages(String ecosystem) {
     log.debug("Syncing OSV for ecosystem: {}", ecosystem);
 
-    List<OsvAdvisoryEntity> existingRecords = osvAdvisoryRepository.findBySource(ecosystem);
-    log.debug("Found {} existing OSV records for ecosystem: {}", existingRecords.size(), ecosystem);
+    try {
+      Set<String> packages = getInventoryPackages().getOrDefault(ecosystem, Set.of());
+
+      if (packages.isEmpty()) {
+        log.debug("No packages found for ecosystem: {}", ecosystem);
+        return;
+      }
+
+      log.info("Querying OSV for {} packages in ecosystem: {}", packages.size(), ecosystem);
+
+      for (String packageName : packages) {
+        try {
+          OsvQueryResponse response = osvApiClient.queryByPackageVersion(
+              ecosystem,
+              packageName,
+              null
+          );
+
+          if (response != null && response.getVulns() != null) {
+            for (OsvVulnerability vuln : response.getVulns()) {
+              saveOsvAdvisory(ecosystem, packageName, vuln);
+            }
+          }
+        } catch (Exception e) {
+          log.warn("Failed to query OSV for {}:{}", ecosystem, packageName, e);
+        }
+      }
+
+      log.debug("Completed OSV sync for ecosystem: {}", ecosystem);
+
+    } catch (Exception e) {
+      log.error("Error syncing ecosystem packages: {}", ecosystem, e);
+    }
+  }
+
+  private Map<String, Set<String>> getInventoryPackages() {
+    log.debug("Fetching unique packages from inventory");
+    Map<String, Set<String>> result = new HashMap<>();
+
+    try {
+      // Query all unique software identities grouped by ecosystem
+      // TODO: Implement this query based on your actual SoftwareIdentity structure
+      // For now, return empty map (will be populated when real packages exist)
+      // In production, this should query softwareIdentityRepository
+
+      log.debug("Found {} ecosystems with packages", result.size());
+      return result;
+
+    } catch (Exception e) {
+      log.error("Failed to get inventory packages", e);
+      return new HashMap<>();
+    }
   }
 
   private void saveOsvAdvisory(String ecosystem, String packageName, OsvVulnerability vuln) {
