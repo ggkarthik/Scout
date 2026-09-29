@@ -1,0 +1,201 @@
+================================================================================
+SCOUTGRID INTEGRATION ROADMAP — QUICK REFERENCE
+================================================================================
+
+🔴 TIER 1: BUILD NOW (Next 8 Weeks) — MUST HAVE
+================================================================================
+
+1. ⚡ Jira Service Management → ITSM ticket creation + status sync
+2. ⚡ ServiceNow Incident Management → Complete ITSM integration
+3. ⚡ Google Cloud Discovery → Multi-cloud parity with AWS/Azure  
+4. ⚡ Okta Directory Sync → Automatic owner resolution
+5. ⚡ Snyk API → #1 developer SCA platform
+6. ⚡ OSV Database → Modern language vulnerability coverage
+7. ⚡ Kubernetes Discovery → Container-native enterprise demand
+8. ⚡ GitHub Issues → GitHub-native workflow
+
+
+🟠 TIER 2: BUILD NEXT (Months 2-3) — HIGH VALUE
+================================================================================
+
+9. Google Vertex AI discovery → Complete AI platform coverage
+10. Azure Entra ID → Azure-first identity + owner resolution
+11. AWS Config state → Cloud configuration compliance
+12. PagerDuty/OpsGenie → On-call alerting integration
+13. Datadog → Observability/metrics correlation
+14. Dependabot Advisories → GitHub intelligence feed
+15. Artifactory/Nexus → Private artifact supply chain
+16. LangChain/LlamaIndex → LLM app security (AI Grid differentiator)
+17. Azure Policy state → Azure compliance signals
+18. Jira/Linear → Engineering work context
+19. GCP Asset Inventory → Historical resource tracking
+20. Splunk → SIEM + compliance correlation
+
+
+🟡 TIER 3: BUILD LATER (Months 3-4) — DIFFERENTIATION
+================================================================================
+
+21. HashiCorp Vault → Secret drift detection (Infra + AI)
+22. CrowdStrike Falcon EDR → Breach risk correlation  
+23. Prompt Injection Detection → LLM security (AI Grid)
+24. Anthropic/OpenAI Expansion → AI-assisted investigation
+25. MITRE ATT&CK Mapping → Threat actor tactics
+26. Hugging Face Hub → ML model vulnerability scanning
+27. Software Heritage → Dependency lineage (forensics)
+28. Recorded Future → Threat intelligence
+29. Falco → Runtime security monitoring
+30. Wiz/Orca/Lacework APIs → Competitor data bridge
+
+
+================================================================================
+AI BOM COMPETITIVE ANALYSIS
+================================================================================
+
+Current State:
+❌ AI BOM is covered by Wiz, Prisma AIRS, and SentinelOne (full/documented)
+❌ AI BOM alone is NOT a ScoutGrid differentiator
+
+ScoutGrid's Actual AI Grid Differentiator:
+✅ Cross-system AI exposure correlation (R2 with evidence)
+✅ Evidence-backed risk scoring (not just inventory)
+✅ Read-only discovery model (no sensitive data required)
+✅ Owner resolution + accountability
+✅ Policy governance + platform control
+
+Action Item:
+→ Position "AI BOM" as COMPONENT of broader AI Grid
+→ Emphasize risk correlation + LLM app security (emerging market)
+→ Add LangChain/LlamaIndex (Tier 1) for LLM app differentiation
+
+
+================================================================================
+BY-GRID COVERAGE RECOMMENDATIONS
+================================================================================
+
+📦 BOM Grid (Software Bill of Materials)
+   Current: 4 connectors
+   Add: Snyk (SCA), OSV (OSS), Artifactory (private)
+   Impact: +75% coverage
+
+🔍 Infra Grid (Infrastructure Discovery)
+   Current: 3 connectors
+   Add: Google Cloud, Kubernetes, CrowdStrike, Falco
+   Impact: +80% coverage
+
+☁️  Cloud Grid (Cloud Bill of Materials + Posture)
+   Current: 2 connectors
+   Add: AWS Config, Azure Policy, GCP Asset, Vault
+   Impact: +100% coverage enhancement
+
+🤖 AI Grid (AI/ML Resource Governance)
+   Current: 2 connectors
+   Add: Vertex AI, LangChain/LlamaIndex, Hugging Face
+   Impact: Complete platform parity
+
+🎫 Ticketing & Governance (NEW GRID)
+   Current: 0 connectors
+   Add: Jira, ServiceNow, GitHub Issues, Okta, Datadog, PagerDuty
+   Impact: Complete SecOps workflow
+
+
+================================================================================
+90-DAY EXECUTION PLAN
+================================================================================
+
+WEEKS 1-3: FOUNDATION
+  • Jira Service Management (350 lines) — Find/ticket workflow
+  • Google Cloud Discovery (500 lines) — Multi-cloud parity
+  • Okta/Entra ID (400 lines) — Owner resolution
+
+WEEKS 4-6: COVERAGE  
+  • Snyk API (350 lines) — Developer SCA
+  • OSV Database (150 lines) — Modern languages
+  • Kubernetes Discovery (600 lines) — Container security
+
+WEEKS 7-9: WORKFLOW
+  • GitHub Issues (200 lines) — Engineering workflow
+  • ServiceNow Complete (300 lines) — ITSM completion
+  • LangChain/LlamaIndex (400 lines) — LLM app security
+
+OUTCOME:
+  ✓ 8 new connectors shipped
+  ✓ 40%+ pilot adoption of 2+ new connectors
+  ✓ 2-3 customer case studies
+  ✓ Competitive advantage vs. Wiz/Orca/Lacework
+
+
+================================================================================
+EFFORT ESTIMATION
+================================================================================
+
+QUICK WINS (≤5 hours, ≤200 lines each):
+  • OSV, GitHub Issues, AWS Config, PagerDuty, Datadog, NVD+
+
+MEDIUM (5-15 hours, 200-600 lines each):
+  • Jira, GCP Discovery, Snyk, Okta, LangChain, Artifactory
+
+HIGH (15-40 hours, 600-1500 lines each):
+  • Kubernetes, Vertex AI, Vault, CrowdStrike, Falco
+
+
+================================================================================
+CRITICAL SUCCESS METRICS
+================================================================================
+
+By end of 90 days:
+✓ 8 new connectors (Tier 1) production-ready + documented
+✓ 40%+ of pilot customers enabling ≥2 new connectors
+✓ 2-3 published case studies with time savings data
+✓ NRR lift from multi-connector customers
+✓ Competitive win rate vs. competitors (connector breadth factor)
+✓ 60%+ adoption of Jira + Google Cloud within 60 days
+
+
+================================================================================
+VENDOR PRIORITY MATRIX (Ordered by Implementation Priority)
+================================================================================
+
+1. Jira Service Management      [CRITICAL] [MEDIUM] [ENTERPRISE]
+2. ServiceNow Incidents         [CRITICAL] [MEDIUM] [ENTERPRISE]
+3. Google Cloud Discovery       [CRITICAL] [MEDIUM] [MULTICLOUD]
+4. Okta Directory               [CRITICAL] [MEDIUM] [ENTERPRISE]
+5. Snyk API                     [HIGH]     [MEDIUM] [DEVELOPERS]
+6. OSV Database                 [HIGH]     [LOW]    [DEVS/RUST/JS/GO]
+7. Kubernetes Discovery         [HIGH]     [HIGH]   [DEVOPS]
+8. GitHub Issues                [HIGH]     [LOW]    [GITHUB-NATIVE]
+9. Google Vertex AI             [HIGH]     [HIGH]   [GCP/AI]
+10. Azure Entra ID              [HIGH]     [MEDIUM] [AZURE]
+11. AWS Config                  [MEDIUM]   [LOW]    [AWS]
+12. PagerDuty/OpsGenie          [MEDIUM]   [LOW]    [ONCALL]
+13. Datadog                     [MEDIUM]   [LOW]    [OBSERVABILITY]
+14. Dependabot                  [MEDIUM]   [LOW]    [GITHUB]
+15. Artifactory/Nexus           [MEDIUM]   [MEDIUM] [DEVOPS]
+16. LangChain/LlamaIndex         [HIGH]     [MEDIUM] [LLM-APPS] ⭐ AI DIFFERENTIATOR
+17. Azure Policy                [MEDIUM]   [LOW]    [AZURE]
+18. Jira/Linear                 [MEDIUM]   [LOW]    [ENGINEERING]
+19. GCP Asset Inventory         [MEDIUM]   [LOW]    [GCP]
+20. Splunk                      [MEDIUM]   [MEDIUM] [SIEM]
+21. HashiCorp Vault             [HIGH]     [HIGH]   [SECRET-DRIFT]
+22. CrowdStrike Falcon          [HIGH]     [HIGH]   [EDR]
+23. Prompt Injection Detection  [HIGH]     [MEDIUM] [LLM-SECURITY] ⭐ AI DIFFERENTIATOR
+24. Anthropic/OpenAI Expansion  [HIGH]     [MEDIUM] [AI-INVESTIGATION]
+25. MITRE ATT&CK                [MEDIUM]   [LOW]    [THREAT-INTEL]
+26. Hugging Face Hub            [MEDIUM]   [MEDIUM] [MODEL-REGISTRY]
+27. Software Heritage           [LOW]      [HIGH]   [RESEARCH]
+28. Recorded Future             [MEDIUM]   [MEDIUM] [THREAT-INTEL]
+29. Falco                       [MEDIUM]   [HIGH]   [RUNTIME-SECURITY]
+30. Wiz/Orca APIs               [MEDIUM]   [MEDIUM] [MIGRATION]
+
+
+================================================================================
+KEY TAKEAWAY
+================================================================================
+
+✓ Build the ITSM integration (Jira + ServiceNow) first → Required for enterprise
+✓ Complete multi-cloud coverage (Google Cloud, K8s) → Competitive necessity
+✓ Add LangChain/LlamaIndex (Tier 1) → AI Grid differentiation
+✓ Focus on identity/ownership (Okta/Entra) → Core to ScoutGrid value
+✓ Avoid scattering effort → Prioritize by revenue impact, not feature count
+
+Success = 8 Tier-1 connectors shipped + 40%+ adoption + case studies
+
