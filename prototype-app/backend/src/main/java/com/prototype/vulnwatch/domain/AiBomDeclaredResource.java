@@ -83,6 +83,20 @@ public class AiBomDeclaredResource {
     @Column(name = "link_reviewed_at")
     private Instant linkReviewedAt;
 
+    /**
+     * A reviewer's not-yet-confirmed candidate mapping (Milestone 3 part 5.3). Never presented
+     * as a deployment -- {@code linked_artifact_id} only changes once a (possibly different)
+     * reviewer approves it, which is what the V7 link-consistency check still governs.
+     */
+    @Column(name = "proposed_artifact_id")
+    private UUID proposedArtifactId;
+
+    @Column(name = "proposed_by", length = 255)
+    private String proposedBy;
+
+    @Column(name = "proposed_at")
+    private Instant proposedAt;
+
     @Column(name = "first_declared_at", nullable = false)
     private Instant firstDeclaredAt;
 
