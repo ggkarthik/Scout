@@ -50,8 +50,10 @@ public class GithubAdvisoryTenantService {
                 .orElseGet(() -> createNewIntegration(tenant));
 
         long affectedComponentCount = componentAdvisoryRepository
-                .findBySourceIdAndIsAffectedTrue(tenantId, UUID.randomUUID())
-                .size();
+                .findAll()
+                .stream()
+                .filter(GithubRepositoryComponentAdvisoryEntity::getIsAffected)
+                .count();
 
         return toIntegrationStatusResponse(integration, affectedComponentCount);
     }
