@@ -68,6 +68,8 @@ Active when `APP_JWT_ISSUER_URI` is set. Token decoded by `JwtTenantAuthenticati
 | `/api/operations/**` | `ROLE_PLATFORM_OWNER` |
 | `/api/operations/quality/**`, `GET /api/operations/software-identities/search` | also permit `TENANT_ADMIN`, `INVENTORY_ADMIN`, `SECURITY_ANALYST`, `READ_ONLY_AUDITOR` |
 | `POST /api/internal/ai-grid/evidence/{producerId}` | `ROLE_SERVICE_ACCOUNT`, and the authenticated principal must equal `producerId` |
+| `/api/fix-intelligence/**` | Public — `permitAll()` unconditionally, not gated by profile/env. Added with the Fix Intelligence MVP; a real gap against the rule below, see [Fix Intelligence](#fix-intelligence) |
+| `GET /api/auth/context`, `GET /api/me` | Authenticated (no longer public); still CSRF-exempt as read-only endpoints |
 | All other `/api/**` | Authenticated |
 
 ---
@@ -411,6 +413,25 @@ Per-tenant configuration of which vulnerability intelligence sources participate
 
 All write endpoints: `PLATFORM_OWNER`/`TENANT_ADMIN`/`SECURITY_ANALYST`.
 
+### Fix Intelligence
+
+**FixIntelligenceController — `/api/fix-intelligence`** (`permitAll()` — see [Authorization Rules](#authorization-rules))
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/fixes` | Paginated fix list; filterable by `search`, `fixType`, `severity`, `ecosystem` |
+| GET | `/fixes/{fixId}` | Single fix detail |
+| GET | `/fixes-by-type/{type}` | Paginated fixes of one `fixType` (`PATCH`/`WORKAROUND`/`COMPENSATING_CONTROL`) |
+| GET | `/statistics` | Counts by type/severity/ecosystem/source plus aggregate deployment-rate metrics |
+
+Every endpoint calls `FixDemoDataSeeder.generateDemoFixes()` — a fixed, seeded-random (`Random(42)`) in-memory list of ~100 synthetic fixes regenerated on every request. There is no repository, no persistence, and no correlation to real inventory or CVE data; this is an MVP demo surface, not a production data path. Frontend: `FixIntelligencePage`/`FixDetailPage` at `/fix-intelligence`.
+
+This is unrelated to the pre-existing, real `FixRecordService`/`fix_records` table surfaced inside `CveDetailController`'s CVE detail response (the CVE Assessment Workbench's own analyst/AI fix-recommendation feature) — don't conflate the two "fix" features.
+
+A parallel set of domain entities was added for a real (non-demo) implementation — `Fix`, `FixApplicabilityDecision`, `AssetFixStatus`, `CveFixMap` (plus, for patch-management ingestion, `PatchConnectorCredential` and `JiraIssueBacklog`) — with JPA mappings, repositories, and (for `AssetFixStatus`) a service (`FixApplicabilityService`). None of it is wired to `FixIntelligenceController` or any other controller, and `asset_fix_status`, `cve_fix_map`, `patch_connector_credentials`, and `jira_issue_backlog` have **no Flyway migration in either migration line** — touching those repositories against a real Postgres instance will fail (`ddl-auto=none`). `dto/patch/*` (`PatchCoverageMetricsResponse`, `PatchDeploymentDashboardResponse`, `VendorPatchData`, `PatchConnectorStatusResponse`, `PatchDeploymentStatusResponse`, `FixNormalizationResult`) likewise has no caller. `PatchConnectorRegistrationConfig`, `PatchSyncSchedulingConfig`, and `JiraIssueStatusSyncService` ship with a `.disabled` extension and are excluded from the Maven build. Treat all of the above as scaffolding for a future patch-management pipeline, not working code.
+
+The `sccm-patch`/`bigfix-patch`/`tanium-patch` connector cards on `/connect` (see [Connectors](#connectors) below) open frontend-only mock config pages for this future pipeline — there is no `PatchConnectorController` or other backend endpoint behind them.
+
 ### AI Security / AI Grid
 
 19 controllers under `com.prototype.vulnwatch.aisecurity.controller` (separate package from the rest of this doc — see [Service Layer](#ai-security--ai-grid-service-layer) below for the full pipeline). Tenant-facing endpoints additionally require the `ai.security` tenant entitlement (`AiSecurityAccessService.assertEntitled`); the global `/api/ai-frameworks` reference endpoint is the deliberate exception because platform owners need it before selecting a tenant. `SecurityConfig` has no dedicated path rule for `/api/ai-security/**` or `/api/ai-grid/**` — authorization is per-endpoint `@PreAuthorize` or service-level entitlement under the generic authenticated-`/api/**` rule. Two of the 19 — `AiGridPhase1PreviewController` and `AiGridPhase1ReleaseBoardController` — predate this doc's last full controller-by-controller sweep and aren't itemized below; read them directly if you need their surface. `AiGridPolicyRolloutController` is a thin trigger for `AiGridPolicyRolloutService.processPendingTasks` (see the Scheduled Jobs table) and likewise isn't itemized.
@@ -551,6 +572,8 @@ Mirrors the AWS Discovery architecture. Auth: `CLIENT_SECRET` or `MANAGED_IDENTI
 | GET | `/sources-summary` | Vulnerability source summary |
 
 `SyncRun` entity tracks each connector sync job.
+
+**Patch management connectors (SCCM, BigFix, Tanium) — no backend controller exists.** The `sccm-patch`/`bigfix-patch`/`tanium-patch` cards on `/connect` (Patch Management category) open `SccmPatchConnectorPage`/`BigFixPatchConnectorPage`/`TaniumPatchConnectorPage`, frontend-only mock forms whose "Test Connection"/"Save Configuration" actions `console.log` their inputs and make no API call. There is no `PatchConnectorController`, and no real endpoint to add one against yet — see [Fix Intelligence](#fix-intelligence) above for the unwired domain/repo scaffolding (`PatchConnectorCredential`, missing migrations) intended to eventually back this.
 
 ### Auth / Admin
 
