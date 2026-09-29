@@ -47,14 +47,16 @@ public class AiGridRuntimeIngestionWorker {
         for (Tenant tenant : tenants.listActiveTenants()) {
             List<IngestionJobService.ClaimedJobRef> claimed = jobs.claimPendingJobsByType(
                     tenant, IngestionJobService.JOB_TYPE_AI_GRID_RUNTIME_ADAPTER, 1, 1);
-            claimed.forEach(this::processSafely);
+            // Audits and metrics also resolve the workspace. Keep the entire job in
+            // tenant context, including the calls outside the ingestion transaction.
+            claimed.forEach(ref -> tenantExecution.run(tenant, () -> processSafely(ref)));
         }
     }
 
     private void processSafely(IngestionJobService.ClaimedJobRef ref) {
         IngestionJob job = jobs.loadJob(ref.tenantId(), ref.jobId());
-        jobs.recordStarted(job);
         try {
+            jobs.recordStarted(job);
             Tenant tenant = tenants.resolveTenantUuid(ref.tenantId());
             IngestionJobService.RuntimeAdapterJobPayload payload = jobs.readPayload(
                     job, IngestionJobService.RuntimeAdapterJobPayload.class);

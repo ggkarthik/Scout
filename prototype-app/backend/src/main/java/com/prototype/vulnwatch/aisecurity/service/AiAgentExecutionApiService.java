@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.aisecurity.service;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.service.TenantSchemaExecutionService;
 import java.sql.Timestamp;
+import java.sql.Types;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
@@ -31,19 +32,19 @@ public class AiAgentExecutionApiService {
         return tenantExecution.run(tenant, () -> {
             MapSqlParameterSource params = new MapSqlParameterSource()
                     .addValue("tenantId", tenant.getId())
-                    .addValue("agentId", agentId).addValue("agentVersionId", agentVersionId)
-                    .addValue("status", blank(status)).addValue("source", blank(source))
-                    .addValue("from", from == null ? null : Timestamp.from(from))
-                    .addValue("to", to == null ? null : Timestamp.from(to))
+                    .addValue("agentId", agentId, Types.OTHER).addValue("agentVersionId", agentVersionId, Types.OTHER)
+                    .addValue("status", blank(status), Types.VARCHAR).addValue("source", blank(source), Types.VARCHAR)
+                    .addValue("from", from == null ? null : Timestamp.from(from), Types.TIMESTAMP)
+                    .addValue("to", to == null ? null : Timestamp.from(to), Types.TIMESTAMP)
                     .addValue("limit", safeSize).addValue("offset", safePage * safeSize);
             String where = """
                     where tenant_id = :tenantId
-                      and (:agentId is null or agent_artifact_id = :agentId)
-                      and (:agentVersionId is null or agent_version_artifact_id = :agentVersionId)
+                      and (cast(:agentId as uuid) is null or agent_artifact_id = :agentId)
+                      and (cast(:agentVersionId as uuid) is null or agent_version_artifact_id = :agentVersionId)
                       and (:status is null or status = :status)
                       and (:source is null or source = :source)
-                      and (:from is null or evidence_time >= :from)
-                      and (:to is null or evidence_time < :to)
+                      and (cast(:from as timestamptz) is null or evidence_time >= :from)
+                      and (cast(:to as timestamptz) is null or evidence_time < :to)
                     """;
             var items = jdbc.query("""
                     select id, provider, agent_artifact_id, agent_version_artifact_id,correlation_status,correlation_diagnostic,source, started_at,

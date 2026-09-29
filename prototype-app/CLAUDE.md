@@ -69,11 +69,11 @@ See `backend/CLAUDE.md` and `frontend/CLAUDE.md` for directory-specific runtime 
 
 | Package | Contents |
 |---|---|
-| `controller/` | 44 REST controllers under `/api/**` |
+| `controller/` | 45 REST controllers under `/api/**`, including `FixIntelligenceController` (`/api/fix-intelligence/**` — see Fix Intelligence note below) |
 | `service/` | 251 business-logic services (plus subpackages `cbom/`, `cmdbingestion/`, `sbomingestion/`, `vulningestion/` — the latter holds the NVD/KEV/GHSA/CSAF/EUVD/JVN sync logic and `@Scheduled` entry points) |
-| `domain/` | 121 JPA entities (assets, inventory, vulns, findings, policies, CMDB, EOL, SCCM, AWS/Azure discovery, campaigns, BOM/CBOM) |
-| `dto/` | 264 API request/response objects |
-| `repo/` | 77 Spring Data JPA repositories |
+| `domain/` | 128 JPA entities (assets, inventory, vulns, findings, policies, CMDB, EOL, SCCM, AWS/Azure discovery, campaigns, BOM/CBOM, Fix Intelligence/patch-management scaffolding) |
+| `dto/` | 271 API request/response objects (incl. `dto/patch/` — patch-management DTOs with no current caller, see Known Limitations) |
+| `repo/` | 83 Spring Data JPA repositories |
 | `client/` | 22 external API clients (NVD, EUVD, JVN, GHSA, CSAF, EPSS, GitHub, ServiceNow, SCCM, endoflife.date, AWS, Azure, OpenAI, Resend) |
 | `config/` | Spring beans and security configuration (`SecurityConfig`, `ApiKeyAuthenticationFilter`, `TenantAwareDataSource`, `ProductionSafetyValidator`) |
 | `security/` | `SensitiveTenantAction` annotation + interceptor, `PasswordSetupCookieService`, `PublicEndpointRateLimiter` (5 files) |
@@ -119,7 +119,7 @@ Two authentication paths, handled by `ApiKeyAuthenticationFilter`:
 - Token decoded and passed to `JwtTenantAuthenticationService`, which resolves roles from the configured claim (default `roles`; namespaced claims ending in `/roles` also work).
 - Roles from JWT are mapped to Spring `GrantedAuthority` values.
 
-Authorization rules: `/api/platform/**` and `/api/operations/**` require `ROLE_PLATFORM_OWNER`. `/api/operations/quality/**` and `GET /api/operations/software-identities/search` also permit `ROLE_TENANT_ADMIN`, `ROLE_INVENTORY_ADMIN`, `ROLE_SECURITY_ANALYST`, and `ROLE_READ_ONLY_AUDITOR`. All other `/api/**` require authentication (including `/actuator/**` beyond health/info). Public: OPTIONS, `/actuator/health`, `/actuator/info`, `POST /api/auth/login`, `POST /api/auth/setup-password`, `POST /api/auth/setup-session`, `POST /api/demo-requests`, `/api/demo-invites/**`, `/api/tenant-invites/**`. `POST /api/internal/ai-grid/evidence/{producerId}` requires a new role, `ROLE_SERVICE_ACCOUNT`, plus the authenticated principal matching `producerId` — used by trusted external evidence producers feeding the AI Grid pipeline. `POST /api/internal/ai-grid/runtime/{producerId}/v1/batches` uses the same `ROLE_SERVICE_ACCOUNT` + principal-equals-`producerId` pattern for governed runtime-telemetry adapter producers (metadata-only agent execution/event batches, 2 MiB / 100 executions per request); the receipt it returns is readable back at `GET /api/ai-security/runtime-ingestion/receipts/{receiptId}` under normal tenant auth.
+Authorization rules: `/api/platform/**` and `/api/operations/**` require `ROLE_PLATFORM_OWNER`. `/api/operations/quality/**` and `GET /api/operations/software-identities/search` also permit `ROLE_TENANT_ADMIN`, `ROLE_INVENTORY_ADMIN`, `ROLE_SECURITY_ANALYST`, and `ROLE_READ_ONLY_AUDITOR`. All other `/api/**` require authentication (including `/actuator/**` beyond health/info), **except `/api/fix-intelligence/**`, which is `permitAll()` unconditionally** — a carve-out added with the Fix Intelligence MVP, not gated by profile or environment; see Known Limitations. Public: OPTIONS, `/actuator/health`, `/actuator/info`, `POST /api/auth/login`, `POST /api/auth/setup-password`, `POST /api/auth/setup-session`, `POST /api/demo-requests`, `/api/demo-invites/**`, `/api/tenant-invites/**`. `GET /api/auth/context` and `GET /api/me` require authentication like any other `/api/**` route (no longer `permitAll()`) but are still CSRF-ignored as read-only endpoints, alongside the public routes above. `POST /api/internal/ai-grid/evidence/{producerId}` requires a new role, `ROLE_SERVICE_ACCOUNT`, plus the authenticated principal matching `producerId` — used by trusted external evidence producers feeding the AI Grid pipeline. `POST /api/internal/ai-grid/runtime/{producerId}/v1/batches` uses the same `ROLE_SERVICE_ACCOUNT` + principal-equals-`producerId` pattern for governed runtime-telemetry adapter producers (metadata-only agent execution/event batches, 2 MiB / 100 executions per request); the receipt it returns is readable back at `GET /api/ai-security/runtime-ingestion/receipts/{receiptId}` under normal tenant auth.
 
 `APP_ALLOW_HEADER_TENANT_SELECTION=true` enables local header-based tenant selection via `X-Tenant-ID`; must be disabled in production.
 
@@ -141,6 +141,8 @@ Top-level routes and their paths:
 | `/exposure` | `ExposureDashboardPage` | Risk-focused overview (Overview) |
 | `/findings` | `FindingsPage` | Active findings |
 | `/findings/:displayId` | `FindingDetailPage` | Single finding detail |
+| `/fix-intelligence/:view?` | `FixIntelligencePage` | Fix Intelligence MVP — default `all`; sub-views `patches`, `workarounds`, `compensating-controls`. Demo-data only, see Known Limitations |
+| `/fix-intelligence/details/:fixId` | `FixDetailPage` | Single fix detail |
 | `/operations/:operationsView?` | `OperationalDashboardPage` | Default `pipeline`; sub-views `pipeline`, `platform-health` (`quality` redirects to `/inventory` with quality-tab search params instead of rendering here — see note below) |
 | `/vuln-repo` | `VulnRepoDashboardPage` | Vulnerability Repository dashboard |
 | `/vuln-repo/org-cves/:cveId?` | `VulnRepoOrgCvePage` | **Unified Records** — org-correlated CVEs (CVE Assessment Workbench) |
@@ -253,13 +255,13 @@ All sections except Ownership persist to a single `RiskPolicy` record via `PUT /
 
 ### Connect Page Architecture
 
-`ConnectPage` (`/connect/:connectView?`) is a connector catalog with views: `sources` (default) and `run-history`.
+`ConnectPage` (`/connect/:connectView?`) is a connector catalog with views: `sources` (default) and `run-history`. Under `sources`, the catalog renders as a card-grid: connector cards centre in an auto-fill grid (a column ladder in `connect.css` steps five-across down to one as the viewport narrows) rather than a fixed two-column stack, and each card shows the connector's real vendor mark (Microsoft's four squares, the `aws` wordmark, Azure's triangle, ServiceNow's `NOW` tile, BigFix's slate-blue "b", Tanium's red-disc "T") drawn as inline SVG rather than committed logo files, keeping third-party trademark assets out of the repo. Connector health (last sync / failure) is exposed via the status dot's `title`/`aria-label`, not card body text — there's no room for a stacked "Last sync · 2h ago" line in the card design.
 
-**Connector categories (rendered as connector-card grids under `sources`):**
+**Connector categories (rendered as connector-card grids under `sources`):** three sections, not the CMDB/Cloud/AI split of the previous stacked-card design —
 
-- **Inventory — CMDB & SBOM** — `sbom-endpoint`, `bom-management` (SBOM/AI-BOM/CBOM/Vendor-BOM via URL or upload), `servicenow-cmdb`, `sccm-cmdb`
-- **Inventory — Cloud Sources** — `aws-discovery`, `azure-discovery`
-- **Inventory — AI** (entitlement-gated, `ai.security`) — `ai-security-aws` (AWS Bedrock), `ai-security-azure` (Azure AI Foundry), `ai-security-copilot` (Microsoft Copilot Studio); config components `AiSecurityConnectorPage`, `AiSecurityAzureConnectorPage`, `CopilotStudioConnectorPage`
+- **Inventory** — absorbs CMDB, cloud, and AI sources in one section: `sbom-github`, `servicenow-cmdb`, `sccm-cmdb`, `aws-discovery`, `azure-discovery`, and (entitlement-gated, `ai.security`) `ai-security-aws` (AWS Bedrock), `ai-security-azure` (Azure AI Foundry), `ai-security-copilot` (Microsoft Copilot Studio); config components `AiSecurityConnectorPage`, `AiSecurityAzureConnectorPage`, `CopilotStudioConnectorPage`
+- **BOM Management** — `sbom-endpoint`, `bom-management` (SBOM/AI-BOM/CBOM/Vendor-BOM via URL or upload)
+- **Patch Management** — `sccm-patch`, `bigfix-patch`, `tanium-patch`; patch deployment tracking from SCCM/MECM, IBM BigFix, and Tanium for vulnerability remediation. Config components `SccmPatchConnectorPage`, `BigFixPatchConnectorPage`, `TaniumPatchConnectorPage` are reachable from the catalog but are UI-only mock forms today — "Test Connection" / "Save Configuration" only `console.log` their inputs, there is no backend call, and there is no backend service behind them yet (see Known Limitations). Distinct from the `sccm-cmdb` connector under Inventory, which is a real, wired CMDB sync.
 
 There is no "Vulnerability Intelligence" connector-card section anymore — see the accordion note above. `endoflife-date`, `euvd-feed`, `jvn-feed`, and `sbom-github` are still declared in the `ConnectorId` union and `CONNECTORS` array (with `ConnectorDetailContent` cases) but are not included in any of the three rendered category lists above, so they currently have no clickable card anywhere in the UI — likely a real gap worth a follow-up ticket rather than intentional.
 
@@ -274,6 +276,11 @@ Key connector components:
 - `IntegrationRunQueuePage` / `InventoryRunQueuePage` — live run queue surfaces
 - `GithubPipelineManager` — GitHub SBOM source management
 - `IngestionPage` — SBOM endpoint / file upload
+- `SccmPatchConnectorPage`, `BigFixPatchConnectorPage`, `TaniumPatchConnectorPage` — patch-management connector config UI (mock only, see above)
+
+### Fix Intelligence (`/fix-intelligence`)
+
+`FixIntelligencePage` (list/filter by `all`/`patches`/`workarounds`/`compensating-controls`) and `FixDetailPage` are an MVP surface for browsing recommended fixes (patches, workarounds, compensating controls) independent of the CVE Assessment Workbench's own fix-recommendation feature (`FixRecordService`, `fix_records` table, surfaced inside `CveDetailController`'s CVE detail response — an older, unrelated feature; don't confuse the two). `FixIntelligenceController` (`/api/fix-intelligence/**`) is backed entirely by `FixDemoDataSeeder.generateDemoFixes()` — a fixed, in-memory, seeded-random (`Random(42)`) list of ~100 synthetic fixes. There is no persistence, no correlation to real inventory or CVE data, and no pagination beyond an in-memory slice. See Known Limitations for the auth and schema gaps around the domain entities (`Fix`, `FixApplicabilityDecision`, `AssetFixStatus`, `CveFixMap`) added alongside this controller but not wired to it.
 
 ### Adding a Database Migration
 
@@ -338,6 +345,9 @@ A handful of additional infra-level jobs also run (ingestion job polling every 2
 - The migration history reset is intentional: the platform and tenant Flyway lines were each consolidated into a fresh `V1` baseline (`postgres_reset/V1__platform_schema.sql`, `tenant/V1__tenant_schema.sql`), independently resolved by `PackagedMigrationCatalog`. The ADR that documented this (`docs/adr-migration-reset-v1-baselines.md`) has been removed from the repository along with a handful of other superseded docs; if the rationale needs to be discoverable again, someone should re-author it rather than assume this bullet is a substitute.
 - `com.prototype.vulnwatch.web.PlatformAdminRequestPaths` has no call site found outside its own unit test as of this writing — likely incompletely wired up.
 - Several docs and this file previously referenced `docs/p0-production-runbook.md` for the production bootstrap/Render migration procedure and `docs/production-database-roles.sql` for manual DBA role grants — **neither file exists in the repository**. These are pre-existing dangling references (the runbook doc has since been deleted outright); someone should author replacements or remove the remaining references in `backend/CLAUDE.md`, `docs/backend.md`, and `docs/architecture.md`.
+- **Fix Intelligence MVP** (`/fix-intelligence`, `FixIntelligenceController`) is demo data only — see "Fix Intelligence" above. Its `/api/fix-intelligence/**` endpoints are `permitAll()` with no auth check and no tenant scoping at all (not even the usual API-key path), which is a real gap against the documented security model, not a deliberate design choice for this data; do not extend this controller to touch real tenant data without closing that first.
+- **Patch management infrastructure is mostly unwired scaffolding.** The `sccm-patch`/`bigfix-patch`/`tanium-patch` cards on `/connect` open mock config forms (`SccmPatchConnectorPage`, `BigFixPatchConnectorPage`, `TaniumPatchConnectorPage`) whose "Test Connection"/"Save Configuration" actions only `console.log` — no API call exists yet. The domain entities added alongside them (`AssetFixStatus`, `CveFixMap`, `PatchConnectorCredential`, `JiraIssueBacklog`) and their repositories have **no corresponding Flyway migration** — `asset_fix_status`, `cve_fix_map`, `patch_connector_credentials`, and `jira_issue_backlog` don't exist in either migration line, so any code path that actually touches them will fail against a real Postgres (`ddl-auto=none`). `FixApplicabilityService` and the `dto/patch/*` DTOs (`PatchCoverageMetricsResponse`, `PatchDeploymentDashboardResponse`, `VendorPatchData`, etc.) have no controller or service caller anywhere in the codebase. `PatchConnectorRegistrationConfig`, `PatchSyncSchedulingConfig`, and `JiraIssueStatusSyncService` ship with a `.disabled` file extension, excluding them from the Maven build entirely — treat all of this as scaffolding for future work, not a working patch-management pipeline.
+- The production-bundle credential check (`frontend/scripts/verify-production-bundle.mjs`, run as part of `npm run build`) scans `dist/` for literal dev-credential strings (`change-me-in-prod`, `local-creator`, `local-analyst`, provider secret patterns). `src/api/client.ts` already avoids embedding these in production by reading them through an `import.meta.env.DEV ? '<default>' : ''` ternary, which Vite dead-code-eliminates in a prod build. `FixIntelligencePage`/`FixDetailPage` initially bypassed this by calling `fetch()` directly with hardcoded `X-API-Key`/`X-Creator-Key` header values instead of going through `api/client.ts`, which leaked the literals into the production bundle and failed this gate; they were fixed to gate those headers behind `import.meta.env.DEV` inline. Prefer routing new pages through `api/client.ts` rather than raw `fetch()` so this class of bug can't recur.
 
 ### GitHub Token
 

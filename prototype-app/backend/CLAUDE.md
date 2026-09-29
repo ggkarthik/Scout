@@ -55,8 +55,10 @@ Every `/api/**` request goes through `ApiKeyAuthenticationFilter` (runs before `
 - `/api/platform/**` and `/api/operations/**` → `ROLE_PLATFORM_OWNER` required
 - `/api/operations/quality/**` and `GET /api/operations/software-identities/search` → also permit `ROLE_TENANT_ADMIN`, `ROLE_INVENTORY_ADMIN`, `ROLE_SECURITY_ANALYST`, `ROLE_READ_ONLY_AUDITOR`
 - All other `/api/**` → authenticated
+- `/api/fix-intelligence/**` → `permitAll()` unconditionally — a carve-out added with the Fix Intelligence MVP (`FixIntelligenceController`), not gated by profile/env. This is a real hole against the pattern above, not a documented exception; see root `CLAUDE.md` Known Limitations before adding real data behind it.
 - `/actuator/**` beyond health/info → authenticated (not public)
 - Public: OPTIONS, `/actuator/health` (+ `/health/readiness`, `/health/liveness`), `/actuator/info`, `POST /api/auth/login`, `POST /api/auth/setup-password`, `POST /api/auth/setup-session`, `POST /api/demo-requests`, `/api/demo-invites/**`, `/api/tenant-invites/**`
+- `GET /api/auth/context` and `GET /api/me` → authenticated (no longer `permitAll()`), but still CSRF-ignored as read-only endpoints
 - `POST /api/internal/ai-grid/evidence/{producerId}` requires `ROLE_SERVICE_ACCOUNT` and that the authenticated principal equals `producerId` — used by trusted external evidence producers (CIEM/DSPM/ASM/runtime tools) feeding the AI Grid pipeline
 
 ## Multi-tenancy
@@ -194,12 +196,12 @@ com.prototype.vulnwatch/
                # JwtDecoderConfig, TenantAwareDataSource, ProductionSafetyValidator,
                # TenantResolutionFilter, WebConfig, TenantSchemaReadinessHealthIndicator,
                # TenantSchemaMigratorRunner (21 files)
-  controller/  # 44 REST controllers under /api/**
+  controller/  # 45 REST controllers under /api/**, incl. FixIntelligenceController
   service/     # 251 business-logic services, incl. subpackages cbom/, cmdbingestion/,
                # sbomingestion/, vulningestion/ (feed sync + the @Scheduled entry points)
-  domain/      # 121 JPA entities
-  dto/         # 264 API request/response objects
-  repo/        # 77 Spring Data JPA repositories
+  domain/      # 128 JPA entities
+  dto/         # 271 API request/response objects, incl. dto/patch/ (unwired scaffolding)
+  repo/        # 83 Spring Data JPA repositories
   client/      # 22 external API clients (NVD, EUVD, JVN, GHSA, CSAF, EPSS, GitHub, ServiceNow, AWS, Azure…)
   security/    # SensitiveTenantAction annotation + interceptor, PasswordSetupCookieService,
                # PublicEndpointRateLimiter (5 files)
@@ -221,6 +223,8 @@ com.prototype.vulnwatch.aisecurity/   # separate top-level package, NOT under th
 ```
 
 `aisecurity/**` tables have **no JPA entity or Spring Data repository** — every read/write goes through `JdbcTemplate`/`NamedParameterJdbcTemplate` directly in the service classes. Full module map: `docs/business-logic-guide.md#ai-security--ai-grid-pipeline`, schema: `docs/database.md#ai-security--ai-grid-tables`.
+
+`FixIntelligenceController` (`/api/fix-intelligence/**`, `permitAll()`) is entirely demo-data-backed — it calls `FixDemoDataSeeder.generateDemoFixes()` on every request and touches no repository. The domain entities added alongside it for a real implementation (`Fix`, `FixApplicabilityDecision`, `AssetFixStatus`, `CveFixMap`, plus the unrelated `PatchConnectorCredential`/`JiraIssueBacklog` patch-management entities) have JPA mappings and repositories but **no backing Flyway migration** for `asset_fix_status`, `cve_fix_map`, `patch_connector_credentials`, or `jira_issue_backlog` in either migration line — do not wire a service to these repos without adding the migration first. `FixApplicabilityService` and `dto/patch/*` are similarly unwired (no caller). See root `CLAUDE.md` Known Limitations for the full list, including the `.disabled` patch-management config/scheduling classes excluded from the build.
 
 Newer, less-obvious controllers worth knowing about: `CampaignController` (`/api/campaigns` — remediation campaigns), `CbomController` (`/api/bom/cbom` — cloud BOM posture), `BomController` (`/api/bom`), `AzureDiscoveryController` (`/api/connectors/azure-discovery`), `IngestionJobController` (`/api/ingestion-jobs`), `TenantSchemaStatusController` (`/api/platform/tenant-schema-status` — per-tenant schema migration status), `DemoDatasetController` (`POST /api/platform/tenants/{tenantId}/demo-data`, `PLATFORM_OWNER` — manual demo dataset provisioning), `TenantSupportAccessController` (`/api/tenants/{tenantId}/support-grants` + `/api/auth/support-grants/**` — tenant-initiated break-glass support access, distinct from the platform-owner-initiated `tenant_support_grants` flow).
 
