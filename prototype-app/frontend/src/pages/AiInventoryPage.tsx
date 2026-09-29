@@ -6,7 +6,7 @@ import { PageFreshnessStatus } from '../components/PageFreshnessStatus';
 import { AI_ARTIFACT_CATEGORIES, combinedNativeKindFilterValue, stripProviderPrefix } from '../features/ai-security/categories';
 import type { AiSeverityGridRow } from '../features/ai-security/types';
 import { InventoryShell } from '../features/inventory/InventoryShell';
-import { pathForConnectView, pathForInventoryAiAsset, pathForInventoryAiAssets } from '../app/routes';
+import { pathForAiBomDeclaredResources, pathForConnectView, pathForInventoryAiAsset, pathForInventoryAiAssets } from '../app/routes';
 import { RUN_QUEUE_REFRESH_INTERVAL_MS } from '../lib/polling';
 
 const MAX_GRID_ROWS = 10;
@@ -266,6 +266,10 @@ export function AiInventoryPage() {
           <button type="button" className="fpl-widget" onClick={() => navigate('/inventory/ai/executions')}>
             <div className="fpl-widget-title">Runtime metadata</div>
             <p>Review execution status, policy state, and timing without exposing prompts or transcripts.</p>
+          </button>
+          <button type="button" className="fpl-widget" onClick={() => navigate(pathForAiBomDeclaredResources())}>
+            <div className="fpl-widget-title">AI-BOM Declared Resources</div>
+            <p>Models and datasets declared by an uploaded AI-BOM, their deployment-linking coverage, and setup actions.</p>
           </button>
         </div>
       </div>

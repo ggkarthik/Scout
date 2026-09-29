@@ -267,6 +267,18 @@ export function pathForPlatformPolicyDetail(policyId: string): string {
   return `/platform/ai-policies/${encodeURIComponent(policyId)}`;
 }
 
+export function pathForAiBomDeclaredResources(): string {
+  return '/inventory/ai/declared-resources';
+}
+
+export function pathForAiBomDeclaredResourceDetail(resourceId: string): string {
+  return `/inventory/ai/declared-resources/${encodeURIComponent(resourceId)}`;
+}
+
+export function pathForAiFindings(tab?: 'violations' | 'vulnerabilities'): string {
+  return tab === 'vulnerabilities' ? '/findings/ai/vulnerabilities' : '/findings/ai';
+}
+
 export function pathForAiFindingDetail(findingId: string, returnTo?: string): string {
   const encodedFindingId = encodeURIComponent(findingId);
   if (!returnTo || returnTo.trim().length === 0) {

@@ -2,6 +2,7 @@ import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../api/client';
 import type { AiSecurityFinding } from '../features/ai-security/types';
+import { buildFinding as buildVulnerabilityFinding, findingPageOf } from '../test/fixtures';
 import { renderWithProviders } from '../test/test-utils';
 import { AiFindingsPage } from './AiFindingsPage';
 
@@ -86,5 +87,34 @@ describe('AiFindingsPage', () => {
     renderWithProviders(<AiFindingsPage />, { route: '/findings/ai' });
 
     expect(await screen.findByText('No matching AI findings')).toBeInTheDocument();
+  });
+
+  it('navigates to the Software Vulnerabilities tab route when clicked', async () => {
+    vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({ items: [], page: 0, size: 100, total: 0 });
+
+    renderWithProviders(<AiFindingsPage />, { route: '/findings/ai' });
+
+    fireEvent.click(await screen.findByText('Software Vulnerabilities'));
+
+    expect(navigateMock).toHaveBeenCalledWith('/findings/ai/vulnerabilities');
+  });
+
+  it('renders findings affecting a declared AI resource on the Software Vulnerabilities tab', async () => {
+    const listFindings = vi.spyOn(api, 'listFindings').mockResolvedValue(findingPageOf([
+      buildVulnerabilityFinding({
+        id: 'finding-2',
+        displayId: 'F-000002',
+        affectedAiResources: [{ id: 'resource-1', name: 'llama-3', resourceKind: 'MODEL' }],
+      }),
+    ]));
+
+    renderWithProviders(<AiFindingsPage />, { route: '/findings/ai/vulnerabilities' });
+
+    expect(await screen.findByText('F-000002')).toBeInTheDocument();
+    expect(screen.getByText('llama-3')).toBeInTheDocument();
+    expect(listFindings).toHaveBeenCalledWith(expect.objectContaining({
+      findingKind: ['VULNERABILITY'],
+      hasAffectedAiResource: true,
+    }));
   });
 });

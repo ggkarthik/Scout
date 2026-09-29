@@ -2,11 +2,95 @@ import { useQuery } from '@tanstack/react-query';
 import React from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
-import { pathForAiFindingDetail } from '../app/routes';
+import { pathForAiFindingDetail, pathForAiFindings, pathForFindingDetail } from '../app/routes';
 import { timeAgo } from '../lib/time';
 import type { AiProvider } from '../features/ai-security/types';
 
-export function AiFindingsPage() {
+type AiFindingsTab = 'violations' | 'vulnerabilities';
+
+function AiFindingsTabBar({ tab }: { tab: AiFindingsTab }) {
+  const navigate = useNavigate();
+  return (
+    <div className="fd3-tab-bar">
+      <button
+        className={`fd3-tab${tab === 'violations' ? ' fd3-tab--active' : ''}`}
+        onClick={() => navigate(pathForAiFindings('violations'))}
+      >
+        Policy Violations
+      </button>
+      <button
+        className={`fd3-tab${tab === 'vulnerabilities' ? ' fd3-tab--active' : ''}`}
+        onClick={() => navigate(pathForAiFindings('vulnerabilities'))}
+      >
+        Software Vulnerabilities
+      </button>
+    </div>
+  );
+}
+
+function SoftwareVulnerabilitiesTab() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [status, setStatus] = React.useState<'OPEN' | 'RESOLVED' | ''>('OPEN');
+  const findingsQuery = useQuery({
+    queryKey: ['ai-bom-affected-vulnerability-findings', status],
+    queryFn: () => api.listFindings({
+      findingKind: ['VULNERABILITY'],
+      hasAffectedAiResource: true,
+      status: status ? [status] : undefined,
+      size: 100,
+    }),
+  });
+  const items = findingsQuery.data?.items ?? [];
+
+  return (
+    <>
+      <section className="ai-security-hero findings">
+        <div>
+          <span className="ai-security-kicker">CVE findings reaching declared AI resources</span>
+          <h2>Software Vulnerabilities</h2>
+          <p>Vulnerability findings that transitively affect a declared AI-BOM model or dataset through a dependency.</p>
+        </div>
+        <select value={status} onChange={(event) => setStatus(event.target.value as 'OPEN' | 'RESOLVED' | '')} aria-label="Finding status">
+          <option value="OPEN">Open</option>
+          <option value="RESOLVED">Resolved</option>
+          <option value="">All states</option>
+        </select>
+      </section>
+
+      {findingsQuery.isLoading ? (
+        <section className="panel"><div className="empty-state"><p>Loading software vulnerabilities…</p></div></section>
+      ) : findingsQuery.isError ? (
+        <section className="panel"><div className="notice error">Software vulnerabilities could not be loaded.</div></section>
+      ) : items.length === 0 ? (
+        <section className="ai-security-empty">
+          <div className="ai-security-empty-mark clean">0</div>
+          <h3>No matching software vulnerabilities</h3>
+          <p>Findings appear here once a component a declared AI resource depends on has an open vulnerability finding.</p>
+        </section>
+      ) : (
+        <section className="panel ai-security-table-panel">
+          <table className="data-table">
+            <thead><tr><th>Finding</th><th>Package</th><th>Affected AI resource</th><th>Status</th><th>Observed</th></tr></thead>
+            <tbody>
+              {items.map((finding) => (
+                <tr key={finding.id} onClick={() => navigate(pathForFindingDetail(finding.displayId || finding.id, `${location.pathname}${location.search}`), { state: { finding } })}>
+                  <td><span className={`severity-badge ${finding.severity.toLowerCase()}`}>{finding.severity}</span><strong>{finding.displayId}</strong></td>
+                  <td>{finding.packageName}<small>{finding.packageVersion}</small></td>
+                  <td>{(finding.affectedAiResources ?? []).map((resource) => resource.name).join(', ') || '—'}</td>
+                  <td><span className="status-pill">{finding.status.replace(/_/g, ' ')}</span></td>
+                  <td>{timeAgo(finding.lastObservedAt) ?? 'Unknown'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+    </>
+  );
+}
+
+function PolicyViolationsTab() {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -37,7 +121,7 @@ export function AiFindingsPage() {
 
   const items = findingsQuery.data?.items ?? [];
   return (
-    <div className="ai-security-page">
+    <>
       <section className="ai-security-hero findings">
         <div>
           <span className="ai-security-kicker">Configuration evidence, separate from CVEs</span>
@@ -110,6 +194,18 @@ export function AiFindingsPage() {
         </section>
         </>
       )}
+    </>
+  );
+}
+
+export function AiFindingsPage() {
+  const location = useLocation();
+  const tab: AiFindingsTab = location.pathname.endsWith('/vulnerabilities') ? 'vulnerabilities' : 'violations';
+
+  return (
+    <div className="ai-security-page">
+      <AiFindingsTabBar tab={tab} />
+      {tab === 'vulnerabilities' ? <SoftwareVulnerabilitiesTab /> : <PolicyViolationsTab />}
     </div>
   );
 }

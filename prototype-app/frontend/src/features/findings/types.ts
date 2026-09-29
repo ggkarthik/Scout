@@ -56,6 +56,8 @@ export type Finding = {
   closedRuleId?: string;
   ownershipSyncedAt?: string;
   ownership?: OwnershipSummary;
+  /** Declared AI-BOM resources this VULNERABILITY finding transitively affects, if any. */
+  affectedAiResources?: Array<{ id: string; name: string; resourceKind: string }>;
 };
 export type FindingPage = {
   items: Finding[];
@@ -96,6 +98,15 @@ export type FindingsFilterModel = {
   patchAvailable?: boolean;
   suppressedUntilBand?: 'expiring-soon' | 'expired';
   assetType?: string[];
+  /**
+   * Finding kinds to include. Omitted or empty means every kind, which keeps All Findings
+   * inclusive; the AI Findings "Software Vulnerabilities" tab selects VULNERABILITY explicitly.
+   */
+  findingKind?: string[];
+  /** Restricts to findings transitively affecting one of these declared AI-BOM resource ids. */
+  affectedAiResourceId?: string[];
+  /** true = affects any declared AI resource; false = affects none. Independent of the id filter. */
+  hasAffectedAiResource?: boolean;
 };
 
 export type FindingQueueKind = 'BUILT_IN' | 'PERSONAL';
