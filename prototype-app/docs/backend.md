@@ -902,7 +902,7 @@ Per-tenant DDL now runs on its own Flyway line, separate from the platform's sta
 | `app.schema-migration.report-only` | `APP_SCHEMA_MIGRATION_REPORT_ONLY` | `false` | Runs the tenant schema rollout in read-only drift-report mode |
 | `app.schema-migration.legacy-test-runner-enabled` | — | `false` | Gates `TenantSchemaMigratorRunner` registration (legacy/test path; production uses `ProductionBootstrapCli`) |
 | `app.tenancy.enforce-schema-version` | `APP_ENFORCE_TENANT_SCHEMA_VERSION` | `false` | Registers `TenantSchemaReadinessHealthIndicator` on `/actuator/health` |
-| `app.tenancy.minimum-compatible-schema-version` | `APP_MINIMUM_TENANT_SCHEMA_VERSION` | `1` | Compatibility/readiness floor; packaged tenant target is currently V3, so this is not the target version |
+| `app.tenancy.minimum-compatible-schema-version` | `APP_MINIMUM_TENANT_SCHEMA_VERSION` | `1` | Compatibility/readiness floor; packaged tenant target is currently V11, so this is not the target version |
 | `spring.datasource.url` | `DB_URL` | `jdbc:postgresql://localhost:5432/vulnwatch` | Database URL |
 | `openai.enabled` | `OPENAI_ENABLED` | `false` | Enable OpenAI integration |
 | `openai.api-key` | `OPENAI_API_KEY` | — | OpenAI API key |

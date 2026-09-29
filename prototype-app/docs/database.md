@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-29
 
-The runtime database is PostgreSQL, with two independent Flyway lines. `postgres_reset/V1__platform_schema.sql` and `tenant/V1__tenant_schema.sql` are the reset baselines; the current heads are platform `postgres_reset/V5__ai_bom_provenance_fact.sql` and tenant `tenant/V11__ai_bom_resource_mapping_review.sql`. The AI Security/AI Grid module's own migrations stop at platform/tenant V3 (platform `V3` is `.disabled`; see "AI Security / AI Grid Tables" below), with platform V4 a separate AI Grid Phase 2 file also unrelated to AI-BOM; only platform V5 and tenant V4-V11 are the AI-BOM → AI Grid integration (see "AI-BOM Common Lifecycle" and "AI-BOM Declared Resources" below). Tenant migrations are applied once per tenant schema by `TenantSchemaMigrationService` / `ProductionBootstrapCli`.
+The runtime database is PostgreSQL, with two independent Flyway lines. `postgres_reset/V1__platform_schema.sql` and `tenant/V1__tenant_schema.sql` are the reset baselines; the current heads are platform `postgres_reset/V5__ai_bom_provenance_fact.sql` and tenant `tenant/V11__ai_bom_resource_mapping_review.sql`. The AI Security/AI Grid module's own migrations stop at platform/tenant V3 (see "AI Security / AI Grid Tables" below), with platform V4 a separate AI Grid Phase 2 file also unrelated to AI-BOM; only platform V5 and tenant V4-V11 are the AI-BOM → AI Grid integration (see "AI-BOM Common Lifecycle" and "AI-BOM Declared Resources" below). Tenant migrations are applied once per tenant schema by `TenantSchemaMigrationService` / `ProductionBootstrapCli`.
 
 ---
 
@@ -166,7 +166,7 @@ Unique: `(tenant_id, entitlement_key)`. Index: `(tenant_id)`.
 
 ### `platform.tenant_schema_versions`
 
-Operational projection of each tenant's per-schema Flyway state, populated by `TenantSchemaMigrationService` / `ProductionBootstrapCli`. The `tenant` migration line's own `<schema>.tenant_schema_history` table (one per tenant schema) remains the authoritative Flyway record; this table is a queryable rollup across all tenants for the platform console and the readiness health indicator. The packaged target is currently `3`; the configured minimum-compatible version remains `1` as a separate rollout/readiness floor.
+Operational projection of each tenant's per-schema Flyway state, populated by `TenantSchemaMigrationService` / `ProductionBootstrapCli`. The `tenant` migration line's own `<schema>.tenant_schema_history` table (one per tenant schema) remains the authoritative Flyway record; this table is a queryable rollup across all tenants for the platform console and the readiness health indicator. The packaged target is currently `11`; the configured minimum-compatible version remains `1` as a separate rollout/readiness floor.
 
 | Column | Type | Notes |
 |---|---|---|
