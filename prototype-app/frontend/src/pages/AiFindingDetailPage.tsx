@@ -13,7 +13,7 @@ type AiFindingDetailPageProps = {
   findingId: string;
 };
 
-type AiFindingDetailTab = 'overview' | 'artifact';
+type AiFindingDetailTab = 'overview' | 'artifact' | 'runtime';
 
 function fmtDt(value?: string | null): string {
   if (!value) return '—';
@@ -106,9 +106,19 @@ export function AiFindingDetailPage({ findingId }: AiFindingDetailPageProps) {
 
   const artifactQuery = useQuery({
     queryKey: ['ai-security-artifact', finding?.artifactId],
-    queryFn: () => api.getAiSecurityArtifact(finding!.artifactId),
+    queryFn: () => api.getAiSecurityArtifact(finding!.artifactId!),
     enabled: tab === 'artifact' && !!finding?.artifactId,
   });
+  const runtimeQuery = useQuery({
+    queryKey: ['ai-security-execution-timeline', finding?.executionId],
+    queryFn: () => api.getAiAgentExecutionTimeline(finding!.executionId!),
+    enabled: tab === 'runtime' && !!finding?.executionId,
+  });
+  const matchedEventIds = React.useMemo(() => {
+    const facts = finding?.evidence?.facts as Record<string, unknown> | undefined;
+    const wrapped = facts?.matchedEventIds as { value?: unknown } | undefined;
+    return new Set(Array.isArray(wrapped?.value) ? wrapped.value.map(String) : []);
+  }, [finding?.evidence]);
   const artifact = artifactQuery.data ?? null;
   const artifactPrimaryFields = React.useMemo<OverviewField[]>(() => {
     if (!artifact) return [];
@@ -243,12 +253,14 @@ export function AiFindingDetailPage({ findingId }: AiFindingDetailPageProps) {
         >
           Overview
         </button>
-        <button
+        {finding.artifactId && <button
           className={`fd3-tab${tab === 'artifact' ? ' fd3-tab--active' : ''}`}
           onClick={() => setTab('artifact')}
-        >
-          Artifact
-        </button>
+        >Artifact</button>}
+        {finding.executionId && <button
+          className={`fd3-tab${tab === 'runtime' ? ' fd3-tab--active' : ''}`}
+          onClick={() => setTab('runtime')}
+        >Runtime evidence</button>}
       </div>
 
       {tab === 'overview' && (
@@ -269,10 +281,10 @@ export function AiFindingDetailPage({ findingId }: AiFindingDetailPageProps) {
                   <p className="fd3-muted">This closure does not indicate verified remediation.</p>
                 )}
                 <KVRow label="Analyst review">{finding.reviewDisposition.replace(/_/g, ' ')}</KVRow>
-                <KVRow label="Artifact">
-                  <button type="button" className="btn-link" onClick={() => navigate(pathForInventoryAiAsset(finding.artifactId))}>
+                <KVRow label={finding.executionId ? 'Execution' : 'Artifact'}>
+                  {finding.artifactId ? <button type="button" className="btn-link" onClick={() => navigate(pathForInventoryAiAsset(finding.artifactId!))}>
                     {finding.artifactName}
-                  </button>
+                  </button> : <span className="mono">{finding.executionId}</span>}
                 </KVRow>
                 <KVRow label="First observed">{fmtDt(finding.firstObservedAt)}</KVRow>
                 <KVRow label="Last observed">{fmtDt(finding.lastObservedAt)}</KVRow>
@@ -329,6 +341,25 @@ export function AiFindingDetailPage({ findingId }: AiFindingDetailPageProps) {
             )}
           </div>
         </div>
+      )}
+
+      {tab === 'runtime' && finding.executionId && (
+        <div className="fd3-body"><div className="fd3-col fd3-col-right">
+          <Panel title="Ordered runtime evidence">
+            {runtimeQuery.isLoading ? <p role="status">Loading execution events…</p> : null}
+            {runtimeQuery.isError ? <p className="notice error">Runtime evidence could not be loaded.</p> : null}
+            {runtimeQuery.data?.length === 0 ? <p>No runtime events were retained for this execution.</p> : null}
+            {runtimeQuery.data?.map((event) => <div key={event.id} className="fd3-kv-table" style={{ marginBottom: 12 }}>
+              <KVRow label={`#${event.sequence} · ${fmtDt(event.eventTime)}`}>
+                <strong>{formatLabel(event.eventType)}</strong>{matchedEventIds.has(event.id) ? ' · Used by evaluator' : ''}
+              </KVRow>
+              <KVRow label="Action / target">{event.actionCategory ?? '—'} / {event.targetClass ?? '—'}</KVRow>
+              <KVRow label="Decision">Approval {event.approvalState ?? '—'} · Policy {event.policyState ?? '—'} · Outcome {event.actionOutcome ?? '—'}</KVRow>
+              <KVRow label="Evidence">{event.evidenceClass ?? '—'} · {event.enforcementPoint ?? '—'}</KVRow>
+              {event.decisionReason && <KVRow label="Reason">{event.decisionReason}</KVRow>}
+            </div>)}
+          </Panel>
+        </div></div>
       )}
     </div>
   );

@@ -14,8 +14,11 @@ import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.Relationship
 import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ScopeStatus;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityDiscoveryProvider;
 import com.prototype.vulnwatch.aisecurity.service.AiSecurityObservationService;
+import com.prototype.vulnwatch.aisecurity.service.AiSecurityConnectorFeatureFlagService;
+import com.prototype.vulnwatch.aisecurity.service.AiAgentExecutionIngestionService;
 import com.prototype.vulnwatch.aisecurity.service.AiSecuritySyncRunFacade;
 import com.prototype.vulnwatch.aisecurity.service.AiGridBudgetService;
+import com.prototype.vulnwatch.aisecurity.service.AiGridCapabilityService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridProviderCallCounter;
 import com.prototype.vulnwatch.aisecurity.service.AiGridRunMetricsService;
 import com.prototype.vulnwatch.domain.SyncRun;
@@ -61,12 +64,18 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
     private final AiGridBudgetService budgets;
     private final AiGridProviderCallCounter providerCalls;
     private final AiGridRunMetricsService runMetrics;
+    private final AiGridCapabilityService capabilities;
     private final ObjectMapper objectMapper;
     private final boolean enabled;
     private final boolean foundryAgentsEnabled;
+    private final boolean classicFoundryAgentsEnabled;
     private final boolean searchDataPlaneEnabled;
     private final boolean purviewPiiEnabled;
+    private final boolean runtimeEnabled;
+    private final long providerCallCeiling;
     private final AzurePurviewClassificationClient purview;
+    private final AiAgentExecutionIngestionService runtimeIngestion;
+    private final AiSecurityConnectorFeatureFlagService featureFlags;
 
     public AzureAiDiscoveryService(
             AiSecurityAzureConnectorService connectors,
@@ -81,12 +90,18 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
             AiGridBudgetService budgets,
             AiGridProviderCallCounter providerCalls,
             AiGridRunMetricsService runMetrics,
+            AiGridCapabilityService capabilities,
             ObjectMapper objectMapper,
             AzurePurviewClassificationClient purview,
+            AiAgentExecutionIngestionService runtimeIngestion,
+            AiSecurityConnectorFeatureFlagService featureFlags,
             @Value("${app.ai-security.azure.enabled:false}") boolean enabled,
             @Value("${app.ai-security.azure.foundry-agents.enabled:false}") boolean foundryAgentsEnabled,
+            @Value("${app.ai-security.azure.classic-foundry-agents.enabled:false}") boolean classicFoundryAgentsEnabled,
             @Value("${app.ai-security.azure.search-data-plane.enabled:false}") boolean searchDataPlaneEnabled,
-            @Value("${app.ai-security.azure.purview-pii.enabled:false}") boolean purviewPiiEnabled
+            @Value("${app.ai-security.azure.purview-pii.enabled:false}") boolean purviewPiiEnabled,
+            @Value("${app.ai-security.runtime.enabled:false}") boolean runtimeEnabled,
+            @Value("${app.ai-security.provider-call-ceiling:10000}") long providerCallCeiling
     ) {
         this.connectors = connectors;
         this.credentials = credentials;
@@ -100,12 +115,18 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         this.budgets = budgets;
         this.providerCalls = providerCalls;
         this.runMetrics = runMetrics;
+        this.capabilities = capabilities;
         this.objectMapper = objectMapper;
         this.purview = purview;
+        this.runtimeIngestion = runtimeIngestion;
+        this.featureFlags = featureFlags;
         this.enabled = enabled;
         this.foundryAgentsEnabled = foundryAgentsEnabled;
+        this.classicFoundryAgentsEnabled = classicFoundryAgentsEnabled;
         this.searchDataPlaneEnabled = searchDataPlaneEnabled;
         this.purviewPiiEnabled = purviewPiiEnabled;
+        this.runtimeEnabled = runtimeEnabled;
+        this.providerCallCeiling = providerCallCeiling;
     }
 
     @Override
@@ -136,7 +157,7 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
             throw new IllegalArgumentException("Azure credential tenant does not match connector tenant");
         }
 
-        List<String> families = effectiveFamilies(connector);
+        List<String> families = effectiveFamilies(tenant, connector);
         SyncRun run = runs.start(
                 tenant,
                 AiSecuritySyncRunFacade.AZURE_SYNC_TYPE,
@@ -148,7 +169,9 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         Instant startedAt = Instant.now();
         int observed = 0;
         int incomplete = 0;
-        try (var measurement = providerCalls.begin()) {
+        capabilities.registerRun(tenant, run.getId(), "AZURE", connector.id(), connector.subscriptionId(),
+                connector.regions(), families);
+        try (var measurement = providerCalls.begin(providerCallCeiling)) {
             try {
                 budgets.admit(tenant, run.getId(), "AZURE", families, "*", "*");
                 try (var permit = admission.acquire(connector.subscriptionId())) {
@@ -157,7 +180,7 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
                             credential,
                             connector.subscriptionId(),
                             Set.copyOf(families),
-                            foundryAgentsEnabled);
+                            foundryAgentsEnabled, tenant);
                     Map<String, AzureResource> allResources = index(snapshot.resources());
                     for (String family : families) {
                         for (ScopePayload payload : payloads(family, connector, credential, snapshot, allResources)) {
@@ -169,8 +192,19 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
                             }
                         }
                     }
+                    // Azure ML jobs are provider execution metadata. Failure here is deliberately
+                    // isolated: it must never invalidate a completed inventory sweep.
+                    if (featureFlags.enabled(tenant, AiSecurityConnectorFeatureFlagService.Feature.AZURE_ML_RUNTIME, runtimeEnabled)) {
+                        try {
+                            int unresolvedReferences = ingestAzureMlRuntime(tenant, connector, snapshot);
+                            metrics.recordScope("AZURE_ML_RUNTIME", unresolvedReferences == 0 ? "COMPLETE" : "PARTIAL");
+                            if (unresolvedReferences > 0) incomplete++;
+                        }
+                        catch (RuntimeException runtimeFailure) { metrics.recordScope("AZURE_ML_RUNTIME", "PARTIAL"); incomplete++; }
+                    }
                 }
                 int persistedArtifacts = observations.countPersistedArtifacts(tenant, run.getId());
+                capabilities.finalizeRun(tenant, run.getId());
                 runMetrics.recordProviderCalls(tenant, run.getId(), "AZURE", measurement.count());
                 budgets.reconcile(tenant, run.getId(), "AZURE");
                 runs.complete(tenant.getId(), run.getId(), persistedArtifacts, incomplete, json(Map.of(
@@ -182,6 +216,7 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
                 metrics.recordRun("completed");
                 return new DiscoveryResult(run.getId(), persistedArtifacts, incomplete);
             } catch (Exception exception) {
+                capabilities.finalizeRun(tenant, run.getId());
                 runMetrics.recordProviderCalls(tenant, run.getId(), "AZURE", measurement.count());
                 budgets.reconcile(tenant, run.getId(), "AZURE");
                 runs.fail(tenant.getId(), run.getId(), "Azure AI Security discovery failed: "
@@ -194,12 +229,41 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         }
     }
 
+    private int ingestAzureMlRuntime(Tenant tenant, ConnectorSecret connector, AzureAiManagementClient.DiscoverySnapshot snapshot) {
+        int unresolvedReferences = 0;
+        for (AzureResource job : snapshot.resources().getOrDefault("AZURE_ML_JOBS", List.of())) {
+            String agentReference = firstText(job.properties(), "agentReference", "agent_reference", "agentId");
+            String versionReference = firstText(job.properties(), "agentVersion", "agent_version");
+            if (agentReference == null) continue;
+            var resolution = runtimeIngestion.resolveAgent(tenant, "AZURE", agentReference, versionReference);
+            if (resolution.agentArtifactId() == null) {
+                unresolvedReferences++;
+                continue;
+            }
+            String status = text(job.properties().path("status"));
+            runtimeIngestion.ingest(tenant, connector.id(), new AiAgentExecutionIngestionService.RuntimeExecution(
+                    "AZURE_ML", job.id(), resolution.agentArtifactId(), "AZURE_ML_RUNTIME", job.parentId() == null ? connector.subscriptionId() : job.parentId(),
+                    null, null, status == null ? "UNKNOWN" : status, null, null, null, null, "ARM", null, null, null, null,
+                    Instant.now(), List.of(), resolution.agentVersionArtifactId(), agentReference, versionReference,
+                    resolution.status(), resolution.diagnostic()));
+        }
+        return unresolvedReferences;
+    }
+
     /** Feature-gated families are opt-in at runtime; stored connector selections remain backward compatible. */
-    private List<String> effectiveFamilies(ConnectorSecret connector) {
+    private List<String> effectiveFamilies(Tenant tenant, ConnectorSecret connector) {
         LinkedHashSet<String> families = new LinkedHashSet<>(connector.resourceFamilies());
-        if (foundryAgentsEnabled) {
+        families.removeAll(Set.of("AZURE_FOUNDRY_AGENTS", "AZURE_FOUNDRY_AGENT_VERSIONS", "AZURE_FOUNDRY_AGENT_TOOLS"));
+        families.removeAll(Set.of("AZURE_CLASSIC_FOUNDRY_AGENTS", "AZURE_CLASSIC_FOUNDRY_AGENT_VERSIONS", "AZURE_CLASSIC_FOUNDRY_AGENT_TOOLS"));
+        if (featureFlags.enabled(tenant, AiSecurityConnectorFeatureFlagService.Feature.AZURE_NEW_FOUNDRY, foundryAgentsEnabled)) {
             families.add("AZURE_FOUNDRY_AGENTS");
+            families.add("AZURE_FOUNDRY_AGENT_VERSIONS");
             families.add("AZURE_FOUNDRY_AGENT_TOOLS");
+        }
+        if (featureFlags.enabled(tenant, AiSecurityConnectorFeatureFlagService.Feature.AZURE_CLASSIC_FOUNDRY, classicFoundryAgentsEnabled)) {
+            families.add("AZURE_CLASSIC_FOUNDRY_AGENTS");
+            families.add("AZURE_CLASSIC_FOUNDRY_AGENT_VERSIONS");
+            families.add("AZURE_CLASSIC_FOUNDRY_AGENT_TOOLS");
         }
         if (searchDataPlaneEnabled) {
             families.addAll(SEARCH_DATA_FAMILIES);
@@ -260,6 +324,10 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
             return unsupported(family, region, "UNSUPPORTED_API_VERSION",
                     "Foundry agent preview discovery is disabled");
         }
+        if (family.startsWith("AZURE_CLASSIC_FOUNDRY_AGENT") && !classicFoundryAgentsEnabled) {
+            return unsupported(family, region, "FEATURE_DISABLED",
+                    "Classic Foundry Assistants discovery is disabled");
+        }
         if (SEARCH_DATA_FAMILIES.contains(family) && !searchDataPlaneEnabled) {
             return unsupported(family, region, "FEATURE_DISABLED",
                     "Azure AI Search definition-only discovery is disabled pending certification");
@@ -270,9 +338,14 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
             return unsupported(family, region, "UNSUPPORTED_API_VERSION",
                     "Foundry agent preview endpoint is unavailable for this project or API version");
         }
-        List<AzureResource> familyResources = "AZURE_FOUNDRY_AGENT_TOOLS".equals(family)
-                ? agentTools(snapshot.resources().getOrDefault("AZURE_FOUNDRY_AGENTS", List.of()))
-                : snapshot.resources().getOrDefault(family, List.of());
+        List<AzureResource> familyResources;
+        if ("AZURE_FOUNDRY_AGENT_TOOLS".equals(family)) {
+            familyResources = agentTools(snapshot.resources().getOrDefault("AZURE_FOUNDRY_AGENT_VERSIONS", List.of()));
+        } else if ("AZURE_CLASSIC_FOUNDRY_AGENT_TOOLS".equals(family)) {
+            familyResources = agentTools(snapshot.resources().getOrDefault("AZURE_CLASSIC_FOUNDRY_AGENT_VERSIONS", List.of()));
+        } else {
+            familyResources = snapshot.resources().getOrDefault(family, List.of());
+        }
         List<AzureResource> resources = familyResources.stream()
                 .filter(resource -> isGlobalFamily(family) || region.equalsIgnoreCase(resource.location()))
                 .toList();
@@ -328,8 +401,12 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
             addSearchKnowledgeSourceRelationships(artifacts, relationships, included, resources, snapshot);
         }
         if ("AZURE_FOUNDRY_AGENTS".equals(family)) {
+            addFoundryVersionProjection(artifacts, relationships, included, resources, snapshot);
             addFoundryAgentModelRelationships(artifacts, relationships, included, resources, snapshot);
             addFoundryMcpRelationships(artifacts, relationships, included, resources, snapshot);
+        }
+        if ("AZURE_CLASSIC_FOUNDRY_AGENTS".equals(family)) {
+            addClassicFoundryRelationships(artifacts, relationships, included, resources, snapshot);
         }
         if ("AZURE_STORAGE_ACCOUNTS".equals(family)) {
             addStorageAccountPiiLinkage(artifacts, relationships, included, resources, snapshot, connector, credential);
@@ -342,8 +419,8 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
             return new ScopePayload(family, region, ScopeStatus.COMPLETE, artifacts, relationships, List.of());
         }
         ScopeStatus status = "UNSUPPORTED_API_VERSION".equals(failure.code())
-                ? ScopeStatus.UNSUPPORTED
-                : failure.retryable() ? ScopeStatus.FAILED : ScopeStatus.PARTIAL;
+                ? ScopeStatus.UNSUPPORTED_API
+                : failure.retryable() ? ScopeStatus.ERROR : ScopeStatus.PARTIAL;
         return new ScopePayload(family, region, status, artifacts, relationships, List.of(
                 diagnostic(failure.code(), failure.message(), failure.retryable(), family)));
     }
@@ -603,12 +680,13 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
             analysis.nonBlockingFilterObserved()
                     .ifPresent(value -> values.put("raiNonBlockingFilterObserved", value));
         }
-        if ("AZURE_FOUNDRY_AGENTS".equals(family)) {
+        if ("AZURE_FOUNDRY_AGENTS".equals(family) || "AZURE_CLASSIC_FOUNDRY_AGENTS".equals(family)) {
             values.put("modelDeployment", nullToEmpty(text(resource.properties().path("modelDeploymentName"))));
             values.put("codeInterpreterEnabled", hasTool(resource.properties(), "code_interpreter"));
         }
-        if ("AZURE_FOUNDRY_AGENT_TOOLS".equals(family)) {
+        if ("AZURE_FOUNDRY_AGENT_TOOLS".equals(family) || "AZURE_CLASSIC_FOUNDRY_AGENT_TOOLS".equals(family)) {
             values.put("toolType", nullToEmpty(text(resource.properties().path("type"))));
+            copyDigestMetadata(values, resource.properties(), "toolDefinitionDigest");
         }
         if ("AZURE_ML_ENDPOINTS".equals(family)) {
             String authMode = text(resource.properties().path("authMode"));
@@ -663,6 +741,14 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         return values;
     }
 
+    private static void copyDigestMetadata(Map<String, Object> values, JsonNode properties, String field) {
+        String digest = text(properties.path(field));
+        if (digest == null) return;
+        values.put(field, digest);
+        values.put("digestAlgorithm", text(properties.path("digestAlgorithm")));
+        values.put("digestKeyVersion", text(properties.path("digestKeyVersion")));
+    }
+
     private boolean diagnosticLoggingEnabled(
             String resourceId,
             AzureAiManagementClient.DiscoverySnapshot snapshot
@@ -693,7 +779,12 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
             int index = 0;
             for (JsonNode tool : definitions) {
                 String type = nullToEmpty(text(tool.path("type")));
-                String id = agent.id() + "/tools/" + index++ + "-" + type.toLowerCase(Locale.ROOT);
+                String digest = text(tool.path("toolDefinitionDigest"));
+                String discriminator = digest == null || digest.isBlank()
+                        ? Integer.toString(index)
+                        : digest.substring(0, Math.min(24, digest.length()));
+                String id = agent.id() + "/tools/" + type.toLowerCase(Locale.ROOT) + "-" + discriminator;
+                index++;
                 tools.add(new AzureResource(
                         id,
                         id,
@@ -721,6 +812,43 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
             AzureAiManagementClient.DiscoverySnapshot snapshot
     ) {
         List<AzureResource> deployments = snapshot.resources().getOrDefault("AZURE_FOUNDRY_DEPLOYMENTS", List.of());
+        List<AzureResource> historical = snapshot.resources().getOrDefault("AZURE_FOUNDRY_AGENT_VERSIONS", List.of());
+        if (!historical.isEmpty()) {
+            for (AzureResource versionResource : historical) {
+                AzureResource agent = agents.stream().filter(candidate -> candidate.id().equals(versionResource.parentId())).findFirst().orElse(null);
+                if (agent == null) continue;
+                addArtifact(artifacts, included, versionResource, "AZURE_FOUNDRY_AGENT_VERSIONS", snapshot);
+                relationships.add(direct(versionResource.id(), agent.id(), "VERSION_OF", "Azure Foundry Agents API", "versions"));
+                String version = text(versionResource.properties().path("agentVersion"));
+                boolean activeVersion = version != null
+                        && version.equals(text(agent.properties().path("agentVersion")));
+                if (activeVersion) {
+                    relationships.add(direct(agent.id(), versionResource.id(), "ACTIVE_VERSION", "Azure Foundry Agents API", "versions.latest"));
+                }
+                String model = text(versionResource.properties().path("modelDeploymentName"));
+                if (model != null) deployments.stream().filter(deployment -> model.equalsIgnoreCase(deployment.name())).findFirst()
+                        .ifPresent(deployment -> {
+                            relationships.add(direct(versionResource.id(), deployment.id(), "USES_MODEL", "Azure Foundry Agents API", "definition.model"));
+                            if (activeVersion) relationships.add(direct(agent.id(), deployment.id(), "USES_MODEL",
+                                    "Azure Foundry Agents API", "versions.latest.definition.model"));
+                        });
+                String promptDigest = text(versionResource.properties().path("promptDigest"));
+                if (promptDigest != null) {
+                    String promptId = versionResource.id() + "/prompts/instructions";
+                    artifacts.add(new ArtifactObservation(promptId, "AI_PROMPT", "AZURE_FOUNDRY_PROMPT", "Prompt", Map.of(
+                            "promptDigest", promptDigest, "digestAlgorithm", text(versionResource.properties().path("digestAlgorithm")),
+                            "digestKeyVersion", text(versionResource.properties().path("digestKeyVersion")))));
+                    relationships.add(direct(versionResource.id(), promptId, "USES_PROMPT", "Azure Foundry Agents API", "definition.instructions"));
+                }
+                for (AzureResource tool : agentTools(List.of(versionResource))) {
+                    addArtifact(artifacts, included, tool, "AZURE_FOUNDRY_AGENT_TOOLS", snapshot);
+                    relationships.add(direct(versionResource.id(), tool.id(), "USES_TOOL", "Azure Foundry Agents API", "definition.tools"));
+                    if (activeVersion) relationships.add(direct(agent.id(), tool.id(), "USES_TOOL",
+                            "Azure Foundry Agents API", "versions.latest.definition.tools"));
+                }
+            }
+            return;
+        }
         for (AzureResource agent : agents) {
             String model = text(agent.properties().path("modelDeploymentName"));
             if (model == null) continue;
@@ -730,6 +858,86 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
                         relationships.add(direct(agent.id(), deployment.id(), "USES_MODEL",
                                 "Azure Foundry Agents API", "definition.model"));
                     });
+        }
+    }
+
+    /** Projects the current Classic Assistant definition while retaining an explicit history gap. */
+    private void addClassicFoundryRelationships(
+            List<ArtifactObservation> artifacts,
+            List<RelationshipObservation> relationships,
+            Set<String> included,
+            List<AzureResource> agents,
+            AzureAiManagementClient.DiscoverySnapshot snapshot
+    ) {
+        List<AzureResource> versions = snapshot.resources()
+                .getOrDefault("AZURE_CLASSIC_FOUNDRY_AGENT_VERSIONS", List.of());
+        List<AzureResource> deployments = snapshot.resources()
+                .getOrDefault("AZURE_FOUNDRY_DEPLOYMENTS", List.of());
+        for (AzureResource version : versions) {
+            AzureResource agent = agents.stream()
+                    .filter(candidate -> candidate.id().equals(version.parentId()))
+                    .findFirst().orElse(null);
+            if (agent == null) continue;
+            addArtifact(artifacts, included, version, "AZURE_CLASSIC_FOUNDRY_AGENT_VERSIONS", snapshot);
+            relationships.add(direct(version.id(), agent.id(), "VERSION_OF", "Classic Foundry Assistants API", "current definition"));
+            relationships.add(direct(agent.id(), version.id(), "ACTIVE_VERSION", "Classic Foundry Assistants API", "current definition"));
+            String model = text(version.properties().path("modelDeploymentName"));
+            if (model != null) deployments.stream().filter(deployment -> model.equalsIgnoreCase(deployment.name())).findFirst()
+                    .ifPresent(deployment -> {
+                        relationships.add(direct(version.id(), deployment.id(), "USES_MODEL", "Classic Foundry Assistants API", "model"));
+                        relationships.add(direct(agent.id(), deployment.id(), "USES_MODEL", "Classic Foundry Assistants API", "active model"));
+                    });
+            String promptDigest = text(version.properties().path("promptDigest"));
+            if (promptDigest != null) {
+                String promptId = version.id() + "/prompts/instructions";
+                artifacts.add(new ArtifactObservation(promptId, "AI_PROMPT", "AZURE_CLASSIC_FOUNDRY_PROMPT", "Prompt", Map.of(
+                        "promptDigest", promptDigest,
+                        "digestAlgorithm", text(version.properties().path("digestAlgorithm")),
+                        "digestKeyVersion", text(version.properties().path("digestKeyVersion")))));
+                relationships.add(direct(version.id(), promptId, "USES_PROMPT", "Classic Foundry Assistants API", "instructions"));
+            }
+            for (AzureResource tool : agentTools(List.of(version))) {
+                addArtifact(artifacts, included, tool, "AZURE_CLASSIC_FOUNDRY_AGENT_TOOLS", snapshot);
+                relationships.add(direct(version.id(), tool.id(), "USES_TOOL", "Classic Foundry Assistants API", "tools"));
+                relationships.add(direct(agent.id(), tool.id(), "USES_TOOL", "Classic Foundry Assistants API", "active tools"));
+            }
+        }
+    }
+
+    /**
+     * Produces a stable active-version node while keeping definition lineage outside membership.
+     * The agent-level model/tool edges remain the active projection consumed by existing systems.
+     */
+    private void addFoundryVersionProjection(
+            List<ArtifactObservation> artifacts,
+            List<RelationshipObservation> relationships,
+            Set<String> included,
+            List<AzureResource> agents,
+            AzureAiManagementClient.DiscoverySnapshot snapshot
+    ) {
+        if (!snapshot.resources().getOrDefault("AZURE_FOUNDRY_AGENT_VERSIONS", List.of()).isEmpty()) {
+            return;
+        }
+        List<AzureResource> deployments = snapshot.resources().getOrDefault("AZURE_FOUNDRY_DEPLOYMENTS", List.of());
+        for (AzureResource agent : agents) {
+            String version = text(agent.properties().path("agentVersion"));
+            if (version == null) version = "active";
+            String versionId = agent.id() + "/versions/" + version.replaceAll("[^A-Za-z0-9._-]", "_");
+            if (included.add(versionId)) {
+                artifacts.add(new ArtifactObservation(versionId, "AI_AGENT_VERSION", "AZURE_FOUNDRY_AGENT_VERSION",
+                        agent.name() + " v" + version, Map.of("version", version, "sourceType", "AZURE_FOUNDRY")));
+            }
+            relationships.add(direct(versionId, agent.id(), "VERSION_OF", "Azure Foundry Agents API", "versions.latest"));
+            relationships.add(direct(agent.id(), versionId, "ACTIVE_VERSION", "Azure Foundry Agents API", "versions.latest"));
+            String model = text(agent.properties().path("modelDeploymentName"));
+            if (model != null) deployments.stream().filter(deployment -> model.equalsIgnoreCase(deployment.name())).findFirst()
+                    .ifPresent(deployment -> relationships.add(direct(versionId, deployment.id(), "USES_MODEL",
+                            "Azure Foundry Agents API", "versions.latest.definition.model")));
+            for (AzureResource tool : agentTools(List.of(agent))) {
+                addArtifact(artifacts, included, tool, "AZURE_FOUNDRY_AGENT_TOOLS", snapshot);
+                relationships.add(direct(versionId, tool.id(), "USES_TOOL", "Azure Foundry Agents API",
+                        "versions.latest.definition.tools"));
+            }
         }
     }
 
@@ -1004,7 +1212,7 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         return new ScopePayload(
                 family,
                 region,
-                ScopeStatus.UNSUPPORTED,
+                ScopeStatus.UNSUPPORTED_API,
                 List.of(),
                 List.of(),
                 List.of(diagnostic(code, message, false, family)));
@@ -1055,8 +1263,10 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
     }
 
     private String artifactType(String family) {
+        if ("AZURE_FOUNDRY_AGENT_VERSIONS".equals(family) || "AZURE_CLASSIC_FOUNDRY_AGENT_VERSIONS".equals(family)) return "AI_AGENT_VERSION";
+        if ("AZURE_FOUNDRY_AGENT_TOOLS".equals(family) || "AZURE_CLASSIC_FOUNDRY_AGENT_TOOLS".equals(family)) return "AI_TOOL";
         if ("AZURE_FOUNDRY_DEPLOYMENTS".equals(family) || "AZURE_ML_MODELS".equals(family)) return "AI_MODEL";
-        if ("AZURE_FOUNDRY_AGENTS".equals(family) || "AZURE_BOT_SERVICES".equals(family)) return "AI_AGENT";
+        if ("AZURE_FOUNDRY_AGENTS".equals(family) || "AZURE_CLASSIC_FOUNDRY_AGENTS".equals(family) || "AZURE_BOT_SERVICES".equals(family)) return "AI_AGENT";
         if ("AZURE_RAI_POLICIES".equals(family)) return "AI_GUARDRAIL";
         if ("AZURE_SEARCH_KNOWLEDGE_BASES".equals(family)) return "KNOWLEDGE_BASE";
         if ("AZURE_SEARCH_KNOWLEDGE_SOURCES".equals(family)
@@ -1234,6 +1444,7 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
             case "ACCESS_DENIED" -> "Azure permissions are insufficient for discovery";
             case "THROTTLED" -> "Azure temporarily throttled AI Security discovery";
             case "BUDGET_THROTTLED" -> "AI Security scan was deferred by the tenant budget policy";
+            case "PAGE_BUDGET_EXCEEDED" -> "Azure discovery reached its configured page budget; this scope is partial";
             case "INVALID_CONFIGURATION" -> "Azure connector configuration is incomplete or invalid";
             case "TIMEOUT" -> "Azure discovery timed out";
             default -> "Azure AI Security discovery could not be completed";

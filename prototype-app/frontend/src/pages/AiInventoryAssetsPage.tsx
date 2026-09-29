@@ -9,6 +9,7 @@ import { FindingSeverityChips } from '../features/findings/components/FindingSev
 import { InventoryShell } from '../features/inventory/InventoryShell';
 import { pathForInventoryAiAsset } from '../app/routes';
 import { RUN_QUEUE_REFRESH_INTERVAL_MS } from '../lib/polling';
+import type { AiProvider } from '../features/ai-security/types';
 
 const ALL_KIND = 'ALL';
 const CATEGORIZED_NATIVE_KINDS = new Set(AI_ARTIFACT_CATEGORIES.flatMap((category) => category.nativeKinds));
@@ -28,9 +29,9 @@ export function AiInventoryAssetsPage() {
   const [searchParams] = useSearchParams();
   const [nativeKind, setNativeKind] = React.useState<string>(searchParams.get('nativeKind') ?? ALL_KIND);
   const [severity, setSeverity] = React.useState<string | undefined>(searchParams.get('severity') ?? undefined);
-  const [provider, setProvider] = React.useState<'' | 'AWS' | 'AZURE'>(
-    searchParams.get('provider') === 'AWS' || searchParams.get('provider') === 'AZURE'
-      ? (searchParams.get('provider') as 'AWS' | 'AZURE')
+  const [provider, setProvider] = React.useState<'' | AiProvider>(
+    ['AWS', 'AZURE', 'MICROSOFT_COPILOT'].includes(searchParams.get('provider') ?? '')
+      ? (searchParams.get('provider') as AiProvider)
       : '',
   );
   const [page, setPage] = React.useState(0);
@@ -40,8 +41,8 @@ export function AiInventoryAssetsPage() {
   React.useEffect(() => {
     setNativeKind(searchParams.get('nativeKind') ?? ALL_KIND);
     setSeverity(searchParams.get('severity') ?? undefined);
-    setProvider(searchParams.get('provider') === 'AWS' || searchParams.get('provider') === 'AZURE'
-      ? searchParams.get('provider') as 'AWS' | 'AZURE'
+    setProvider(['AWS', 'AZURE', 'MICROSOFT_COPILOT'].includes(searchParams.get('provider') ?? '')
+      ? searchParams.get('provider') as AiProvider
       : '');
     setPage(0);
   }, [searchParams]);
@@ -128,10 +129,11 @@ export function AiInventoryAssetsPage() {
         )}
         <label className="findings-filter-chip">
           <span className="panel-caption">Provider</span>
-          <select value={provider} onChange={(event) => { setProvider(event.target.value as '' | 'AWS' | 'AZURE'); setPage(0); }} aria-label="Cloud provider">
+          <select value={provider} onChange={(event) => { setProvider(event.target.value as '' | AiProvider); setPage(0); }} aria-label="Cloud provider">
             <option value="">All providers</option>
             <option value="AWS">AWS</option>
             <option value="AZURE">Azure</option>
+            <option value="MICROSOFT_COPILOT">Microsoft Copilot</option>
           </select>
         </label>
         {severity ? (

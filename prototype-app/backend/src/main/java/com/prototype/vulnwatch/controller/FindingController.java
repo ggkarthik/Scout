@@ -85,6 +85,13 @@ public class FindingController {
         return findingQueryService.listByTenantPage(tenant, page, size, filter);
     }
 
+    @GetMapping("/groups")
+    public List<com.prototype.vulnwatch.dto.FindingCountBucketResponse> groups(
+            @RequestParam String field, FindingsFilterRequest filterRequest) {
+        return findingAnalyticsService.groupCounts(workspaceService.getWorkspace(),
+                findingQueueService.resolveEffectiveFilter(filterRequest.getQueueKey(), filterRequest.toFilter()), field);
+    }
+
     @GetMapping("/summary")
     public FindingSummaryResponse summary(FindingsFilterRequest filterRequest) {
         Tenant tenant = workspaceService.getWorkspace();

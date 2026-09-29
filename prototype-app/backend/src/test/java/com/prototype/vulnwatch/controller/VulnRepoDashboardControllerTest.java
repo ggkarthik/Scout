@@ -94,8 +94,10 @@ class VulnRepoDashboardControllerTest {
                 null,
                 null,
                 null,
+                null,
+                null,
                 null
-        , null)).thenReturn(new OrgSpecificCveExposurePageResponse(
+        )).thenReturn(new OrgSpecificCveExposurePageResponse(
                 new OrgSpecificCveExposureSummaryResponse(7L, 5L, 3L, 1L, 2L),
                 List.of(new OrgSpecificCveExposureRecordResponse(
                         UUID.fromString("10000000-0000-0000-0000-000000000001"),
@@ -172,8 +174,10 @@ class VulnRepoDashboardControllerTest {
                 null,
                 null,
                 null,
+                null,
+                null,
                 null
-        , null);
+        );
     }
 
     @Test

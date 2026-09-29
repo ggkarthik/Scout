@@ -23,6 +23,10 @@ import { timeAgo } from '../lib/time';
 import { BomManagementPage } from './BomManagementPage';
 import { AiSecurityConnectorPage } from './AiSecurityConnectorPage';
 import { AiSecurityAzureConnectorPage } from './AiSecurityAzureConnectorPage';
+import { CopilotStudioConnectorPage } from './CopilotStudioConnectorPage';
+import { SccmPatchConnectorPage } from './SccmPatchConnectorPage';
+import { BigFixPatchConnectorPage } from './BigFixPatchConnectorPage';
+import { TaniumPatchConnectorPage } from './TaniumPatchConnectorPage';
 import { canUseEntitlement } from '../features/auth/entitlements';
 
 type ConnectorId =
@@ -35,6 +39,7 @@ type ConnectorId =
   | 'azure-discovery'
   | 'ai-security-aws'
   | 'ai-security-azure'
+  | 'ai-security-copilot'
   | 'nvd-api'
   | 'cisa-kev'
   | 'ghsa-feed'
@@ -43,7 +48,10 @@ type ConnectorId =
   | 'advisory-feed'
   | 'endoflife-date'
   | 'euvd-feed'
-  | 'jvn-feed';
+  | 'jvn-feed'
+  | 'sccm-patch'
+  | 'bigfix-patch'
+  | 'tanium-patch';
 
 type ConnectView = 'sources' | 'run-history';
 
@@ -83,26 +91,65 @@ const IconGitHub = (
   </svg>
 );
 
-const IconServiceNow = (
-  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="4" y="3" width="12" height="14" rx="2" />
-    <path d="M7 7h6" />
-    <path d="M7 10h6" />
-    <path d="M7 13h4" />
+const IconMicrosoft = (
+  <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
+    <rect x="3" y="3" width="15.6" height="15.6" fill="#F25022" />
+    <rect x="21.4" y="3" width="15.6" height="15.6" fill="#7FBA00" />
+    <rect x="3" y="21.4" width="15.6" height="15.6" fill="#00A4EF" />
+    <rect x="21.4" y="21.4" width="15.6" height="15.6" fill="#FFB900" />
   </svg>
 );
 
-const IconDesktop = (
-  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="2" y="3" width="16" height="11" rx="2" />
-    <path d="M7 17h6" />
-    <path d="M10 14v3" />
+const IconAws = (
+  <svg width="56" height="40" viewBox="0 0 56 40" aria-hidden="true">
+    <text x="28" y="27" textAnchor="middle" fontSize="21" fontWeight="700"
+          fontFamily="Helvetica, Arial, sans-serif" fill="#FF9900">aws</text>
   </svg>
 );
 
-const IconCloud = (
-  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M5.5 15.5a3.5 3.5 0 0 1-.4-6.97 5.5 5.5 0 0 1 10.64 1.22A3 3 0 0 1 15 15.5H5.5Z" />
+const IconAzure = (
+  <svg width="44" height="40" viewBox="0 0 44 40" aria-hidden="true">
+    <path d="M17.2 5.2h10.4L16.6 26.2H8z" fill="#0078D4" />
+    <path d="M19.2 28.4 28.8 10.8l8.6 23.8H14.2z" fill="#50BCEB" />
+  </svg>
+);
+
+const IconServiceNowBrand = (
+  <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
+    <rect x="2" y="2" width="36" height="36" rx="7" fill="#12263A" />
+    <text x="20" y="25.5" textAnchor="middle" fontSize="12.6" fontWeight="700"
+          fontFamily="Helvetica, Arial, sans-serif" fill="#ffffff">NOW</text>
+  </svg>
+);
+
+// BigFix: the lowercase "b" bowl in slate blue with an olive dot at its centre.
+const IconBigFix = (
+  <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
+    <path
+      d="M13.2 24.4V6.5"
+      fill="none"
+      stroke="#7B9BC4"
+      strokeWidth="6.4"
+      strokeLinecap="round"
+    />
+    <path
+      d="M31.8 22.6a12.8 12.8 0 1 1-8.6-12.1"
+      fill="none"
+      stroke="#7B9BC4"
+      strokeWidth="6.4"
+      strokeLinecap="round"
+    />
+    <circle cx="19.6" cy="23.4" r="5.4" fill="#A8C63F" />
+  </svg>
+);
+
+// Tanium: white "T" knocked out of a red disc, with the disc's upper-left squared off as
+// in the brand mark.
+const IconTanium = (
+  <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
+    <path d="M20 5.6A14.4 14.4 0 1 1 5.6 20V5.6Z" fill="#E4002B" />
+    <path d="M10.4 15.2h19.2" fill="none" stroke="#ffffff" strokeWidth="5" strokeLinecap="butt" />
+    <path d="M20 15.2v14.2" fill="none" stroke="#ffffff" strokeWidth="5" strokeLinecap="butt" />
   </svg>
 );
 
@@ -179,19 +226,19 @@ const CONNECTORS: ConnectorDefinition[] = [
   {
     id: 'sbom-endpoint',
     name: 'SBOM API Endpoint',
-    summary: 'Pull SBOM JSON from authenticated API endpoints.',
+    summary: 'Fetch SBOM JSON from authenticated API endpoints.',
     icon: IconGlobe
   },
   {
     id: 'sbom-github',
-    name: 'GitHub SBOM',
-    summary: 'Run repository or GHCR SBOM ingestion and manage reusable GitHub ingestion pipelines.',
+    name: 'GitHub',
+    summary: 'SBOM ingestion from GitHub repositories and GHCR container images.',
     icon: IconGitHub
   },
   {
     id: 'bom-management',
     name: 'BOM Management',
-    summary: 'Ingest and manage SBOM, AI BOM, CBOM, and Vendor BOM files via URL fetch or file upload.',
+    summary: 'Ingest SBOM, AI BOM, CBOM, and Vendor BOM via URL or file upload.',
     icon: (
       <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
         <path d="M4 3h8l4 4v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" />
@@ -204,39 +251,45 @@ const CONNECTORS: ConnectorDefinition[] = [
   },
   {
     id: 'servicenow-cmdb',
-    name: 'ServiceNow CMDB',
-    summary: 'Pull host inventory from ServiceNow Table APIs and review ingestion history in Connect.',
-    icon: IconServiceNow
+    name: 'ServiceNow',
+    summary: 'Host inventory from ServiceNow CI records via Table APIs.',
+    icon: IconServiceNowBrand
   },
   {
     id: 'sccm-cmdb',
-    name: 'SCCM / MECM',
-    summary: 'Ingest hardware asset and installed software inventory from Microsoft Endpoint Configuration Manager (SCCM/MECM) via direct SQL Server connection.',
-    icon: IconDesktop
+    name: 'SCCM/MECM',
+    summary: 'Hardware asset and software inventory from Microsoft Configuration Manager.',
+    icon: IconMicrosoft
   },
   {
     id: 'aws-discovery',
-    name: 'AWS Cloud Discovery',
-    summary: 'Discover EC2 compute instances from AWS accounts and ingest SSM package inventory into Host Inventory.',
-    icon: IconCloud
+    name: 'AWS',
+    summary: 'Cloud infrastructure discovery from AWS EC2 and systems inventory.',
+    icon: IconAws
   },
   {
     id: 'azure-discovery',
-    name: 'Azure Cloud Discovery',
-    summary: 'Discover Azure compute and platform resources across subscriptions and ingest into Host/Cloud Inventory.',
-    icon: IconCloud
+    name: 'Azure',
+    summary: 'Cloud infrastructure discovery from Azure compute and platform resources.',
+    icon: IconAzure
   },
   {
     id: 'ai-security-aws',
-    name: 'AI Security — AWS Bedrock',
-    summary: 'Discover tenant-scoped agents, referenced models, AI artifacts, relationships, and configuration findings.',
-    icon: IconBrain
+    name: 'AWS Bedrock',
+    summary: 'AI resource discovery and posture assessment for AWS Bedrock agents and models.',
+    icon: IconAws
   },
   {
     id: 'ai-security-azure',
-    name: 'AI Security — Microsoft Azure',
-    summary: 'Discover tenant-scoped Foundry, Azure ML, AI Search, and Bot resources with isolated policy findings.',
-    icon: IconBrain
+    name: 'Azure AI',
+    summary: 'AI resource discovery and posture assessment for Azure Foundry and AI services.',
+    icon: IconAzure
+  },
+  {
+    id: 'ai-security-copilot',
+    name: 'Copilot Studio',
+    summary: 'Discovery of Microsoft Copilot agents and AI components via Dataverse.',
+    icon: IconMicrosoft
   },
   {
     id: 'nvd-api',
@@ -291,6 +344,24 @@ const CONNECTORS: ConnectorDefinition[] = [
     name: 'JVN Vulnerability Database',
     summary: 'Ingest Japan Vulnerability Notes (JVNdb) records via the MyJVN API and sync JVNDB-to-CVE correlations.',
     icon: IconJvn
+  },
+  {
+    id: 'sccm-patch',
+    name: 'SCCM/MECM',
+    summary: 'Microsoft Configuration Manager patch deployment tracking.',
+    icon: IconMicrosoft
+  },
+  {
+    id: 'bigfix-patch',
+    name: 'BigFix',
+    summary: 'IBM BigFix patch and endpoint management integration.',
+    icon: IconBigFix
+  },
+  {
+    id: 'tanium-patch',
+    name: 'Tanium',
+    summary: 'Tanium endpoint platform patch management integration.',
+    icon: IconTanium
   }
 ];
 
@@ -303,19 +374,25 @@ const VULNERABILITY_INTELLIGENCE_CONNECTOR_IDS: ConnectorId[] = [
   'advisory-feed'
 ];
 
-const CMDB_CONNECTOR_IDS: ConnectorId[] = [
-  'sbom-endpoint',
-  'bom-management',
+// Order is the display order within each section.
+const INVENTORY_CONNECTOR_IDS: ConnectorId[] = [
+  'sbom-github',
   'servicenow-cmdb',
-  'sccm-cmdb'
-];
-
-const CLOUD_CONNECTOR_IDS: ConnectorId[] = [
+  'sccm-cmdb',
   'aws-discovery',
-  'azure-discovery'
+  'azure-discovery',
+  'ai-security-aws',
+  'ai-security-azure',
+  'ai-security-copilot'
 ];
 
-const AI_CONNECTOR_IDS: ConnectorId[] = ['ai-security-aws', 'ai-security-azure'];
+const BOM_CONNECTOR_IDS: ConnectorId[] = ['sbom-endpoint', 'bom-management'];
+
+const PATCH_CONNECTOR_IDS: ConnectorId[] = ['sccm-patch', 'bigfix-patch', 'tanium-patch'];
+
+// The AI connectors are entitlement-gated, so they drop out of Inventory rather than
+// leaving an empty section behind.
+const AI_CONNECTOR_IDS: ConnectorId[] = ['ai-security-aws', 'ai-security-azure', 'ai-security-copilot'];
 
 function formatInstantConnect(iso?: string): string {
   if (!iso) return 'Never';
@@ -528,6 +605,15 @@ type ConnectorDetailsProps = {
 };
 
 function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
+  if (connectorId === 'sccm-patch') {
+    return <SccmPatchConnectorPage />;
+  }
+  if (connectorId === 'bigfix-patch') {
+    return <BigFixPatchConnectorPage />;
+  }
+  if (connectorId === 'tanium-patch') {
+    return <TaniumPatchConnectorPage />;
+  }
   if (connectorId === 'sbom-endpoint') {
     return (
       <IngestionPage
@@ -648,6 +734,9 @@ function ConnectorDetailContent({ connectorId }: ConnectorDetailsProps) {
   if (connectorId === 'ai-security-azure') {
     return <AiSecurityAzureConnectorPage />;
   }
+  if (connectorId === 'ai-security-copilot') {
+    return <CopilotStudioConnectorPage />;
+  }
 
   return (
     <section className="panel">
@@ -716,32 +805,36 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [activeConnector]);
 
-  const cmdbConnectors = CONNECTORS
-    .filter((connector) => CMDB_CONNECTOR_IDS.includes(connector.id));
-
-  const cloudConnectors = CONNECTORS
-    .filter((connector) => CLOUD_CONNECTOR_IDS.includes(connector.id));
-  const aiConnectors = CONNECTORS
-    .filter((connector) => AI_CONNECTOR_IDS.includes(connector.id) && canUseEntitlement(actor, 'ai.security'));
+  const aiEntitled = canUseEntitlement(actor, 'ai.security');
+  const inventoryConnectors = INVENTORY_CONNECTOR_IDS
+    .filter((id) => aiEntitled || !AI_CONNECTOR_IDS.includes(id))
+    .map((id) => CONNECTORS.find((connector) => connector.id === id))
+    .filter((connector): connector is ConnectorDefinition => Boolean(connector));
+  const bomConnectors = BOM_CONNECTOR_IDS
+    .map((id) => CONNECTORS.find((connector) => connector.id === id))
+    .filter((connector): connector is ConnectorDefinition => Boolean(connector));
+  const patchConnectors = PATCH_CONNECTOR_IDS
+    .map((id) => CONNECTORS.find((connector) => connector.id === id))
+    .filter((connector): connector is ConnectorDefinition => Boolean(connector));
 
   const visibleSections = [
     {
-      key: 'cmdb-sbom' as const,
-      title: 'Inventory — CMDB & SBOM',
-      connectors: cmdbConnectors,
-      caption: 'SBOM file upload, GitHub, ServiceNow CMDB, and SCCM/MECM inventory sources.',
+      key: 'inventory' as const,
+      title: 'Inventory',
+      connectors: inventoryConnectors,
+      caption: 'SBOM, CMDB, Cloud discovery, and AI resource inventory sources.',
     },
     {
-      key: 'cloud-sources' as const,
-      title: 'Inventory — Cloud Sources',
-      connectors: cloudConnectors,
-      caption: 'Cloud hyperscaler discovery — AWS and Azure, with future GCP integration.',
+      key: 'bom-management' as const,
+      title: 'BOM Management',
+      connectors: bomConnectors,
+      caption: 'Ingest and manage Bill of Materials files.',
     },
     {
-      key: 'ai-sources' as const,
-      title: 'Inventory — AI',
-      connectors: aiConnectors,
-      caption: 'Read-only AI estate discovery and deterministic configuration assessment.',
+      key: 'patch-management' as const,
+      title: 'Patch Management',
+      connectors: patchConnectors,
+      caption: 'Patch deployment tracking from SCCM, BigFix, and Tanium for vulnerability remediation.',
     }
   ];
 
@@ -794,6 +887,10 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
                         const dotClass = status.isFailed ? 'connect-source-dot--fail' :
                                          status.hasSynced ? 'connect-source-dot--ok' :
                                          'connect-source-dot--warn';
+                        const statusTitle = status.demoDisabled ? 'Unavailable in 7-day demo'
+                          : status.isFailed ? `Last sync failed${lastSync ? ` · ${lastSync}` : ''}`
+                          : lastSync ? `Last sync · ${lastSync}`
+                          : 'Not configured';
 
                         return (
                           <button
@@ -806,22 +903,18 @@ export function ConnectPage({ initialView = 'sources', onViewChange }: ConnectPa
                             <div className="connect-source-body">
                               <div className="connect-source-name-row">
                                 <span className="connect-source-name">{connector.name}</span>
-                                <span className={`connect-source-dot ${dotClass}`} />
+                                {/* The dot is the only place connector health appears in this
+                                    layout, so its title carries the detail the old stacked card
+                                    showed as text. Dropping it would lose at-a-glance sync
+                                    state for every connector. */}
+                                <span
+                                  className={`connect-source-dot ${dotClass}`}
+                                  title={statusTitle}
+                                  aria-label={statusTitle}
+                                  role="img"
+                                />
                               </div>
                               <div className="panel-caption">{connector.summary}</div>
-                              {status.demoDisabled && (
-                                <div className="connect-source-lastsync">Unavailable in 7-day demo</div>
-                              )}
-                              {status.isFailed && lastSync && (
-                                <div className="connect-source-lastsync connect-source-lastsync--fail">
-                                  Failed · {lastSync}
-                                </div>
-                              )}
-                              {!status.isFailed && lastSync && (
-                                <div className="connect-source-lastsync">
-                                  Last sync · {lastSync}
-                                </div>
-                              )}
                             </div>
                           </button>
                         );

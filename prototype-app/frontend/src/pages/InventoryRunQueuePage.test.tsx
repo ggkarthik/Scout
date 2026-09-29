@@ -7,9 +7,14 @@ import { InventoryRunQueuePage } from './InventoryRunQueuePage';
 describe('InventoryRunQueuePage', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it('shows AWS and Azure AI discovery progress with provider details and errors', async () => {
+  it('shows AWS, Azure, and Copilot AI discovery progress with provider details and errors', async () => {
     vi.spyOn(api, 'listIngestionJobs').mockResolvedValue({
-      items: [], page: 0, size: 100, totalItems: 0, totalPages: 0
+      items: [{
+        jobId: 'copilot-job', jobType: 'AI_SECURITY_COPILOT_STUDIO', status: 'QUEUED',
+        sourceType: 'ai-security-copilot', assetIdentifier: 'connector:copilot-connector',
+        requestedAt: '2026-07-29T09:10:00Z', requestedBy: 'operator', attemptCount: 0,
+        resultJson: null, failureCode: null, failureMessage: null, sbomUploadId: null, startedAt: null, completedAt: null,
+      }], page: 0, size: 100, totalItems: 1, totalPages: 1
     });
     vi.spyOn(api, 'listSyncRuns').mockResolvedValue([
       {
@@ -113,6 +118,16 @@ describe('InventoryRunQueuePage', () => {
       /Error: Azure AI Security discovery failed/
     )).toBeInTheDocument();
 
+    const copilotType = screen.getByText('Microsoft Copilot Discovery');
+    const copilotRow = copilotType.closest('tr');
+    expect(copilotRow).not.toBeNull();
+    expect(within(copilotRow as HTMLTableRowElement).getByText('Queued')).toBeInTheDocument();
+    within(copilotRow as HTMLTableRowElement).getByText('Details').click();
+    expect(within(copilotRow as HTMLTableRowElement).getByText(/Provider: MICROSOFT_COPILOT/)).toBeInTheDocument();
+    expect(within(copilotRow as HTMLTableRowElement).getByText(
+      /Waiting for the AI Security discovery worker to claim this job/
+    )).toBeInTheDocument();
+
     const azureCloudType = screen.getByText('Azure Cloud Discovery');
     const azureCloudRow = azureCloudType.closest('tr');
     expect(azureCloudRow).not.toBeNull();
@@ -173,5 +188,57 @@ describe('InventoryRunQueuePage', () => {
     expect(within(row as HTMLTableRowElement).getByText(
       /Waiting for the AI Security discovery worker to claim this job/
     )).toBeInTheDocument();
+  });
+
+  it('keeps claimed Azure jobs visible and includes completed Copilot discovery runs', async () => {
+    vi.spyOn(api, 'listSyncRuns').mockResolvedValue([{
+      id: 'copilot-run',
+      syncType: 'AI_SECURITY_COPILOT_STUDIO',
+      runDomain: 'INVENTORY',
+      runClass: 'INGESTION',
+      status: 'completed',
+      recordsFetched: 6,
+      recordsInserted: 6,
+      recordsUpdated: 0,
+      recordsFailed: 0,
+      startedAt: '2026-09-13T09:00:00Z',
+      completedAt: '2026-09-13T09:00:04Z',
+      metadataJson: JSON.stringify({ provider: 'MICROSOFT_COPILOT', connectorId: 'copilot-connector' }),
+    }]);
+    vi.spyOn(api, 'listIngestionJobs').mockResolvedValue({
+      items: [{
+        jobId: 'azure-running-job',
+        jobType: 'AI_SECURITY_AZURE_DISCOVERY',
+        sourceType: 'ai-security-azure',
+        assetIdentifier: 'ai-security-azure:azure-connector',
+        status: 'RUNNING',
+        requestedBy: 'analyst',
+        requestedAt: '2026-09-13T10:00:00Z',
+        startedAt: '2026-09-13T10:00:01Z',
+        completedAt: null,
+        attemptCount: 1,
+        failureCode: null,
+        failureMessage: null,
+        sbomUploadId: null,
+        resultJson: null,
+      }],
+      page: 0,
+      size: 100,
+      totalItems: 1,
+      totalPages: 1,
+    });
+
+    renderWithProviders(<InventoryRunQueuePage />);
+
+    const azureType = await screen.findByText('Azure AI Discovery');
+    const azureRow = azureType.closest('tr') as HTMLTableRowElement;
+    expect(within(azureRow).getByText('Running')).toBeInTheDocument();
+    within(azureRow).getByText('Details').click();
+    expect(within(azureRow).getByText(/worker is starting this run/)).toBeInTheDocument();
+
+    const copilotType = screen.getByText('Microsoft Copilot Discovery');
+    const copilotRow = copilotType.closest('tr') as HTMLTableRowElement;
+    expect(within(copilotRow).getByText('Completed')).toBeInTheDocument();
+    expect(within(copilotRow).getByText('6')).toBeInTheDocument();
   });
 });

@@ -509,6 +509,7 @@ export type CampaignAiResponse = {
 import { resolveApiBase } from './base';
 import type {
   AiArtifactSummary,
+  AiProvider,
   AiSecurityArtifact,
   AiSecurityConnectionTest,
   AiSecurityConnectorConfig,
@@ -517,6 +518,13 @@ import type {
   AiSecurityAzureCredentialProfile,
   AiSecurityAzureFoundryConfig,
   AiSecurityAzureRequirements,
+  AiSecurityAwsPreflight,
+  AiSecurityAwsRequirements,
+  AiAgentExecutionEvent,
+  AiAgentExecutionPage,
+  CopilotStudioConnector,
+  AiSecurityConnectorFeatureFlag,
+  AiActivityEvidence,
   AiSecurityFinding,
   AiSecurityGraph,
   AiSecurityPage,
@@ -529,6 +537,10 @@ import type {
   AiGridSystem,
   AiGridCoverage,
   AiGridCoverageDimension,
+  AiFrameworkCoverage,
+  AiFrameworkDefinition,
+  AiRuntimeTelemetryReadiness,
+  AiGridPolicyAssessmentStateSummary,
   AiGridPolicy,
   AiGridPolicyDistribution,
   AiGridShippingStatus,
@@ -539,14 +551,11 @@ import type {
   AiGridPhase1CorpusBootstrap,
   AiGridPhase1CorpusReadiness,
   AiGridPhase1CorpusCertification,
-  AiGridPhase1MigrationPreview,
   AiGridPhase1PreviewCertificationProfile,
   AiGridPhase1PreviewStatus,
-  AiGridPhase1MigrationResult,
-  AiGridControlCoverage,
-  AiGridOwaspCoverage,
   AiGridPolicyCandidate,
   AiGridPolicySelection,
+  AiGridBulkPolicySelectionResult,
   AiGridOwner,
   AiGridRunMetrics,
   AiGridPolicyExecutionResult,
@@ -644,6 +653,13 @@ function formatApiError(payload: ApiErrorPayload, fallback: string): string {
   return `${codePrefix}${baseMessage} (${fieldDetails})`;
 }
 
+export class ApiError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 async function parseApiError(response: Response): Promise<Error> {
   const fallback = `Request failed (${response.status})`;
   const contentType = response.headers.get('content-type') ?? '';
@@ -653,9 +669,9 @@ async function parseApiError(response: Response): Promise<Error> {
       if (isJwtAuthFailure(response.status, payload)) {
         handleJwtAuthFailure();
       }
-      return new Error(formatApiError(payload, fallback));
+      return new ApiError(formatApiError(payload, fallback), response.status);
     } catch {
-      return new Error(fallback);
+      return new ApiError(fallback, response.status);
     }
   }
 
@@ -663,7 +679,7 @@ async function parseApiError(response: Response): Promise<Error> {
   if (isJwtAuthFailure(response.status, undefined, text)) {
     handleJwtAuthFailure();
   }
-  return new Error(text || fallback);
+  return new ApiError(text || fallback, response.status);
 }
 
 export function getStoredAuthToken(): string {
@@ -880,6 +896,8 @@ async function publicRequest<T>(path: string, options?: RequestInit): Promise<T>
 
 function buildFindingsSearchParams(params?: FindingsFilterModel): URLSearchParams {
   const searchParams = new URLSearchParams();
+  if (params?.groupField) searchParams.set('groupField', params.groupField);
+  if (params?.groupValue != null) searchParams.set('groupValue', params.groupValue);
   if (params?.page != null) searchParams.set('page', String(params.page));
   if (params?.size != null) searchParams.set('size', String(params.size));
   if (params?.cursor && params.cursor.trim().length > 0) searchParams.set('cursor', params.cursor.trim());
@@ -941,6 +959,7 @@ export const api = {
   issueDemoSetupLink: (requestId: string) => request<DemoSetupLink>(`/platform/demo-requests/${requestId}/issue-setup-link`, { method: 'POST' }),
   deleteDemoRequest: (requestId: string) => request<void>(`/platform/demo-requests/${requestId}`, { method: 'DELETE' }),
   getDashboard: () => request<Dashboard>('/dashboard'),
+  getExposureSummary: () => request<Pick<Dashboard, 'openFindings' | 'criticalFindings' | 'openCritical' | 'openHigh' | 'openMedium' | 'openLow' | 'averageOpenRiskScore' | 'topAssetsAtRisk'>>('/dashboard/exposure-summary'),
   getVulnRepoDashboard: () => request<VulnRepoDashboard>('/vuln-repo/dashboard'),
   getPlatformVulnRepoDashboard: () => request<VulnRepoDashboard>('/platform/vuln-repo/dashboard'),
   getPlatformVulnSourceStats: () => request<PlatformVulnSourceStats>('/platform/vuln-repo/source-stats'),
@@ -967,6 +986,11 @@ export const api = {
     return request<FindingPage>(`/findings${suffix}`);
   },
   getFinding: (findingId: string) => request<Finding>(`/findings/${encodeURIComponent(findingId)}`),
+  getFindingGroups: (field: string, params?: FindingsFilterModel) => {
+    const search = buildFindingsSearchParams(params);
+    search.set('field', field);
+    return request<Array<{ key: string; count: number }>>(`/findings/groups?${search.toString()}`);
+  },
   getFindingSummary: (params?: FindingsFilterModel) => {
     const searchParams = buildFindingsSearchParams(params);
     const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : '';
@@ -1376,6 +1400,16 @@ export const api = {
   listAiGridSystems: () => request<AiGridSystem[]>('/ai-systems'),
   getAiGridCoverage: () => request<AiGridCoverage>('/ai-coverage'),
   getAiGridCoverageDimensions: () => request<AiGridCoverageDimension[]>('/ai-coverage/dimensions'),
+  getAiFrameworkCoverage: (framework: string, version: string, coverageEpochId?: string) => {
+    const params = new URLSearchParams({ framework, version });
+    if (coverageEpochId) params.set('coverageEpochId', coverageEpochId);
+    return request<AiFrameworkCoverage>(`/ai-framework-coverage?${params.toString()}`);
+  },
+  getAiFrameworks: () => request<AiFrameworkDefinition[]>('/ai-frameworks'),
+  getAiRuntimeTelemetryReadiness: () =>
+    request<AiRuntimeTelemetryReadiness>('/ai-runtime-telemetry-readiness'),
+  getLatestAiGridAssessmentStates: () =>
+    request<AiGridPolicyAssessmentStateSummary[]>('/ai-assessment-states/latest'),
   listAiGridPolicies: () => request<AiGridPolicy[]>('/ai-policies'),
   listPlatformAiGridPolicies: async (filters?: { releaseFamily?: string; lifecycle?: string }) => {
     const params = new URLSearchParams();
@@ -1434,16 +1468,6 @@ export const api = {
   certifyPlatformAiGridPhase1Corpus: () => request<AiGridPhase1CorpusCertification>(
     '/platform/ai-grid/validation/releases/phase-1/certification-corpus/certify', { method: 'POST' },
   ),
-  getPlatformAiGridPhase1MigrationPreview: (tenantId: string) => request<AiGridPhase1MigrationPreview>(
-    `/platform/ai-grid/migrations/phase-1/tenants/${encodeURIComponent(tenantId)}/preview`,
-  ),
-  applyPlatformAiGridPhase1Migration: (tenantId: string) => request<AiGridPhase1MigrationResult>(
-    `/platform/ai-grid/migrations/phase-1/tenants/${encodeURIComponent(tenantId)}/apply`, { method: 'POST' },
-  ),
-  /** @deprecated Retained for one release; use getPlatformAiGridFrameworkCoverage. */
-  getPlatformAiGridOwaspCoverage: () => request<AiGridOwaspCoverage[]>('/platform/ai-grid/policies/portfolio/owasp'),
-  getPlatformAiGridFrameworkCoverage: (framework = 'OWASP_GENAI_LLM_TOP_10', version = '2026') =>
-    request<AiGridControlCoverage[]>(`/platform/ai-grid/policies/portfolio/frameworks?framework=${encodeURIComponent(framework)}&version=${encodeURIComponent(version)}`),
   getPlatformAiGridPolicyCandidates: () => request<AiGridPolicyCandidate[]>('/platform/ai-grid/policies/portfolio/candidates'),
   createPlatformAiGridPolicyCandidate: (payload: {
     title: string; sourceType: string; status: string; technologyId?: string; rationale: string;
@@ -1454,6 +1478,11 @@ export const api = {
     request<AiGridPolicy[]>(`/ai-policies/${encodeURIComponent(policyId)}/selection`, {
       method: 'PUT',
       body: JSON.stringify({ selection, reason }),
+    }),
+  enableAllDistributedAiGridPolicies: (reason: string) =>
+    request<AiGridBulkPolicySelectionResult>('/ai-policies/enable-all', {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
     }),
   getAiGridRunMetrics: (runId: string) => request<AiGridRunMetrics>(
     `/ai-assessment-runs/${encodeURIComponent(runId)}/metrics`,
@@ -1491,7 +1520,7 @@ export const api = {
     artifactType?: string,
     page = 0,
     size = 50,
-    provider?: 'AWS' | 'AZURE',
+    provider?: AiProvider,
     subscription?: string,
     nativeKind?: string,
     severity?: string,
@@ -1508,7 +1537,7 @@ export const api = {
     artifactType?: string,
     page = 0,
     size = 50,
-    provider?: 'AWS' | 'AZURE',
+    provider?: AiProvider,
     subscription?: string,
     nativeKind?: string,
     severity?: string,
@@ -1526,7 +1555,7 @@ export const api = {
     return request<AiSecurityPage<AiArtifactSummary>>(`/ai-security/artifact-summaries?${params.toString()}`);
   },
   listAiKnowledgeDataInventory: (
-    page = 0, size = 50, provider?: 'AWS' | 'AZURE', kind?: string,
+    page = 0, size = 50, provider?: AiProvider, kind?: string,
     sourceType?: string, sensitivity?: string, publicContentAccess?: string, active?: boolean,
   ) => {
     const params = new URLSearchParams({ page: String(page), size: String(size) });
@@ -1539,7 +1568,7 @@ export const api = {
     return request<AiSecurityPage<AiSecurityArtifact>>(`/ai-security/inventory/knowledge-data?${params.toString()}`);
   },
   listAiMcpInventory: (
-    page = 0, size = 50, provider?: 'AWS' | 'AZURE', role?: string,
+    page = 0, size = 50, provider?: AiProvider, role?: string,
     authenticationType?: string, endpointExposure?: string, synchronizationStatus?: string, active?: boolean,
   ) => {
     const params = new URLSearchParams({ page: String(page), size: String(size) });
@@ -1553,10 +1582,17 @@ export const api = {
   },
   getAiSecurityArtifact: (artifactId: string) =>
     request<AiSecurityArtifact>(`/ai-security/artifacts/${encodeURIComponent(artifactId)}`),
-  getAiSecurityGraph: (rootArtifactId?: string, depth?: number) => {
+  getAiActivityEvidence: (artifactId: string) =>
+    request<AiActivityEvidence[]>(`/ai-security/artifacts/${encodeURIComponent(artifactId)}/activity-evidence`),
+  getAiSecurityGraph: (rootArtifactId?: string, depth?: number, runtime?: { from?: string; to?: string }) => {
     const params = new URLSearchParams();
     if (rootArtifactId) params.set('rootArtifactId', rootArtifactId);
     if (depth) params.set('depth', String(depth));
+    if (runtime) {
+      params.set('includeRuntime', 'true');
+      if (runtime.from) params.set('runtimeFrom', runtime.from);
+      if (runtime.to) params.set('runtimeTo', runtime.to);
+    }
     const suffix = params.toString() ? `?${params.toString()}` : '';
     return request<AiSecurityGraph>(`/ai-security/graph${suffix}`);
   },
@@ -1565,7 +1601,7 @@ export const api = {
     status?: string,
     page = 0,
     size = 50,
-    provider?: 'AWS' | 'AZURE',
+    provider?: AiProvider,
     subscription?: string,
     severity?: string,
     nativeKind?: string,
@@ -1602,12 +1638,13 @@ export const api = {
     method: 'PUT',
     body: JSON.stringify({ disposition, reason }),
   }),
-  listAiGridPolicyDetails: () => request<AiSecurityPolicy[]>('/ai-policies/details'),
-  updateAiGridPolicyEnabled: (policyId: string, enabled: boolean) =>
-    request<AiSecurityPolicy>(`/ai-policies/${encodeURIComponent(policyId)}/enabled`, {
-      method: 'PATCH',
-      body: JSON.stringify({ enabled }),
-    }),
+  getAiGridPolicyDetail: (policyId: string) =>
+    request<AiSecurityPolicy>(`/ai-policies/${encodeURIComponent(policyId)}`),
+  listAiGridPolicyDetails: async () => {
+    const summaries = await request<AiGridPolicy[]>('/ai-policies');
+    return Promise.all(summaries.map((policy) =>
+      request<AiSecurityPolicy>(`/ai-policies/${encodeURIComponent(policy.policyId)}`)));
+  },
   getAiGridPolicyConfiguration: (policyId: string) =>
     request<PolicyConfiguration>(`/ai-policies/${encodeURIComponent(policyId)}/configuration`),
   updateAiGridPolicyScope: (
@@ -1650,8 +1687,24 @@ export const api = {
     }),
   explainAiGridPolicy: (policyId: string) =>
     request<PolicyAssistExplanation>(`/ai-policies/${encodeURIComponent(policyId)}/assist/explain`),
-  listAiSecurityRuns: (provider?: 'AWS' | 'AZURE') =>
+  listAiSecurityRuns: (provider?: AiProvider) =>
     request<AiSecurityRun[]>(`/ai-security/runs${provider ? `?provider=${provider}` : ''}`),
+  listAiAgentExecutions: (filters: { agentId?: string; agentVersionId?: string; status?: string; source?: string; from?: string; to?: string; page?: number; size?: number } = {}) => {
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => { if (value !== undefined && value !== '') params.set(key, String(value)); });
+    return request<AiAgentExecutionPage>(`/ai-security/executions?${params.toString()}`);
+  },
+  getAiAgentExecutionTimeline: (executionId: string) =>
+    request<AiAgentExecutionEvent[]>(`/ai-security/executions/${encodeURIComponent(executionId)}/timeline`),
+  listCopilotStudioConnectors: () => request<CopilotStudioConnector[]>('/connectors/ai-security/copilot-studio'),
+  saveCopilotStudioConnector: (payload: { organizationUrl: string; credentialProfileId: string; discoveryEnabled: boolean; executionEnabled: boolean; killSwitch: boolean; scheduleCron?: string; allowedDataverseHosts?: string[] }) =>
+    request<CopilotStudioConnector>('/connectors/ai-security/copilot-studio', { method: 'PUT', body: JSON.stringify(payload) }),
+  testCopilotStudioConnector: (connectorId: string) => request<{ bots: { ready: boolean; status: number; state: string }; components: { ready: boolean; status: number; state: string }; executions: { ready: boolean; status: number; state: string } }>(`/connectors/ai-security/copilot-studio/${encodeURIComponent(connectorId)}/test`, { method: 'POST' }),
+  runCopilotStudioDiscovery: (connectorId: string) => request<IngestionJobAccepted>(`/connectors/ai-security/copilot-studio/${encodeURIComponent(connectorId)}/run`, { method: 'POST' }),
+  runCopilotStudioRuntime: (connectorId: string) => request<{ accepted: number; duplicates: number; windowStart: string }>(`/connectors/ai-security/copilot-studio/${encodeURIComponent(connectorId)}/runtime-run`, { method: 'POST' }),
+  listAiSecurityConnectorFeatureFlags: () => request<AiSecurityConnectorFeatureFlag[]>('/connectors/ai-security/feature-flags'),
+  updateAiSecurityConnectorFeatureFlag: (featureKey: string, payload: { enabled: boolean; killSwitch: boolean }) =>
+    request<AiSecurityConnectorFeatureFlag>(`/connectors/ai-security/feature-flags/${encodeURIComponent(featureKey)}`, { method: 'PUT', body: JSON.stringify(payload) }),
   listAiSecurityRunScopes: (runId: string) =>
     request<AiSecurityScope[]>(`/ai-security/runs/${encodeURIComponent(runId)}/scopes`),
   getAiSecurityConnector: () => request<AiSecurityConnectorConfig | null>('/connectors/ai-security/aws'),
@@ -1667,6 +1720,10 @@ export const api = {
   }),
   testAiSecurityConnector: () =>
     request<AiSecurityConnectionTest>('/connectors/ai-security/aws/test', { method: 'POST' }),
+  getAiSecurityAwsRequirements: () =>
+    request<AiSecurityAwsRequirements>('/connectors/ai-security/aws/requirements'),
+  runAiSecurityAwsPreflight: () =>
+    request<AiSecurityAwsPreflight>('/connectors/ai-security/aws/preflight', { method: 'POST' }),
   runAiSecurityConnector: () =>
     request<{ jobId: string; status: string; message: string }>('/connectors/ai-security/aws/run', { method: 'POST' }),
   listAiSecurityAzureConnectors: () =>

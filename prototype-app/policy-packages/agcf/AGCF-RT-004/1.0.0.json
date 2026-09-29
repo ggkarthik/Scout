@@ -1,0 +1,54 @@
+{
+  "policyId": "AGCF-RT-004",
+  "version": "1.0.0",
+  "name": "Consequential runtime telemetry is incomplete",
+  "description": "Fails when an execution's evidence source cannot supply the decision context that behavioural runtime policies require. Reported once per provider and window, never per execution.",
+  "securityIntent": "Make runtime coverage gaps visible without inferring behaviour from missing evidence.",
+  "remediationIntent": "Enable the provider's decision telemetry source or register a governed telemetry adapter for the missing evidence family.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-RT-004",
+  "provider": "MULTI_CLOUD",
+  "evaluationMode": "RUNTIME_COVERAGE",
+  "evaluationDefinition": {
+    "mode": "RUNTIME_COVERAGE",
+    "runtimeCoverage": {
+      "lookbackSeconds": 86400,
+      "windowSeconds": 3600,
+      "maximumRowsExamined": 10000,
+      "sampleSize": 10
+    }
+  },
+  "baseEvidenceTiers": [
+    "E1"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "PREVIEW",
+  "releaseFamily": "AGCF_PHASE_2",
+  "wave": "WAVE_2A",
+  "workflowClass": "RUNTIME_FINDING",
+  "evaluationSubject": "EXECUTION",
+  "artifactTypes": [],
+  "nativeKinds": [],
+  "requiredCapabilities": [
+    "RUNTIME_EXECUTION_METADATA"
+  ],
+  "requiredRelationships": [],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [],
+  "reasonCode": "AGCF_RT_004_CONSEQUENTIAL_TELEMETRY_INCOMPLETE",
+  "frameworkMappings": [
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "LOG-05",
+      "mappingType": "PARTIAL",
+      "rationale": "Telemetry completeness is a logging and monitoring control."
+    }
+  ],
+  "parameterDefinitions": [],
+  "certificationParameterProfile": null,
+  "packageSourceRef": "policy-packages/agcf/AGCF-RT-004/1.0.0.json",
+  "findingAggregationGrain": "PROVIDER_WINDOW_CAPABILITY_FAMILY"
+}

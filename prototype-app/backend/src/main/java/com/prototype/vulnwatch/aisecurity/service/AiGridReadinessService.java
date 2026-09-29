@@ -247,6 +247,8 @@ public class AiGridReadinessService {
                     "Add applicable governed policy coverage", detail(gap));
             case "UNRESOLVED_OWNER" -> new Action(gap, 50, "OWNERSHIP", "CONFIRM_OWNER",
                     "Confirm an accountable owner", detail(gap));
+            case "UNATTACHED_RESOURCE" -> new Action(gap, 35, "ASSOCIATION", "RESTORE_RESOURCE_ASSOCIATION",
+                    "Attach required AI resource", detail(gap));
             default -> new Action(gap, 60, "EVIDENCE", "REVIEW_COVERAGE_GAP",
                     "Review unresolved coverage gap", detail(gap));
         };

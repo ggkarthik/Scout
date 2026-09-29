@@ -73,24 +73,24 @@ class AiSecurityGraphPostgresIntegrationTest {
         ArtifactObservation agent = new ArtifactObservation(
                 "arn:aws:bedrock:us-east-1:123456789012:agent/depth-agent",
                 "AI_AGENT", "AWS_BEDROCK_AGENT", "Depth agent", Map.of());
-        ArtifactObservation lambda = new ArtifactObservation(
-                "arn:aws:lambda:us-east-1:123456789012:function:depth-fn",
-                "OTHER_AI_ARTIFACT", "AWS_LAMBDA_FUNCTION", "Depth function", Map.of());
-        ArtifactObservation model = new ArtifactObservation(
-                "arn:aws:bedrock:us-east-1:123456789012:custom-model/depth-model",
-                "AI_MODEL", "AWS_BEDROCK_CUSTOM_MODEL", "Depth model", Map.of());
+        ArtifactObservation alias = new ArtifactObservation(
+                "arn:aws:bedrock:us-east-1:123456789012:agent-alias/depth-agent/depth-alias",
+                "AI_COMPONENT", "AWS_BEDROCK_AGENT_ALIAS", "Depth alias", Map.of());
+        ArtifactObservation version = new ArtifactObservation(
+                "arn:aws:bedrock:us-east-1:123456789012:agent/depth-agent/version/1",
+                "AI_AGENT_VERSION", "AWS_BEDROCK_AGENT_VERSION", "Depth version", Map.of());
 
         observationService.ingest(tenant, new ObservationEnvelopeV1(
                 AiSecurityObservationService.CONTRACT_VERSION, runId, connectorId, tenant.getId(), "AWS",
                 "123456789012", "us-east-1", "BEDROCK_AGENTS",
                 "AWS:123456789012:us-east-1:BEDROCK_AGENTS", 0, 1,
                 runId + ":depth:0", "depth-hash", Instant.now(), ScopeStatus.COMPLETE,
-                List.of(agent, lambda, model),
+                List.of(agent, alias, version),
                 List.of(
-                        new RelationshipObservation(agent.providerResourceId(), lambda.providerResourceId(),
-                                "INVOKES_LAMBDA", Map.of()),
-                        new RelationshipObservation(lambda.providerResourceId(), model.providerResourceId(),
-                                "USES_MODEL", Map.of())),
+                        new RelationshipObservation(agent.providerResourceId(), alias.providerResourceId(),
+                                "HAS_COMPONENT", Map.of()),
+                        new RelationshipObservation(alias.providerResourceId(), version.providerResourceId(),
+                                "SERVES_VERSION", Map.of())),
                 List.of()));
 
         UUID agentId = tenantExecution.run(tenant, () -> jdbc.queryForObject(
@@ -99,11 +99,11 @@ class AiSecurityGraphPostgresIntegrationTest {
 
         var depth1 = apiService.graph(tenant, agentId, 1);
         assertEquals(1, depth1.edges().size(), "depth 1 must only surface the agent's direct edge");
-        assertEquals(2, depth1.nodes().size(), "depth 1 nodes: agent + lambda only");
+        assertEquals(2, depth1.nodes().size(), "depth 1 nodes: agent + alias only");
 
         var depth2 = apiService.graph(tenant, agentId, 2);
         assertEquals(2, depth2.edges().size(), "depth 2 must include the second hop to the model");
-        assertEquals(3, depth2.nodes().size(), "depth 2 nodes: agent + lambda + model");
+        assertEquals(3, depth2.nodes().size(), "depth 2 nodes: agent + alias + version");
     }
 
     @Test
@@ -120,17 +120,17 @@ class AiSecurityGraphPostgresIntegrationTest {
         ArtifactObservation agentA = new ArtifactObservation(
                 "arn:aws:bedrock:us-east-1:123456789012:agent/tenant-a-agent",
                 "AI_AGENT", "AWS_BEDROCK_AGENT", "Tenant A agent", Map.of());
-        ArtifactObservation lambdaA = new ArtifactObservation(
-                "arn:aws:lambda:us-east-1:123456789012:function:tenant-a-fn",
-                "OTHER_AI_ARTIFACT", "AWS_LAMBDA_FUNCTION", "Tenant A function", Map.of());
+        ArtifactObservation aliasA = new ArtifactObservation(
+                "arn:aws:bedrock:us-east-1:123456789012:agent-alias/tenant-a-agent/alias-a",
+                "AI_COMPONENT", "AWS_BEDROCK_AGENT_ALIAS", "Tenant A alias", Map.of());
         observationService.ingest(tenantA, new ObservationEnvelopeV1(
                 AiSecurityObservationService.CONTRACT_VERSION, runA, connectorA, tenantA.getId(), "AWS",
                 "123456789012", "us-east-1", "BEDROCK_AGENTS",
                 "AWS:123456789012:us-east-1:BEDROCK_AGENTS", 0, 1,
                 runA + ":isolation:0", "isolation-hash-a", Instant.now(), ScopeStatus.COMPLETE,
-                List.of(agentA, lambdaA),
-                List.of(new RelationshipObservation(agentA.providerResourceId(), lambdaA.providerResourceId(),
-                        "INVOKES_LAMBDA", Map.of())),
+                List.of(agentA, aliasA),
+                List.of(new RelationshipObservation(agentA.providerResourceId(), aliasA.providerResourceId(),
+                        "HAS_COMPONENT", Map.of())),
                 List.of()));
 
         UUID connectorB = connectorService.save(

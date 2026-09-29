@@ -6,6 +6,8 @@ import com.azure.core.credential.TokenRequestContext;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.aisecurity.service.AiGridProviderCallCounter;
+import com.prototype.vulnwatch.aisecurity.service.AiSecurityDigestService;
+import com.prototype.vulnwatch.domain.Tenant;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -40,16 +42,19 @@ public class AzureAiManagementClient {
     private final ObjectMapper objectMapper;
     private final AzurePolicyPermissionMatrix permissionMatrix;
     private final AiGridProviderCallCounter providerCalls;
+    private final AiSecurityDigestService digests;
 
     @org.springframework.beans.factory.annotation.Autowired
     public AzureAiManagementClient(
             ObjectMapper objectMapper,
             AzurePolicyPermissionMatrix permissionMatrix,
-            AiGridProviderCallCounter providerCalls
+            AiGridProviderCallCounter providerCalls,
+            AiSecurityDigestService digests
     ) {
         this.objectMapper = objectMapper;
         this.permissionMatrix = permissionMatrix;
         this.providerCalls = providerCalls;
+        this.digests = digests;
         this.http = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(15))
                 .followRedirects(HttpClient.Redirect.NEVER)
@@ -57,7 +62,7 @@ public class AzureAiManagementClient {
     }
 
     AzureAiManagementClient(ObjectMapper objectMapper, AzurePolicyPermissionMatrix permissionMatrix) {
-        this(objectMapper, permissionMatrix, new AiGridProviderCallCounter());
+        this(objectMapper, permissionMatrix, new AiGridProviderCallCounter(), new AiSecurityDigestService("0123456789abcdef0123456789abcdef", "test", "", ""));
     }
 
     public DiscoverySnapshot discover(TokenCredential credential, String subscriptionId) {
@@ -70,6 +75,11 @@ public class AzureAiManagementClient {
             Set<String> requestedFamilies,
             boolean previewAgentsEnabled
     ) {
+        return discover(credential, subscriptionId, requestedFamilies, previewAgentsEnabled, null);
+    }
+
+    public DiscoverySnapshot discover(TokenCredential credential, String subscriptionId, Set<String> requestedFamilies,
+                                      boolean previewAgentsEnabled, Tenant tenant) {
         Set<String> requested = requestedFamilies == null ? Set.of() : Set.copyOf(requestedFamilies);
         Map<String, List<AzureResource>> resources = new LinkedHashMap<>();
         Map<String, AzureApiFailure> failures = new LinkedHashMap<>();
@@ -107,7 +117,10 @@ public class AzureAiManagementClient {
         collectRequestedChild(credential, requested, resources.get("AZURE_AI_ACCOUNTS"),
                 "raiPolicies", "AZURE_RAI_POLICIES", resources, failures);
         if (previewAgentsEnabled && requested.stream().anyMatch(family -> family.startsWith("AZURE_FOUNDRY_AGENT"))) {
-            collectFoundryAgents(credential, resources.get("AZURE_FOUNDRY_PROJECTS"), resources, failures);
+            collectFoundryAgents(credential, resources.get("AZURE_FOUNDRY_PROJECTS"), resources, failures, tenant);
+        }
+        if (requested.stream().anyMatch(family -> family.startsWith("AZURE_CLASSIC_FOUNDRY_AGENT"))) {
+            collectClassicFoundryAgents(credential, resources.get("AZURE_FOUNDRY_PROJECTS"), resources, failures, tenant);
         }
         collectRequestedChild(credential, requested, resources.get("AZURE_ML_WORKSPACES"),
                 "models", "AZURE_ML_MODELS", resources, failures);
@@ -188,7 +201,7 @@ public class AzureAiManagementClient {
     /** Uses only GET /agents and published definitions; it never invokes agents, models, or tools. */
     private void collectFoundryAgents(
             TokenCredential credential, List<AzureResource> projects,
-            Map<String, List<AzureResource>> resources, Map<String, AzureApiFailure> failures
+            Map<String, List<AzureResource>> resources, Map<String, AzureApiFailure> failures, Tenant tenant
     ) {
         if (projects == null || failures.containsKey("AZURE_FOUNDRY_AGENTS")) return;
         for (AzureResource project : projects) {
@@ -196,13 +209,102 @@ public class AzureAiManagementClient {
             if (endpoint == null) continue;
             try {
                 for (JsonNode agent : foundryList(credential, endpoint + "/agents?api-version=v1")) {
-                    resources.get("AZURE_FOUNDRY_AGENTS").add(foundryAgentResource(agent, project));
+                    AzureResource agentResource = foundryAgentResource(agent, project, tenant);
+                    resources.get("AZURE_FOUNDRY_AGENTS").add(agentResource);
+                    String name = text(agent.path("name"));
+                    if (name == null) continue;
+                    try {
+                        for (JsonNode version : foundryList(credential,
+                                endpoint + "/agents/" + encode(name) + "/versions?api-version=v1")) {
+                            resources.get("AZURE_FOUNDRY_AGENT_VERSIONS").add(
+                                    foundryVersionResource(version, agentResource, tenant));
+                        }
+                    } catch (AzureApiException exception) {
+                        // A single agent can be unavailable or use an unsupported version API;
+                        // retain all other agents and make the enclosing inventory scope partial.
+                        failures.putIfAbsent("AZURE_FOUNDRY_AGENTS", exception.failure());
+                    }
                 }
             } catch (AzureApiException exception) {
-                failures.put("AZURE_FOUNDRY_AGENTS", exception.failure());
-                return;
+                failures.putIfAbsent("AZURE_FOUNDRY_AGENTS", exception.failure());
             }
         }
+    }
+
+    /**
+     * Classic Foundry exposes Assistants API definitions but no immutable definition-version
+     * history. We retain its current definition as a version node and report that limitation as
+     * an explicit coverage gap instead of inventing history.
+     */
+    private void collectClassicFoundryAgents(
+            TokenCredential credential, List<AzureResource> projects,
+            Map<String, List<AzureResource>> resources, Map<String, AzureApiFailure> failures, Tenant tenant
+    ) {
+        if (projects == null || failures.containsKey("AZURE_CLASSIC_FOUNDRY_AGENTS")) return;
+        boolean observed = false;
+        for (AzureResource project : projects) {
+            String endpoint = foundryProjectEndpoint(project);
+            if (endpoint == null) continue;
+            try {
+                for (JsonNode assistant : foundryList(credential, endpoint + "/assistants?api-version=v1")) {
+                    AzureResource agent = classicAssistantResource(assistant, project, tenant);
+                    resources.get("AZURE_CLASSIC_FOUNDRY_AGENTS").add(agent);
+                    resources.get("AZURE_CLASSIC_FOUNDRY_AGENT_VERSIONS").add(
+                            classicAssistantVersionResource(assistant, agent, tenant));
+                    observed = true;
+                }
+            } catch (AzureApiException exception) {
+                failures.putIfAbsent("AZURE_CLASSIC_FOUNDRY_AGENTS", exception.failure());
+            }
+        }
+        if (observed) {
+            failures.putIfAbsent("AZURE_CLASSIC_FOUNDRY_AGENTS", new AzureApiFailure(
+                    "COVERAGE_GAP",
+                    "Classic Foundry exposes only the current assistant definition, and its runs API is thread-scoped without project-wide thread enumeration; historical versions and exhaustive runtime collection require external snapshots or log export",
+                    false,
+                    200));
+        }
+    }
+
+    private AzureResource classicAssistantResource(JsonNode assistant, AzureResource project, Tenant tenant) {
+        String providerId = text(assistant.path("id"));
+        if (providerId == null) providerId = text(assistant.path("name"));
+        if (providerId == null) providerId = "unnamed";
+        String name = text(assistant.path("name"));
+        String id = project.id() + "/assistants/" + encode(providerId);
+        var properties = safeClassicDefinition(assistant, tenant);
+        properties.put("agentVersion", classicVersion(assistant));
+        return new AzureResource(id.toLowerCase(Locale.ROOT), id, name,
+                "Microsoft.Foundry/projects/assistants", "ClassicFoundryAssistant", project.location(),
+                project.subscriptionId(), project.resourceGroup(), objectMapper.createObjectNode(), properties,
+                objectMapper.createObjectNode(), Map.of(), project.id());
+    }
+
+    private AzureResource classicAssistantVersionResource(JsonNode assistant, AzureResource agent, Tenant tenant) {
+        String version = classicVersion(assistant);
+        String id = agent.id() + "/versions/" + encode(version);
+        var properties = safeClassicDefinition(assistant, tenant);
+        properties.put("agentVersion", version);
+        return new AzureResource(id.toLowerCase(Locale.ROOT), id, agent.name() + " current",
+                "Microsoft.Foundry/projects/assistants/versions", "ClassicFoundryAssistantVersion", agent.location(),
+                agent.subscriptionId(), agent.resourceGroup(), objectMapper.createObjectNode(), properties,
+                objectMapper.createObjectNode(), Map.of(), agent.id());
+    }
+
+    private com.fasterxml.jackson.databind.node.ObjectNode safeClassicDefinition(JsonNode assistant, Tenant tenant) {
+        var properties = objectMapper.createObjectNode();
+        String model = text(assistant.path("model"));
+        if (model != null) properties.put("modelDeploymentName", model);
+        addPromptDigest(properties, assistant, tenant);
+        properties.set("tools", safeTools(assistant.path("tools"), tenant));
+        return properties;
+    }
+
+    private static String classicVersion(JsonNode assistant) {
+        JsonNode updated = assistant.path("updated_at");
+        if (updated.isIntegralNumber()) return Long.toString(updated.asLong());
+        JsonNode created = assistant.path("created_at");
+        return created.isIntegralNumber() ? Long.toString(created.asLong()) : "current";
     }
 
     private String foundryProjectEndpoint(AzureResource project) {
@@ -224,7 +326,7 @@ public class AzureAiManagementClient {
         for (int page = 0; next != null; page++) {
             if (page >= MAX_PAGES || !visited.add(next)) {
                 throw new AzureApiException(new AzureApiFailure(
-                        "INVALID_CONFIGURATION", "Azure Foundry pagination limit was exceeded", false, 0));
+                        "PAGE_BUDGET_EXCEEDED", "Azure Foundry pagination limit was exceeded", false, 0));
             }
             JsonNode response = get(credential, next);
             JsonNode data = response.path("data");
@@ -245,20 +347,78 @@ public class AzureAiManagementClient {
         return initialUrl + (initialUrl.contains("?") ? "&" : "?") + "after=" + encode(cursor);
     }
 
-    private AzureResource foundryAgentResource(JsonNode agent, AzureResource project) {
+    private AzureResource foundryAgentResource(JsonNode agent, AzureResource project, Tenant tenant) {
         String name = text(agent.path("name"));
         String id = project.id() + "/agents/" + (name == null ? "unnamed" : name);
         com.fasterxml.jackson.databind.node.ObjectNode properties = objectMapper.createObjectNode();
         JsonNode definition = agent.path("versions").path("latest").path("definition");
-        if (definition.isObject()) properties.setAll((com.fasterxml.jackson.databind.node.ObjectNode) definition);
+        // Do not carry the provider definition forward. It may contain instructions, tool schemas,
+        // headers, or other content. Keep only fields needed for inventory relationships.
         String model = text(definition.path("model"));
         if (model != null) properties.put("modelDeploymentName", model);
         String version = text(agent.path("versions").path("latest").path("version"));
         if (version != null) properties.put("agentVersion", version);
+        addPromptDigest(properties, definition, tenant);
+        properties.set("tools", safeTools(definition.path("tools"), tenant));
         return new AzureResource(id.toLowerCase(Locale.ROOT), id, name,
                 "Microsoft.Foundry/projects/agents", "FoundryPromptAgent", project.location(),
                 project.subscriptionId(), project.resourceGroup(), objectMapper.createObjectNode(), properties,
                 objectMapper.createObjectNode(), Map.of(), project.id());
+    }
+
+    private com.fasterxml.jackson.databind.node.ArrayNode safeTools(JsonNode definitions, Tenant tenant) {
+        com.fasterxml.jackson.databind.node.ArrayNode tools = objectMapper.createArrayNode();
+        if (definitions.isArray()) {
+            for (JsonNode tool : definitions) {
+                String type = text(tool.path("type"));
+                if (type == null) continue;
+                var summary = objectMapper.createObjectNode();
+                summary.put("type", type);
+                // MCP identity is metadata; schemas, headers, arguments, and definitions are omitted.
+                copyText(tool, summary, "server_url");
+                copyText(tool, summary, "serverUrl");
+                copyText(tool, summary, "url");
+                copyText(tool, summary, "project_connection_id");
+                copyText(tool, summary, "projectConnectionId");
+                if (tenant != null) {
+                    var digest = digests.digest(tenant, "tool-definition", tool.toString());
+                    summary.put("toolDefinitionDigest", digest.value()); summary.put("digestAlgorithm", digest.algorithm()); summary.put("digestKeyVersion", digest.keyVersion());
+                }
+                tools.add(summary);
+            }
+        }
+        return tools;
+    }
+
+    private AzureResource foundryVersionResource(JsonNode version, AzureResource agent, Tenant tenant) {
+        String number = text(version.path("version"));
+        if (number == null) number = text(version.path("id"));
+        if (number == null) number = "unknown";
+        String id = agent.id() + "/versions/" + encode(number);
+        var properties = objectMapper.createObjectNode();
+        JsonNode definition = version.path("definition");
+        String model = text(definition.path("model"));
+        if (model != null) properties.put("modelDeploymentName", model);
+        properties.put("agentVersion", number);
+        addPromptDigest(properties, definition, tenant);
+        properties.set("tools", safeTools(definition.path("tools"), tenant));
+        return new AzureResource(id.toLowerCase(Locale.ROOT), id, agent.name() + " v" + number,
+                "Microsoft.Foundry/projects/agents/versions", "FoundryPromptAgentVersion", agent.location(),
+                agent.subscriptionId(), agent.resourceGroup(), objectMapper.createObjectNode(), properties,
+                objectMapper.createObjectNode(), Map.of(), agent.id());
+    }
+
+    private void addPromptDigest(com.fasterxml.jackson.databind.node.ObjectNode properties, JsonNode definition, Tenant tenant) {
+        if (tenant == null) return;
+        String prompt = text(definition.path("instructions")); if (prompt == null) prompt = text(definition.path("prompt"));
+        if (prompt == null) return;
+        var digest = digests.digest(tenant, "prompt-definition", prompt);
+        properties.put("promptDigest", digest.value()); properties.put("digestAlgorithm", digest.algorithm()); properties.put("digestKeyVersion", digest.keyVersion());
+    }
+
+    private void copyText(JsonNode source, com.fasterxml.jackson.databind.node.ObjectNode target, String field) {
+        String value = text(source.path(field));
+        if (value != null) target.put(field, value);
     }
 
     private List<JsonNode> searchList(TokenCredential credential, String initialUrl) {
@@ -266,7 +426,7 @@ public class AzureAiManagementClient {
         String next = initialUrl;
         for (int page = 0; next != null; page++) {
             if (page >= MAX_PAGES) throw new AzureApiException(new AzureApiFailure(
-                    "INVALID_CONFIGURATION", "Azure Search pagination limit was exceeded", false, 0));
+                    "PAGE_BUDGET_EXCEEDED", "Azure Search pagination limit was exceeded", false, 0));
             JsonNode response = get(credential, next);
             JsonNode pageValues = response.path("value");
             if (pageValues.isArray()) pageValues.forEach(values::add);
@@ -307,7 +467,7 @@ public class AzureAiManagementClient {
         if (requested.contains(family)) return true;
         if ("AZURE_AI_ACCOUNTS".equals(family)) {
             return requested.stream().anyMatch(value -> value.startsWith("AZURE_FOUNDRY")
-                    || value.startsWith("AZURE_RAI"));
+                    || value.startsWith("AZURE_CLASSIC_FOUNDRY") || value.startsWith("AZURE_RAI"));
         }
         if ("AZURE_ML_WORKSPACES".equals(family)) {
             return requested.stream().anyMatch(value -> value.startsWith("AZURE_ML"));
@@ -329,7 +489,8 @@ public class AzureAiManagementClient {
     ) {
         if (requested.contains(family)
                 || ("AZURE_FOUNDRY_PROJECTS".equals(family)
-                        && requested.stream().anyMatch(value -> value.startsWith("AZURE_FOUNDRY_AGENT")))) {
+                        && requested.stream().anyMatch(value -> value.startsWith("AZURE_FOUNDRY_AGENT")
+                                || value.startsWith("AZURE_CLASSIC_FOUNDRY_AGENT")))) {
             collectChildren(credential, parents, childPath, family, resources, failures);
         }
     }
@@ -430,7 +591,7 @@ public class AzureAiManagementClient {
         for (int page = 0; next != null; page++) {
             if (page >= MAX_PAGES || !visited.add(next)) {
                 throw new AzureApiException(new AzureApiFailure(
-                        "INVALID_CONFIGURATION", "Azure pagination limit was exceeded", false, 0));
+                        "PAGE_BUDGET_EXCEEDED", "Azure pagination limit was exceeded", false, 0));
             }
             JsonNode response = get(credential, next);
             JsonNode pageValues = response.path("value");

@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { PageFreshnessStatus, latestFreshnessValue } from '../components/PageFreshnessStatus';
-import { useDashboardSummaryQuery, useGridExposureQuery } from '../features/dashboard/queries';
+import { useExposureSummaryQuery, useGridExposureQuery } from '../features/dashboard/queries';
 import type { GridExposureRow } from '../features/dashboard/types';
 import { useVulnRepoDashboardQuery } from '../features/vuln-repo-dashboard/queries';
 import { useEolSummaryQuery } from '../features/eol/queries';
@@ -79,7 +79,7 @@ function ExposureFunnelWidget({
       color: '#4AAD8F',
       ratio: tracked > 0 ? Math.max(remediation / tracked, MIN_RATIO) : MIN_RATIO,
       sub: `${pct(remediation, Math.max(impacted, 1))}% of impacted`,
-      path: vulnPath({ applicable: true, hasFindings: true, includeAll: true }),
+      path: vulnPath({ hasFindings: true, includeAll: true }),
     },
   ];
 
@@ -258,7 +258,7 @@ type Insight = {
 
 export function ExposureDashboardPage() {
   const navigate = useNavigate();
-  const dashQ = useDashboardSummaryQuery();
+  const dashQ = useExposureSummaryQuery();
   const vulnQ = useVulnRepoDashboardQuery();
   const eolQ = useEolSummaryQuery();
   const gridExposureQ = useGridExposureQuery();
@@ -274,7 +274,7 @@ export function ExposureDashboardPage() {
   ]);
 
   if (!dash && dashQ.isPending) {
-    return <div className="panel"><div className="panel-caption">Loading executive dashboard...</div></div>;
+    return <div className="panel" aria-busy="true" aria-label="Exposure dashboard" />;
   }
 
   // ── Risk posture numbers ──────────────────────────────────────────
@@ -378,7 +378,7 @@ export function ExposureDashboardPage() {
 
   // ── Critical unresolved CVEs ──────────────────────────────────────
   const criticalUnresolved = vuln?.criticalUnresolved ?? [];
-  const topSoftware = (vuln?.topAffectedSoftware ?? [])
+  const topSoftware = [...(vuln?.topAffectedSoftware ?? [])]
     .sort((a, b) => b.cveCount - a.cveCount || b.criticalCount - a.criticalCount)
     .slice(0, 6);
   const impactedAssets = (vuln?.impactedAssets ?? []).slice(0, 6);

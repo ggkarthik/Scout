@@ -57,6 +57,8 @@ public class FindingQueueResolutionService {
         requireSubset("vexFreshness", queueFilter.vexFreshness(), adHocFilter.vexFreshness(), queueTitle);
         requireSubset("vexProvider", queueFilter.vexProvider(), adHocFilter.vexProvider(), queueTitle);
         requireSubset("assetType", queueFilter.assetType(), adHocFilter.assetType(), queueTitle);
+        requireExact("groupField", queueFilter.groupField(), adHocFilter.groupField(), queueTitle);
+        requireExact("groupValue", queueFilter.groupValue(), adHocFilter.groupValue(), queueTitle);
         requireExact("vulnerabilityId", queueFilter.vulnerabilityId(), adHocFilter.vulnerabilityId(), queueTitle);
         requireExact("packageName", queueFilter.packageName(), adHocFilter.packageName(), queueTitle);
         requireExact("ecosystem", queueFilter.ecosystem(), adHocFilter.ecosystem(), queueTitle);
@@ -99,7 +101,9 @@ public class FindingQueueResolutionService {
                 coalesceText(adHocFilter.supportGroup(), queueFilter.supportGroup()),
                 adHocFilter.patchAvailable() != null ? adHocFilter.patchAvailable() : queueFilter.patchAvailable(),
                 coalesceText(adHocFilter.suppressedUntilBand(), queueFilter.suppressedUntilBand()),
-                coalesceList(adHocFilter.assetType(), queueFilter.assetType())
+                coalesceList(adHocFilter.assetType(), queueFilter.assetType()),
+                coalesceText(adHocFilter.groupField(), queueFilter.groupField()),
+                coalesceText(adHocFilter.groupValue(), queueFilter.groupValue())
         );
     }
 

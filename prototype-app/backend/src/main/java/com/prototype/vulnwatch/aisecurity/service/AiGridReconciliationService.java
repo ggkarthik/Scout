@@ -75,16 +75,28 @@ public class AiGridReconciliationService {
                  where coverage_epoch_id is not null and status = 'OPEN'
                 """, Map.of());
         List<CurrentArtifact> artifacts = jdbc.query("""
-                select a.artifact_id, a.technology_id, a.owner_name,
-                       count(c.policy_id) candidate_count
+                select a.artifact_id, a.artifact_type, a.native_kind, a.technology_id, a.owner_name,
+                       coalesce(observed.attributes_json ->> 'agentCoreRootQualified','false') = 'true'
+                           agentcore_root_qualified,
+                       count(distinct c.policy_id) candidate_count,
+                       count(distinct systems.id) system_count
                   from ai_grid_current_coverage_artifacts a
+                  join ai_security_artifacts observed on observed.id=a.artifact_id
                   left join ai_grid_current_expected_candidates c
                     on c.epoch_id = a.epoch_id and c.artifact_id = a.artifact_id
+                  left join ai_grid_system_memberships membership
+                    on membership.artifact_id=a.artifact_id and membership.valid_until is null
+                  left join ai_grid_system_revisions revision on revision.id=membership.system_revision_id
+                  left join ai_grid_systems systems
+                    on systems.id=revision.system_id and systems.current_revision=revision.revision and systems.status='ACTIVE'
                  where a.epoch_id = :epochId
-                 group by a.artifact_id, a.technology_id, a.owner_name
+                 group by a.artifact_id, a.artifact_type, a.native_kind, a.technology_id, a.owner_name,
+                          observed.attributes_json
                 """, Map.of("epochId", epochId), (rs, n) -> new CurrentArtifact(
-                rs.getObject("artifact_id", UUID.class), rs.getString("technology_id"),
-                rs.getString("owner_name"), rs.getLong("candidate_count")));
+                rs.getObject("artifact_id", UUID.class), rs.getString("artifact_type"), rs.getString("native_kind"),
+                rs.getString("technology_id"), rs.getString("owner_name"),
+                rs.getBoolean("agentcore_root_qualified"), rs.getLong("candidate_count"),
+                rs.getLong("system_count")));
         for (CurrentArtifact artifact : artifacts) {
             if ("UNCLASSIFIED".equals(artifact.technologyId())) {
                 upsert(tenant, triggerRunId, epochId, artifact.id(), null, "UNKNOWN_TECHNOLOGY",
@@ -100,6 +112,13 @@ public class AiGridReconciliationService {
                 upsert(tenant, triggerRunId, epochId, artifact.id(), null, "UNRESOLVED_OWNER",
                         "No authoritative or candidate owner signal is available",
                         "Confirm an accountable owner or add an approved ownership mapping");
+            }
+            if (AiGridRelationshipSemantics.attachmentContract(artifact.artifactType(), artifact.nativeKind(),
+                    Map.of("agentCoreRootQualified", artifact.agentCoreRootQualified()))
+                    == AiGridRelationshipSemantics.AttachmentContract.REQUIRED && artifact.systemCount() == 0) {
+                upsert(tenant, triggerRunId, epochId, artifact.id(), null, "UNATTACHED_RESOURCE",
+                        "A required " + artifact.nativeKind() + " resource is not attached to any AI system",
+                        "Restore the provider-backed association or confirm that the resource should be retired");
             }
         }
         for (AiGridCoverageService.CoverageItem candidate : coverage.currentCandidates()) {
@@ -164,5 +183,7 @@ public class AiGridReconciliationService {
         catch (Exception e) { throw new IllegalStateException("Unable to fingerprint coverage gap", e); }
     }
     private record ArtifactState(UUID id, boolean classified) {}
-    private record CurrentArtifact(UUID id, String technologyId, String ownerName, long candidateCount) {}
+    private record CurrentArtifact(UUID id, String artifactType, String nativeKind, String technologyId,
+                                   String ownerName, boolean agentCoreRootQualified,
+                                   long candidateCount, long systemCount) {}
 }

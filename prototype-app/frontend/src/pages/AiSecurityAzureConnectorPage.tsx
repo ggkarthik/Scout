@@ -65,6 +65,8 @@ export function AiSecurityAzureConnectorPage() {
     mutationFn: api.runAiSecurityAzureFoundryConfig,
     onSuccess: (result: { jobId: string; status: string; message: string }) => {
       setRunMessage(`${result.message} Status: ${result.status}.`);
+      void queryClient.invalidateQueries({ queryKey: ['ingestion-jobs'] });
+      void queryClient.invalidateQueries({ queryKey: ['sync-runs'] });
       void queryClient.invalidateQueries({ queryKey: ['ai-security-runs', 'AZURE'] });
     },
     onError: (error: Error) => setRunMessage(`Execution failed: ${error.message}`),

@@ -1,0 +1,71 @@
+{
+  "policyId": "AGCF-RT-003",
+  "version": "1.0.0",
+  "name": "Agent executed a retired agent version",
+  "description": "Fails when an execution terminates against a version the tenant has retired, indicating traffic still reaching a withdrawn build.",
+  "securityIntent": "Prevent retired agent versions from continuing to serve runtime traffic.",
+  "remediationIntent": "Drain the retired version's endpoint and confirm no further executions reference it.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-RT-003",
+  "provider": "MULTI_CLOUD",
+  "evaluationMode": "RUNTIME_FACTS",
+  "evaluationDefinition": {
+    "mode": "RUNTIME_FACTS",
+    "runtimeFacts": {
+      "conditions": [
+        {
+          "field": "execution.version_lifecycle_state",
+          "operator": "IN",
+          "value": [
+            "RETIRED",
+            "WITHDRAWN"
+          ]
+        }
+      ],
+      "explanationFields": [
+        "execution.version_lifecycle_state",
+        "execution.provider_agent_version_digest"
+      ]
+    }
+  },
+  "baseEvidenceTiers": [
+    "E1"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "PREVIEW",
+  "releaseFamily": "AGCF_PHASE_2",
+  "wave": "WAVE_2A",
+  "workflowClass": "RUNTIME_FINDING",
+  "evaluationSubject": "EXECUTION",
+  "artifactTypes": [],
+  "nativeKinds": [],
+  "requiredCapabilities": [
+    "RUNTIME_EXECUTION_METADATA",
+    "RUNTIME_VERSION_CORRELATION"
+  ],
+  "requiredRelationships": [],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [],
+  "reasonCode": "AGCF_RT_003_RETIRED_VERSION_EXECUTED",
+  "frameworkMappings": [
+    {
+      "framework": "OWASP_AGENTIC_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "ASI04",
+      "mappingType": "DIRECT",
+      "rationale": "Retired-build execution is an agent supply-chain control failure."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "AIS-04",
+      "mappingType": "PARTIAL",
+      "rationale": "Version lifecycle enforcement is an application security control."
+    }
+  ],
+  "parameterDefinitions": [],
+  "certificationParameterProfile": null,
+  "packageSourceRef": "policy-packages/agcf/AGCF-RT-003/1.0.0.json"
+}

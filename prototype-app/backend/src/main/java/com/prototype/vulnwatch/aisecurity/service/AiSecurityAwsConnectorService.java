@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.aisecurity.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.domain.Tenant;
+import com.prototype.vulnwatch.aisecurity.aws.AwsPermissionPreflightService;
 import com.prototype.vulnwatch.dto.IngestionJobAcceptedResponse;
 import com.prototype.vulnwatch.service.CredentialEncryptionService;
 import com.prototype.vulnwatch.service.IngestionJobService;
@@ -99,21 +100,24 @@ public class AiSecurityAwsConnectorService {
                      .region(Region.US_EAST_1)
                      .credentialsProvider(handle.provider())
                      .build()) {
-            String actualAccount = sts.getCallerIdentity().account();
+            var callerIdentity = sts.getCallerIdentity();
+            String actualAccount = callerIdentity.account();
             if (!config.accountId().equals(actualAccount)) {
                 return new ConnectionTestResponse(false, "INVALID_CONFIGURATION",
-                        "The assumed identity belongs to a different AWS account", false, List.of());
+                        "The assumed identity belongs to a different AWS account", false, List.of(), null, null);
             }
-            return new ConnectionTestResponse(true, null, "AWS connection successful", false, List.of());
+            return new ConnectionTestResponse(true, null, "AWS connection successful", false, List.of(),
+                    new AwsPermissionPreflightService.Identity(actualAccount,
+                            callerIdentity.arn(), callerIdentity.userId()), null);
         } catch (software.amazon.awssdk.services.sts.model.StsException ex) {
             String code = ex.awsErrorDetails() == null ? "ASSUME_ROLE_FAILED" : ex.awsErrorDetails().errorCode();
             return new ConnectionTestResponse(false, normalizeStsCode(code),
-                    "Unable to assume the configured AWS role", false, List.of("sts:AssumeRole"));
+                    "Unable to assume the configured AWS role", false, List.of("sts:AssumeRole"), null, null);
         } catch (Exception ex) {
             LOG.warn("AWS connection test could not be completed for tenant {}: {}: {}",
                     tenant.getId(), ex.getClass().getName(), ex.getMessage());
             return new ConnectionTestResponse(false, "PROVIDER_UNAVAILABLE",
-                    "AWS connection test could not be completed", true, List.of());
+                    "AWS connection test could not be completed", true, List.of(), null, null);
         }
     }
 
@@ -268,8 +272,14 @@ public class AiSecurityAwsConnectorService {
             String code,
             String message,
             boolean retryable,
-            List<String> missingPermissions
+            List<String> missingPermissions,
+            AwsPermissionPreflightService.Identity identity,
+            AwsPermissionPreflightService.PreflightReport preflight
     ) {
+        public ConnectionTestResponse withPreflight(AwsPermissionPreflightService.PreflightReport report) {
+            return new ConnectionTestResponse(success, code, message, retryable, missingPermissions,
+                    report == null ? identity : report.identity(), report);
+        }
     }
 
     public record ConnectorSecret(

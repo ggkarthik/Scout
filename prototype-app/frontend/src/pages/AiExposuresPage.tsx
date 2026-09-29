@@ -73,7 +73,7 @@ export function AiExposuresPage() {
           const priority = priorities.data?.find((candidate) => candidate.id === item.id);
           return <tr key={item.id} tabIndex={0} onClick={() => navigate(`/findings/ai/exposures/${item.id}`)} onKeyDown={(event) => { if (event.key === 'Enter') navigate(`/findings/ai/exposures/${item.id}`); }}>
           <td><span className={`severity-badge ${item.severity.toLowerCase()}`}>{item.severity}</span><strong>{item.title}</strong><small>{item.correlationId}</small></td>
-          <td>{priority ? <><strong>{priority.priority}</strong><small>{priority.severityPoints}+{priority.confidencePoints}+{priority.publicExposurePoints}+{priority.criticalityPoints}+{priority.recencyPoints}</small></> : '—'}</td>
+          <td>{priority ? <><strong>{priority.priority}</strong><small>{priority.severityPoints}+{priority.confidencePoints}+{priority.publicExposurePoints}+{priority.criticalityPoints}+{priority.recencyPoints}+{priority.activityPoints}</small></> : '—'}</td>
           <td><span className="status-pill">{item.state.replace(/_/g, ' ')}</span></td><td>{priority?.owner ?? 'Unowned'}</td><td>{Math.round(item.confidence * 100)}%</td><td>{item.affectedSystems}</td><td>{new Date(item.lastObservedAt).toLocaleString()}</td>
         </tr>;
         })}</tbody></table>{items.length === 0 ? <div className="empty-state"><p>No exposure paths observed.</p></div> : null}

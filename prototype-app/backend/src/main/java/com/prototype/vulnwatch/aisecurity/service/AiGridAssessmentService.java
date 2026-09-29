@@ -67,6 +67,10 @@ public class AiGridAssessmentService {
         if (policyIds != null && !policyIds.isEmpty()) {
             policies = policies.stream().filter(policy -> policyIds.contains(policy.id())).toList();
         }
+        // Runtime policies have an EXECUTION subject and read the runtime metadata tables, not
+        // snapshot facts. Evaluating them in the artifact loop would bind them to the wrong
+        // subject and run their predicate through the leaf fact engine.
+        policies = policies.stream().filter(policy -> !isRuntimeMode(policy.evaluationMode())).toList();
         Map<String, ScopeConfig> scopes = loadScopes();
         Map<String, Map<String, String>> overrides = loadOverrides();
         Map<String, Map<String, Object>> parameters = loadParameters();
@@ -258,7 +262,7 @@ public class AiGridAssessmentService {
                     :manifestId, :selection, :applicability, :readiness, :decision, :reason,
                     cast(:missing as jsonb), cast(:evidence as jsonb), :findingFingerprint,
                     :evaluationAsOf, :decisionFingerprint)
-                on conflict (tenant_id, run_id, policy_id, subject_type, subject_id) do update set
+                on conflict (tenant_id, run_id, policy_id, subject_type, subject_id, fingerprint) do update set
                     policy_version = excluded.policy_version, snapshot_manifest_id = excluded.snapshot_manifest_id,
                     selection = excluded.selection, applicability = excluded.applicability,
                     evidence_readiness = excluded.evidence_readiness, decision = excluded.decision,
@@ -281,6 +285,13 @@ public class AiGridAssessmentService {
                         "decisionFingerprint", decisionFingerprint));
         return new AiGridFindingService.AssessmentResult(persisted, runId, policy.id(), policy.version(), policy.name(),
                 policy.severity(), selection, decision, reason, artifact.id(), findingFingerprint, evidence);
+    }
+
+    static boolean isRuntimeMode(String evaluationMode) {
+        return "RUNTIME_FACTS".equals(evaluationMode)
+                || "RUNTIME_SEQUENCE".equals(evaluationMode)
+                || "RUNTIME_AGGREGATE".equals(evaluationMode)
+                || "RUNTIME_COVERAGE".equals(evaluationMode);
     }
 
     private Instant evaluationAsOf(UUID runId) {
@@ -306,8 +317,8 @@ public class AiGridAssessmentService {
                   join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id and d.available=true
                 where (p.release_family in ('AGCF_PHASE_1', 'AGCF_PHASE_2') or p.release_family is null)
                    and p.lifecycle in ('VALIDATED', 'APPROVED', 'PUBLISHED', 'CANARY')
-                   and (d.rollout_stage = 'GENERAL_AVAILABILITY'
-                        or (d.rollout_stage in ('CANARY', 'DEV') and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
+                   and platform.ai_grid_policy_visible_to_tenant(
+                           d.available, d.rollout_stage, d.canary_tenant_ids_json, cast(:tenantId as uuid))
                  order by p.policy_id, p.published_at desc, p.version desc
                 """, Map.of("tenantId", tenant.getId().toString()), (rs, n) -> new Policy(rs.getString("policy_id"), rs.getString("version"), rs.getString("name"),
                 rs.getString("severity"), rs.getString("default_selection"), strings(rs.getString("artifact_types_json")),

@@ -1,6 +1,6 @@
 # VulnWatch Architecture
 
-Last updated: 2026-09-08
+Last updated: 2026-09-24
 
 ---
 
@@ -36,7 +36,7 @@ VulnWatch is a security operations prototype: SBOM ingestion → vulnerability i
                                         └────────────────────────────┘
 ```
 
-Of the 58 controllers / 299 services, 14 controllers / 48 services live under `com.prototype.vulnwatch.aisecurity` — a separate top-level package implementing AI Security / AI Grid posture management (see [Core Data Flow](#7-ai-security--ai-grid) below and `docs/business-logic-guide.md#ai-security--ai-grid-pipeline`). Its tables are read/written via `JdbcTemplate` directly, bypassing the Spring Data JPA path shown above.
+Of the 63 controllers / 314 services, 19 controllers / 63 services live under `com.prototype.vulnwatch.aisecurity` — a separate top-level package implementing AI Security / AI Grid posture management (see [Core Data Flow](#7-ai-security--ai-grid) below and `docs/business-logic-guide.md#ai-security--ai-grid-pipeline`). Its tables are read/written via `JdbcTemplate` directly, bypassing the Spring Data JPA path shown above.
 
 ---
 
@@ -126,6 +126,9 @@ A separate discovery-and-governance pipeline, entitlement-gated (`ai.security`),
 1. **Discovery** — AWS Bedrock and Azure AI connectors (`aisecurity.aws`/`aisecurity.azure`) emit sanitized `ObservationEnvelopeV1` chunks describing agents, models, guardrails, knowledge bases, and MCP servers.
 2. **AI Grid pipeline** — per completed scan scope: immutable snapshot → derived facts → ownership resolution → agent-rooted system grouping → policy assessment (JSON predicate engine) → R2 exposure correlation (cross-system risk chains, promoted to "validated" only on exact, fresh evidence) → coverage/setup-action reconciliation → bridge into the canonical `findings` table (`finding_kind = AI_POSTURE`/`AI_EXPOSURE`).
 3. **Platform governance** — a separate platform-owner track (answer-key precision review, release certification, GA/canary policy distribution) gates what policy/correlation content ever reaches tenants.
+4. **Tenant reporting** — `/policies` combines tenant-visible policies with registered framework coverage, latest assessment-state totals, and the numeric Program 2 telemetry gate. The customer state projection is `PASS`/`FAIL`/`UNKNOWN`/`NOT_ASSESSED`: out-of-scope, capability-unavailable, and not-applicable subjects have no security state (`NOT_ASSESSED`); incomplete, stale, or failed evidence is `UNKNOWN`.
+
+The framework registry (`GET /api/ai-frameworks`) is platform reference data and is readable without selecting a tenant. Framework coverage and runtime readiness remain tenant-scoped because they depend on distribution, selection, evidence, and connector data. Consequently, `/platform/ai-policies` is limited to global catalog/distribution governance and does not render tenant coverage or telemetry.
 
 Full mechanics: `docs/business-logic-guide.md#ai-security--ai-grid-pipeline`. Schema: `docs/database.md#ai-security--ai-grid-tables`.
 
@@ -163,9 +166,11 @@ HTTP Request
 
 ### Tenant Schema Control Plane
 
-Per-tenant DDL is no longer applied by the application's own startup Flyway run. A second, independent Flyway migration line lives under `backend/src/main/resources/db/migration/tenant/` (its own `<schema>.tenant_schema_history` table per tenant, currently a single `V1__tenant_schema.sql` baseline created by the one-time migration-history reset), separate from the platform-only `postgres_reset/` line (each file there must start with a `-- migration-guard: platform-only` comment, enforced by `PostgresResetMigrationGuardTest`).
+Per-tenant DDL is no longer applied by the application's own startup Flyway run. A second, independent Flyway migration line lives under `backend/src/main/resources/db/migration/tenant/` (its own `<schema>.tenant_schema_history` table per tenant), separate from the platform-only `postgres_reset/` line (each file there must start with a `-- migration-guard: platform-only` comment, enforced by `PostgresResetMigrationGuardTest`). Both lines now have append-only V3 migrations after their reset V1 baselines: platform V3 adds bounded runtime evaluation modes and policy-addressable runtime fields; tenant V3 adds typed runtime evidence, governed producer/source registration, receipts, and rolling quota state.
 
 `TenantSchemaMigrationService` drives the rollout: hold a Postgres advisory lock → migrate the `tenant_default` template and compute a SHA-256 **structural fingerprint** (normalized dump of every column/constraint/index/sequence/RLS policy) → migrate one canary tenant → migrate the rest in batches of 10, comparing each tenant's post-migration fingerprint against the template and failing (`DRIFTED`) rather than silently diverging. Every step is recorded in `platform.tenant_schema_versions`, surfaced by `TenantSchemaStatusService`/`TenantSchemaStatusController` (`GET /api/platform/tenant-schema-status`, shown in the Platform Console) and by `TenantSchemaReadinessHealthIndicator` (an actuator health contributor gated behind `app.tenancy.enforce-schema-version=true`).
+
+Tenant V2 (and now V3) is therefore a control-plane rollout, not an application deploy side effect. Manifest/allowlist operations require the tenant schema to have reached V2; the typed runtime contract, governed producer/source registry, receipts, and rolling quota state require V3. Callers should report an unready tenant as not assessed with a schema-readiness blocker rather than treating it as a policy failure. The packaged tenant target is 3, while the configured minimum-compatible floor remains 1 during the controlled rollout.
 
 For production, the same rollout runs from `ProductionBootstrapCli` — a standalone `main()` that skips Spring/JPA entirely — invoked by a temporary Render "migrator" web service (`backend/scripts/run-render-migration.sh`) rather than the long-running API service. See [Deployment](#deployment) below; there is no committed operational runbook right now (a prior reference to `docs/p0-production-runbook.md` pointed at a file that has since been deleted).
 

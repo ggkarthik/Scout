@@ -107,6 +107,8 @@ function buildArtifact(overrides: Partial<AiSecurityArtifact> = {}): AiSecurityA
     piiInfoTypes: [],
     piiFindingCount: 0,
     piiLastScannedAt: null,
+    attachmentState: 'STANDALONE_OPTIONAL',
+    systemIds: [],
     ...overrides,
   };
 }

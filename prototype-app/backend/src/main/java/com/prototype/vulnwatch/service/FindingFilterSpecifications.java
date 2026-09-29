@@ -48,7 +48,29 @@ public final class FindingFilterSpecifications {
                 .and(bySupportGroup(filter.supportGroup()))
                 .and(byPatchAvailable(filter.patchAvailable()))
                 .and(bySuppressedUntilBand(filter.suppressedUntilBand()))
-                .and(byAssetType(filter.assetType()));
+                .and(byAssetType(filter.assetType()))
+                .and(byGroup(filter.groupField(), filter.groupValue()));
+    }
+
+    private static Specification<Finding> byGroup(String field, String value) {
+        if (!hasText(field) || value == null) return null;
+        return (root, query, cb) -> {
+            var component = root.join("component", JoinType.LEFT);
+            var directAsset = root.join("asset", JoinType.LEFT);
+            var componentAsset = component.join("asset", JoinType.LEFT);
+            jakarta.persistence.criteria.Expression<String> expression = switch (field) {
+                case "severity" -> cb.coalesce(cb.nullif(cb.coalesce(root.<String>get("severityOverride"), root.join("vulnerability", JoinType.LEFT).<String>get("severity")), ""), "UNKNOWN");
+                case "status" -> root.get("status").as(String.class);
+                case "assetName" -> cb.coalesce(cb.nullif(cb.coalesce(directAsset.<String>get("name"), componentAsset.<String>get("name")), ""), "Unknown");
+                case "packageName" -> cb.coalesce(cb.nullif(component.<String>get("packageName"), ""), "Unknown");
+                case "vulnerabilityId" -> cb.coalesce(cb.nullif(root.join("vulnerability", JoinType.LEFT).<String>get("externalId"), ""), "Unknown");
+                case "owner" -> cb.coalesce(cb.coalesce(
+                        cb.nullif(cb.trim(cb.coalesce(directAsset.<String>get("ownerTeam"), componentAsset.<String>get("ownerTeam"))), ""),
+                        cb.nullif(cb.trim(cb.coalesce(directAsset.<String>get("ownerEmail"), componentAsset.<String>get("ownerEmail"))), "")), "Unassigned");
+                default -> throw new IllegalArgumentException("Unsupported finding group: " + field);
+            };
+            return cb.equal(expression, value);
+        };
     }
 
     public static Specification<Finding> statusEquals(FindingStatus status) {

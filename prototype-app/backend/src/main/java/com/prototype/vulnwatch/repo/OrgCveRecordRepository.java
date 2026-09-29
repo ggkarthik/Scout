@@ -238,7 +238,7 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                         o.inKev = true
                         or coalesce(o.epssScore, 0.0) >= 0.9
                       )
-                      and o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE
+                      and (:includeAll = true or o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE)
                     order by
                       case when o.impacted = true then 1 else 0 end desc,
                       case when o.impactState = com.prototype.vulnwatch.domain.ImpactState.UNDER_INVESTIGATION then 1 else 0 end desc,
@@ -256,12 +256,13 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                         o.inKev = true
                         or coalesce(o.epssScore, 0.0) >= 0.9
                       )
-                      and o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE
+                      and (:includeAll = true or o.applicabilityState = com.prototype.vulnwatch.domain.ApplicabilityState.APPLICABLE)
                     """
     )
     Page<OrgCveRecord> findExposurePageExploitOnly(
             @Param("tenant") Tenant tenant,
             @Param("inKev") Boolean inKev,
+            @Param("includeAll") boolean includeAll,
             Pageable pageable
     );
 
@@ -273,6 +274,9 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                     join o.vulnerability v
                     where o.tenant = :tenant
                       and (:inKev is null or o.inKev = :inKev)
+                      and (:sourceFilter = false or o.vulnerability.id in :sourceIds or (:kevSource = true and o.inKev = true))
+                      and (:hasFindings is null or (:hasFindings = true and exists (select f.id from Finding f where f.tenant = :tenant and f.vulnerability = o.vulnerability))
+                           or (:hasFindings = false and not exists (select f.id from Finding f where f.tenant = :tenant and f.vulnerability = o.vulnerability)))
                       and (:externalId is null or o.externalId = :externalId)
                       and (:severity is null or upper(coalesce(o.severity, 'UNKNOWN')) = :severity)
                       and (:createdSinceSet = false or o.createdAt >= :createdSince)
@@ -334,6 +338,9 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                     join o.vulnerability v
                     where o.tenant = :tenant
                       and (:inKev is null or o.inKev = :inKev)
+                      and (:sourceFilter = false or o.vulnerability.id in :sourceIds or (:kevSource = true and o.inKev = true))
+                      and (:hasFindings is null or (:hasFindings = true and exists (select f.id from Finding f where f.tenant = :tenant and f.vulnerability = o.vulnerability))
+                           or (:hasFindings = false and not exists (select f.id from Finding f where f.tenant = :tenant and f.vulnerability = o.vulnerability)))
                       and (:externalId is null or o.externalId = :externalId)
                       and (:severity is null or upper(coalesce(o.severity, 'UNKNOWN')) = :severity)
                       and (:createdSinceSet = false or o.createdAt >= :createdSince)
@@ -396,6 +403,10 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
             @Param("softwarePattern") String softwarePattern,
             @Param("includeAll") boolean includeAll,
             @Param("impactedOnly") boolean impactedOnly,
+            @Param("sourceFilter") boolean sourceFilter,
+            @Param("sourceIds") List<UUID> sourceIds,
+            @Param("kevSource") boolean kevSource,
+            @Param("hasFindings") Boolean hasFindings,
             Pageable pageable
     );
 
@@ -407,6 +418,9 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                     join o.vulnerability v
                     where o.tenant = :tenant
                       and (:inKev is null or o.inKev = :inKev)
+                      and (:sourceFilter = false or o.vulnerability.id in :sourceIds or (:kevSource = true and o.inKev = true))
+                      and (:hasFindings is null or (:hasFindings = true and exists (select f.id from Finding f where f.tenant = :tenant and f.vulnerability = o.vulnerability))
+                           or (:hasFindings = false and not exists (select f.id from Finding f where f.tenant = :tenant and f.vulnerability = o.vulnerability)))
                       and (:externalId is null or o.externalId = :externalId)
                       and (:severity is null or upper(coalesce(o.severity, 'UNKNOWN')) = :severity)
                       and (:createdSinceSet = false or o.createdAt >= :createdSince)
@@ -468,6 +482,9 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
                     join o.vulnerability v
                     where o.tenant = :tenant
                       and (:inKev is null or o.inKev = :inKev)
+                      and (:sourceFilter = false or o.vulnerability.id in :sourceIds or (:kevSource = true and o.inKev = true))
+                      and (:hasFindings is null or (:hasFindings = true and exists (select f.id from Finding f where f.tenant = :tenant and f.vulnerability = o.vulnerability))
+                           or (:hasFindings = false and not exists (select f.id from Finding f where f.tenant = :tenant and f.vulnerability = o.vulnerability)))
                       and (:externalId is null or o.externalId = :externalId)
                       and (:severity is null or upper(coalesce(o.severity, 'UNKNOWN')) = :severity)
                       and (:createdSinceSet = false or o.createdAt >= :createdSince)
@@ -530,6 +547,10 @@ public interface OrgCveRecordRepository extends JpaRepository<OrgCveRecord, UUID
             @Param("softwarePattern") String softwarePattern,
             @Param("includeAll") boolean includeAll,
             @Param("impactedOnly") boolean impactedOnly,
+            @Param("sourceFilter") boolean sourceFilter,
+            @Param("sourceIds") List<UUID> sourceIds,
+            @Param("kevSource") boolean kevSource,
+            @Param("hasFindings") Boolean hasFindings,
             Pageable pageable
     );
 

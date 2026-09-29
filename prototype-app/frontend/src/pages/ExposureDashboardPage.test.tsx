@@ -147,18 +147,19 @@ describe('ExposureDashboardPage', () => {
   });
 
   it('renders loading state while dashboard data is pending', () => {
-    vi.spyOn(api, 'getDashboard').mockReturnValue(new Promise(() => {}));
+    vi.spyOn(api, 'getExposureSummary').mockReturnValue(new Promise(() => {}));
     vi.spyOn(api, 'getVulnRepoDashboard').mockReturnValue(new Promise(() => {}));
     vi.spyOn(api, 'getEolSummary').mockReturnValue(new Promise(() => {}));
     vi.spyOn(api, 'getGridExposure').mockReturnValue(new Promise(() => {}));
 
     renderWithProviders(<ExposureDashboardPage />);
 
-    expect(screen.getByText(/loading executive dashboard/i)).toBeInTheDocument();
+    expect(screen.queryByText(/loading.*dashboard/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Exposure dashboard')).toHaveAttribute('aria-busy', 'true');
   });
 
   it('renders open findings count from dashboard data', async () => {
-    vi.spyOn(api, 'getDashboard').mockResolvedValue(buildDashboard({ openFindings: 17 }));
+    vi.spyOn(api, 'getExposureSummary').mockResolvedValue(buildDashboard({ openFindings: 17 }));
     vi.spyOn(api, 'getVulnRepoDashboard').mockResolvedValue(buildVulnRepoDashboard());
     vi.spyOn(api, 'getEolSummary').mockResolvedValue(buildEolSummary());
     vi.spyOn(api, 'getGridExposure').mockResolvedValue(buildGridExposure());
@@ -170,7 +171,7 @@ describe('ExposureDashboardPage', () => {
   });
 
   it('renders critical findings count', async () => {
-    vi.spyOn(api, 'getDashboard').mockResolvedValue(buildDashboard({ criticalFindings: 23, openCritical: 0 }));
+    vi.spyOn(api, 'getExposureSummary').mockResolvedValue(buildDashboard({ criticalFindings: 23, openCritical: 0 }));
     vi.spyOn(api, 'getVulnRepoDashboard').mockResolvedValue(buildVulnRepoDashboard());
     vi.spyOn(api, 'getEolSummary').mockResolvedValue(buildEolSummary());
     vi.spyOn(api, 'getGridExposure').mockResolvedValue(buildGridExposure());
@@ -181,7 +182,7 @@ describe('ExposureDashboardPage', () => {
   });
 
   it('renders high severity finding count in severity breakdown', async () => {
-    vi.spyOn(api, 'getDashboard').mockResolvedValue(buildDashboard({ openHigh: 77 }));
+    vi.spyOn(api, 'getExposureSummary').mockResolvedValue(buildDashboard({ openHigh: 77 }));
     vi.spyOn(api, 'getVulnRepoDashboard').mockResolvedValue(buildVulnRepoDashboard());
     vi.spyOn(api, 'getEolSummary').mockResolvedValue(buildEolSummary());
     vi.spyOn(api, 'getGridExposure').mockResolvedValue(buildGridExposure());
@@ -192,7 +193,7 @@ describe('ExposureDashboardPage', () => {
   });
 
   it('renders eol count from eol summary', async () => {
-    vi.spyOn(api, 'getDashboard').mockResolvedValue(buildDashboard());
+    vi.spyOn(api, 'getExposureSummary').mockResolvedValue(buildDashboard());
     vi.spyOn(api, 'getVulnRepoDashboard').mockResolvedValue(buildVulnRepoDashboard());
     vi.spyOn(api, 'getEolSummary').mockResolvedValue(buildEolSummary({ eolCount: 12 }));
     vi.spyOn(api, 'getGridExposure').mockResolvedValue(buildGridExposure());
@@ -203,7 +204,7 @@ describe('ExposureDashboardPage', () => {
   });
 
   it('renders Grid Exposure rows for every asset type and omits AI assets', async () => {
-    vi.spyOn(api, 'getDashboard').mockResolvedValue(buildDashboard());
+    vi.spyOn(api, 'getExposureSummary').mockResolvedValue(buildDashboard());
     vi.spyOn(api, 'getVulnRepoDashboard').mockResolvedValue(buildVulnRepoDashboard());
     vi.spyOn(api, 'getEolSummary').mockResolvedValue(buildEolSummary());
     vi.spyOn(api, 'getGridExposure').mockResolvedValue(buildGridExposure());
@@ -217,7 +218,7 @@ describe('ExposureDashboardPage', () => {
   });
 
   it('navigates to the filtered findings list when a Grid Exposure cell is clicked', async () => {
-    vi.spyOn(api, 'getDashboard').mockResolvedValue(buildDashboard());
+    vi.spyOn(api, 'getExposureSummary').mockResolvedValue(buildDashboard());
     vi.spyOn(api, 'getVulnRepoDashboard').mockResolvedValue(buildVulnRepoDashboard());
     vi.spyOn(api, 'getEolSummary').mockResolvedValue(buildEolSummary());
     vi.spyOn(api, 'getGridExposure').mockResolvedValue(buildGridExposure());

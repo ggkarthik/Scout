@@ -140,6 +140,35 @@ public class FindingProjectionQueryService {
         });
     }
 
+    public List<com.prototype.vulnwatch.dto.FindingCountBucketResponse> groupCounts(Tenant tenant, FindingsFilter filter, String field) {
+        ensureTenantProjection(tenant);
+        String expression = groupExpression(field);
+        String table = qualifiedTenantTable(tenant, "finding_list_projection");
+        return tenantSchemaExecutionService.run(tenant, () -> {
+            SqlFilter sql = buildSqlFilter(filter);
+            return jdbcTemplate.query("SELECT " + expression + " AS group_value, COUNT(*) AS group_count FROM "
+                    + table + " WHERE 1=1 " + sql.whereClause() + " GROUP BY 1 ORDER BY 2 DESC, 1 ASC",
+                    sql.params(), (rs, row) -> new com.prototype.vulnwatch.dto.FindingCountBucketResponse(
+                            rs.getString("group_value"), rs.getLong("group_count")));
+        });
+    }
+
+    private String groupExpression(String field) {
+        // Only fixed expressions enter SQL; the selected value is always bound.
+        return switch (field) {
+            case "severity" -> "coalesce(nullif(severity, ''), 'UNKNOWN')";
+            case "status" -> "status";
+            case "assetName" -> "coalesce(nullif(asset_name, ''), 'Unknown')";
+            case "packageName" -> "coalesce(nullif(package_name, ''), 'Unknown')";
+            case "vulnerabilityId" -> "coalesce(nullif(vulnerability_id, ''), 'Unknown')";
+            case "owner" -> "coalesce((select coalesce(nullif(trim(a.owner_team), ''), nullif(trim(a.owner_email), '')) "
+                    + "from findings f left join inventory_components ic on ic.id = f.component_id "
+                    + "left join assets a on a.id = coalesce(f.asset_id, ic.asset_id) "
+                    + "where f.id = finding_list_projection.finding_id), 'Unassigned')";
+            default -> throw new IllegalArgumentException("Unsupported finding group: " + field);
+        };
+    }
+
     private String qualifiedTenantTable(Tenant tenant, String tableName) {
         String schema = tenant == null ? null : tenant.getSchemaName();
         if (schema == null || !schema.matches("[a-z][a-z0-9_]*")) {
@@ -186,6 +215,14 @@ public class FindingProjectionQueryService {
             params.addValue("patchAvailable", filter.patchAvailable());
         }
         appendSuppressedUntilBand(where, params, filter.suppressedUntilBand());
+        if (FindingFilterSpecifications.hasText(filter.groupField()) && filter.groupValue() != null) {
+            where.append(" AND ").append(groupExpression(filter.groupField())).append(" = :groupValue");
+            params.addValue("groupValue", filter.groupValue());
+        }
+        if (filter.assetType() != null && !filter.assetType().isEmpty()) {
+            where.append(" AND finding_id IN (SELECT f.id FROM findings f LEFT JOIN inventory_components ic ON ic.id = f.component_id LEFT JOIN assets a ON a.id = coalesce(f.asset_id, ic.asset_id) WHERE cast(a.type as text) IN (:assetTypes))");
+            params.addValue("assetTypes", upperValues(filter.assetType()));
+        }
         return new SqlFilter(where.toString(), params);
     }
 

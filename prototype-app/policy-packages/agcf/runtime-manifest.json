@@ -1,0 +1,113 @@
+{
+  "release": "AGCF_PHASE_2_RUNTIME",
+  "policies": [
+    {
+      "policyId": "AGCF-RT-001",
+      "version": "1.0.0",
+      "digest": "d6ee4427efd3d05d4edff304df0cb95bd69946792cec2122559984c9f2159bc6",
+      "provider": "MULTI_CLOUD",
+      "controlObjectiveId": "AGCF-OBJ-RT-001",
+      "evaluationMode": "RUNTIME_FACTS",
+      "defaultSelection": "PREVIEW",
+      "releaseFamily": "AGCF_PHASE_2",
+      "wave": "WAVE_2A",
+      "packageSourceRef": "policy-packages/agcf/AGCF-RT-001/1.0.0.json"
+    },
+    {
+      "policyId": "AGCF-RT-002",
+      "version": "1.0.0",
+      "digest": "5d389bae812adc6cb08c3602ce96f73413d59ea50111fcc036d59dbfaee34f3d",
+      "provider": "MULTI_CLOUD",
+      "controlObjectiveId": "AGCF-OBJ-RT-002",
+      "evaluationMode": "RUNTIME_FACTS",
+      "defaultSelection": "PREVIEW",
+      "releaseFamily": "AGCF_PHASE_2",
+      "wave": "WAVE_2A",
+      "packageSourceRef": "policy-packages/agcf/AGCF-RT-002/1.0.0.json"
+    },
+    {
+      "policyId": "AGCF-RT-003",
+      "version": "1.0.0",
+      "digest": "3447b938212d713e2101a2945144b3c0e21d21181033bee0209721457b12b728",
+      "provider": "MULTI_CLOUD",
+      "controlObjectiveId": "AGCF-OBJ-RT-003",
+      "evaluationMode": "RUNTIME_FACTS",
+      "defaultSelection": "PREVIEW",
+      "releaseFamily": "AGCF_PHASE_2",
+      "wave": "WAVE_2A",
+      "packageSourceRef": "policy-packages/agcf/AGCF-RT-003/1.0.0.json"
+    },
+    {
+      "policyId": "AGCF-RT-004",
+      "version": "1.0.0",
+      "digest": "9d9278f70b03d2300f798ff62af27cfae2eb8ab4c4b93638481b79e92852e0c6",
+      "provider": "MULTI_CLOUD",
+      "controlObjectiveId": "AGCF-OBJ-RT-004",
+      "evaluationMode": "RUNTIME_COVERAGE",
+      "defaultSelection": "PREVIEW",
+      "releaseFamily": "AGCF_PHASE_2",
+      "wave": "WAVE_2A",
+      "packageSourceRef": "policy-packages/agcf/AGCF-RT-004/1.0.0.json"
+    },
+    {
+      "policyId": "AGCF-RT-005",
+      "version": "1.0.0",
+      "digest": "20c1d61535f4b0475e578f83a88f1cce91df5237b6da2e40cbaf289fdc6ad999",
+      "provider": "MULTI_CLOUD",
+      "controlObjectiveId": "AGCF-OBJ-RT-005",
+      "evaluationMode": "RUNTIME_SEQUENCE",
+      "defaultSelection": "PREVIEW",
+      "releaseFamily": "AGCF_PHASE_2",
+      "wave": "WAVE_2B",
+      "packageSourceRef": "policy-packages/agcf/AGCF-RT-005/1.0.0.json"
+    },
+    {
+      "policyId": "AGCF-RT-006",
+      "version": "1.0.0",
+      "digest": "a58ba2bb2b844573336445121847059017db4d2267194eb08a3d92dc7b86ad7c",
+      "provider": "MULTI_CLOUD",
+      "controlObjectiveId": "AGCF-OBJ-RT-006",
+      "evaluationMode": "RUNTIME_SEQUENCE",
+      "defaultSelection": "PREVIEW",
+      "releaseFamily": "AGCF_PHASE_2",
+      "wave": "WAVE_2B",
+      "packageSourceRef": "policy-packages/agcf/AGCF-RT-006/1.0.0.json"
+    },
+    {
+      "policyId": "AGCF-RT-007",
+      "version": "1.0.0",
+      "digest": "0054ddb33e5783008f3a1ff7001e23bebd88f155e5de2e6e5c7f6a3b4318d8c6",
+      "provider": "MULTI_CLOUD",
+      "controlObjectiveId": "AGCF-OBJ-RT-007",
+      "evaluationMode": "RUNTIME_SEQUENCE",
+      "defaultSelection": "PREVIEW",
+      "releaseFamily": "AGCF_PHASE_2",
+      "wave": "WAVE_2B",
+      "packageSourceRef": "policy-packages/agcf/AGCF-RT-007/1.0.0.json"
+    },
+    {
+      "policyId": "AGCF-RT-008",
+      "version": "1.0.0",
+      "digest": "8397505ef3a4819109d423b366a5b0a02469fce894ca1d6c5abe072284f8762c",
+      "provider": "MULTI_CLOUD",
+      "controlObjectiveId": "AGCF-OBJ-RT-008",
+      "evaluationMode": "RUNTIME_SEQUENCE",
+      "defaultSelection": "PREVIEW",
+      "releaseFamily": "AGCF_PHASE_2",
+      "wave": "WAVE_2B",
+      "packageSourceRef": "policy-packages/agcf/AGCF-RT-008/1.0.0.json"
+    },
+    {
+      "policyId": "AGCF-RT-009",
+      "version": "1.0.0",
+      "digest": "c80006c1c1f4446f36e978496adfcf32ec92ad6eb0e012e5bbb7428a64fb0660",
+      "provider": "MULTI_CLOUD",
+      "controlObjectiveId": "AGCF-OBJ-RT-009",
+      "evaluationMode": "RUNTIME_AGGREGATE",
+      "defaultSelection": "PREVIEW",
+      "releaseFamily": "AGCF_PHASE_2",
+      "wave": "WAVE_2B",
+      "packageSourceRef": "policy-packages/agcf/AGCF-RT-009/1.0.0.json"
+    }
+  ]
+}

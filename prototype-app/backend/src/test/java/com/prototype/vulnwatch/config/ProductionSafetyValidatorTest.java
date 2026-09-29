@@ -11,8 +11,22 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.util.ReflectionTestUtils;
 
 class ProductionSafetyValidatorTest {
+
+    @Test
+    void validateRequiresDedicatedRuntimeIdentityKeyWhenRuntimeCollectionIsEnabled() {
+        ProductionSafetyValidator validator = validator(
+                "", false, "https://issuer.example.com", "",
+                "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=", false, true,
+                "https://app.example.com", disabledBootstrap());
+        ReflectionTestUtils.setField(validator, "aiRuntimeEnabled", true);
+        ReflectionTestUtils.setField(validator, "aiIdentityHmacKey", testHmacKey());
+        ReflectionTestUtils.setField(validator, "aiRuntimeIdentityHmacKey", "");
+
+        assertThrows(IllegalStateException.class, validator::validate);
+    }
 
     @Test
     void sharedDemoLifecycleTablesAreExemptOnlyInDefaultSchema() {
@@ -36,6 +50,10 @@ class ProductionSafetyValidatorTest {
                 disabledBootstrap());
 
         assertDoesNotThrow(validator::validate);
+    }
+
+    private static String testHmacKey() {
+        return String.join("-", "test", "only", "identity", "hmac", "material", "0001");
     }
 
     @Test
@@ -299,7 +317,7 @@ class ProductionSafetyValidatorTest {
             boolean testPersonasEnabled,
             PlatformOwnerBootstrapProperties platformOwnerBootstrapProperties
     ) {
-        return new ProductionSafetyValidator(
+        ProductionSafetyValidator validator = new ProductionSafetyValidator(
                 true,
                 "",
                 creatorKey,
@@ -318,6 +336,8 @@ class ProductionSafetyValidatorTest {
                 false,
                 safeRoleJdbcTemplate(),
                 platformOwnerBootstrapProperties);
+        ReflectionTestUtils.setField(validator, "aiIdentityHmacKey", testHmacKey());
+        return validator;
     }
 
     private ProductionSafetyValidator validator(
@@ -399,7 +419,7 @@ class ProductionSafetyValidatorTest {
             JdbcTemplate jdbcTemplate,
             PlatformOwnerBootstrapProperties platformOwnerBootstrapProperties
     ) {
-        return new ProductionSafetyValidator(
+        ProductionSafetyValidator validator = new ProductionSafetyValidator(
                 true,
                 "",
                 creatorKey,
@@ -418,6 +438,8 @@ class ProductionSafetyValidatorTest {
                 validateRlsRuntimeRole,
                 jdbcTemplate,
                 platformOwnerBootstrapProperties);
+        ReflectionTestUtils.setField(validator, "aiIdentityHmacKey", testHmacKey());
+        return validator;
     }
 
     private PlatformOwnerBootstrapProperties disabledBootstrap() {
@@ -427,7 +449,7 @@ class ProductionSafetyValidatorTest {
     }
 
     private ProductionSafetyValidator hmacValidator(String hmacSecret, boolean allowHmacInProduction) {
-        return new ProductionSafetyValidator(
+        ProductionSafetyValidator validator = new ProductionSafetyValidator(
                 true,
                 "",
                 "",
@@ -446,6 +468,8 @@ class ProductionSafetyValidatorTest {
                 false,
                 safeRoleJdbcTemplate(),
                 disabledBootstrap());
+        ReflectionTestUtils.setField(validator, "aiIdentityHmacKey", testHmacKey());
+        return validator;
     }
 
     private PlatformOwnerBootstrapProperties enabledBootstrap() {

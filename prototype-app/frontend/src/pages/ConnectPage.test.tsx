@@ -87,8 +87,8 @@ describe('ConnectPage', () => {
 
     renderConnectPage(TENANT_ADMIN);
 
-    expect(await screen.findByText(/Failed/i)).toBeInTheDocument();
-    expect(screen.getByText('ServiceNow CMDB')).toBeInTheDocument();
+    expect(await screen.findByLabelText(/last sync failed/i)).toBeInTheDocument();
+    expect(screen.getByText('ServiceNow')).toBeInTheDocument();
   });
 
   it('keeps platform-owned vulnerability connector management hidden from tenant users', async () => {
@@ -145,7 +145,7 @@ describe('ConnectPage', () => {
 
     renderConnectPage(TENANT_ADMIN);
 
-    expect(await screen.findByText(/Inventory.*CMDB & SBOM/i)).toBeInTheDocument();
+    expect(await screen.findByText(/SBOM, CMDB, Cloud discovery, and AI resource inventory sources/i)).toBeInTheDocument();
     expect(screen.queryByText('Connectors')).not.toBeInTheDocument();
     expect(screen.queryByText('NVD Vulnerability Feed')).not.toBeInTheDocument();
   });
@@ -207,7 +207,7 @@ describe('ConnectPage', () => {
 
     renderConnectPage({ ...TENANT_ADMIN, roles: ['TENANT_ADMIN', 'PLATFORM_OWNER'] });
 
-    expect(await screen.findByText(/Inventory.*CMDB & SBOM/i)).toBeInTheDocument();
+    expect(await screen.findByText(/SBOM, CMDB, Cloud discovery, and AI resource inventory sources/i)).toBeInTheDocument();
     expect(screen.queryByText('Connectors')).not.toBeInTheDocument();
     expect(screen.queryByText('NVD Vulnerability Feed')).not.toBeInTheDocument();
   });

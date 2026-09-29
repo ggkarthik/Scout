@@ -30,12 +30,12 @@ const registeredCapabilities = new Set([
 ]);
 const registeredRelationships = new Set(['DIRECT_PROVIDER_RELATIONSHIP']);
 const correlationReferences = new Map([
-  ['AGCF-XSP-001', ['R2_EXTERNAL_SENSITIVE_ACCESS', '1.0.0']],
-  ['AGCF-XSP-002', ['R2_UNTRUSTED_AUTONOMOUS_EXECUTION', '1.0.0']],
-  ['AGCF-XSP-003', ['R2_EXCESSIVE_TOOL_PRIVILEGE', '1.0.0']],
-  ['AGCF-XSP-004', ['R2_EXTERNAL_MCP_SENSITIVE_ACCESS', '1.0.0']],
-  ['AGCF-XSP-005', ['R2_MCP_WEAK_AUTH_EXECUTION', '1.0.0']],
-  ['AGCF-XSP-006', ['R2_SENSITIVE_RETRIEVAL_CONTROL_GAP', '1.0.0']],
+  ['AGCF-XSP-001', ['R2_EXTERNAL_SENSITIVE_ACCESS', '2.0.0']],
+  ['AGCF-XSP-002', ['R2_UNTRUSTED_AUTONOMOUS_EXECUTION', '2.0.0']],
+  ['AGCF-XSP-003', ['R2_EXCESSIVE_TOOL_PRIVILEGE', '2.0.0']],
+  ['AGCF-XSP-004', ['R2_EXTERNAL_MCP_SENSITIVE_ACCESS', '2.0.0']],
+  ['AGCF-XSP-005', ['R2_MCP_WEAK_AUTH_EXECUTION', '2.0.0']],
+  ['AGCF-XSP-006', ['R2_SENSITIVE_RETRIEVAL_CONTROL_GAP', '2.0.0']],
 ]);
 const registeredCorrelations = new Set([...correlationReferences.values()].map(([id, version]) => `${id}@${version}`));
 
@@ -442,12 +442,12 @@ function parsePolicies(markdown) {
   });
 }
 
-async function walk(directory, allowedPolicyIds = null) {
+async function walk(directory, allowedPackageFiles = null) {
   const entries = await readdir(directory, { withFileTypes: true });
   const nested = await Promise.all(entries.map(async (entry) => {
     const path = join(directory, entry.name);
-    return entry.isDirectory() ? (allowedPolicyIds === null || allowedPolicyIds.has(entry.name) ? walk(path, allowedPolicyIds) : []) : entry.name.endsWith('.json')
-      && !['phase-1-manifest.json', 'phase-2-manifest.json', 'phase-2-catalog-contract.json'].includes(entry.name) ? [path] : [];
+    return entry.isDirectory() ? walk(path, allowedPackageFiles) : entry.name.endsWith('.json')
+      && (allowedPackageFiles === null || allowedPackageFiles.has(path)) ? [path] : [];
   }));
   return nested.flat();
 }
@@ -526,7 +526,9 @@ async function writeShippingDigestBindings(policies) {
 async function validate(sourcePolicies) {
   const manifestBytes = await readFile(manifestPath, 'utf8');
   const manifest = JSON.parse(manifestBytes);
-  const files = await walk(packageRoot, new Set(sourcePolicies.map((policy) => policy.policyId)));
+  const files = await walk(packageRoot, new Set(sourcePolicies.map(
+    (policy) => join(packageRoot, policy.policyId, `${policy.version}.json`)
+  )));
   const packages = await Promise.all(files.map(async (file) => ({
     file,
     policy: JSON.parse(await readFile(file, 'utf8')),

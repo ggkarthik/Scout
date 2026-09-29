@@ -5,6 +5,12 @@ import java.util.List;
 
 public class FindingsFilterRequest {
 
+    private String groupField;
+    private String groupValue;
+    public String getGroupField() { return groupField; }
+    public void setGroupField(String value) { groupField = value; }
+    public String getGroupValue() { return groupValue; }
+    public void setGroupValue(String value) { groupValue = value; }
     private List<String> severity;
     private List<String> status;
     private List<String> decisionState;
@@ -50,7 +56,7 @@ public class FindingsFilterRequest {
                 supportGroup,
                 null,
                 null,
-                assetType
+                assetType, groupField, groupValue
         );
     }
 

@@ -1,0 +1,34 @@
+{
+  "version": "1.1.0",
+  "governedReleaseFamilies": ["AGCF_PHASE_1", "AGCF_PHASE_2"],
+  "defaultVerification": {
+    "selectionState": "CAPTURE_FROM_INSTALLED_DISTRIBUTION",
+    "predicateEvidenceParity": "NOT_VERIFIED",
+    "findingFingerprintMigration": "NOT_ASSESSED",
+    "parityStatus": "PENDING",
+    "blocker": "Predicate, evidence, selection, and finding-fingerprint parity require certification evidence."
+  },
+  "policies": [
+    {"legacyPolicyId":"AWS_BEDROCK_WEAK_GUARDRAIL","legacyVersion":"2.0.0","successorPolicyIds":["AGCF-AWS-002"],"disposition":"RETIRE_AFTER_PARITY","rationale":"The AGCF successor evaluates the same approved minimum-strength guardrail condition."},
+    {"legacyPolicyId":"AZURE_FOUNDRY_AGENT_CODE_INTERPRETER_ENABLED","legacyVersion":"2.0.0","successorPolicyIds":["AGCF-AZR-017"],"disposition":"RETIRE_AFTER_PARITY","rationale":"The AGCF successor adds the approved-scope boundary to the Code Interpreter condition."},
+    {"legacyPolicyId":"AZURE_ML_ENDPOINT_LOCAL_AUTH_ENABLED","legacyVersion":"2.0.0","successorPolicyIds":["AGCF-AZR-022"],"disposition":"RETIRE_AFTER_PARITY","rationale":"The AGCF successor evaluates local or key authentication on Azure ML online endpoints."},
+    {"legacyPolicyId":"AZURE_RAI_POLICY_NON_BLOCKING_FILTER","legacyVersion":"1.0.0","successorPolicyIds":["AGCF-AZR-010"],"disposition":"RETIRE_AFTER_PARITY","rationale":"The AGCF successor evaluates explicitly disabled or non-blocking RAI filters."},
+    {"legacyPolicyId":"AZURE_SEARCH_DATA_SOURCE_NON_IDENTITY_AUTH","legacyVersion":"2.0.0","successorPolicyIds":["AGCF-AZR-040"],"disposition":"RETIRE_AFTER_PARITY","rationale":"The AGCF successor evaluates key, SAS, or secret authentication on Search data sources."},
+    {"legacyPolicyId":"AZURE_SEARCH_LOCAL_ADMIN_AUTH_ENABLED","legacyVersion":"2.0.0","successorPolicyIds":["AGCF-AZR-026"],"disposition":"RETIRE_AFTER_PARITY","rationale":"The AGCF successor evaluates Azure AI Search local admin-key authentication."},
+    {"legacyPolicyId":"MCP_TARGET_UNHEALTHY_OR_SYNC_UNSUCCESSFUL","legacyVersion":"1.0.0","successorPolicyIds":["AGCF-AWS-033"],"disposition":"RETIRE_AFTER_PARITY","rationale":"The AGCF successor evaluates failed, unsynchronized, or stale AgentCore targets."},
+    {"legacyPolicyId":"AZURE_AI_CUSTOMER_MANAGED_KEY_MISSING","legacyVersion":"1.0.0","successorPolicyIds":["AGCF-AZR-004"],"disposition":"RETIRE_AFTER_PARITY","rationale":"The AGCF successor evaluates required customer-managed-key encryption."},
+    {"legacyPolicyId":"MCP_PUBLIC_ENDPOINT_WITHOUT_CONFIGURED_AUTH","legacyVersion":"1.0.0","successorPolicyIds":["AGCF-AWS-063","AGCF-AZR-066"],"disposition":"RETIRE_AFTER_PARITY","rationale":"Provider-specific AGCF successors cover public MCP or bot endpoints without adequate authentication."},
+    {"legacyPolicyId":"AZURE_AI_LOCAL_AUTH_ENABLED","legacyVersion":"2.0.0","successorPolicyIds":["AGCF-AZR-003"],"disposition":"RETIRE_AFTER_PARITY","rationale":"The AGCF successor evaluates Azure AI local or key authentication."},
+    {"legacyPolicyId":"AZURE_AI_PRIVATE_ENDPOINT_MISSING","legacyVersion":"1.0.0","successorPolicyIds":["AGCF-AZR-002"],"disposition":"RETIRE_AFTER_PARITY","rationale":"The AGCF successor evaluates the required private-endpoint baseline."},
+    {"legacyPolicyId":"AZURE_AI_UNRESTRICTED_PUBLIC_ACCESS","legacyVersion":"2.0.0","successorPolicyIds":["AGCF-AZR-001"],"disposition":"RETIRE_AFTER_PARITY","rationale":"The AGCF successor evaluates unrestricted public network access."},
+    {"legacyPolicyId":"AZURE_BOT_PASSWORD_AUTH_WITHOUT_MANAGED_IDENTITY","legacyVersion":"2.0.0","successorPolicyIds":["AGCF-AZR-027"],"disposition":"RETIRE_AFTER_PARITY","rationale":"The AGCF successor evaluates password authentication without managed identity."},
+    {"legacyPolicyId":"AWS_BEDROCK_AGENT_INACTIVE_OR_ROLE_MISSING","legacyVersion":"1.0.0","successorPolicyIds":["AGCF-AWS-003","AGCF-AWS-004"],"disposition":"RETIRE_AFTER_PARITY","rationale":"The legacy compound predicate is replaced by separate operational-state and missing-role policies."},
+    {"legacyPolicyId":"AZURE_AI_DIAGNOSTIC_LOGGING_DISABLED","legacyVersion":"2.0.0","successorPolicyIds":["AGCF-AZR-005"],"disposition":"RETIRE_AFTER_PARITY","rationale":"The AGCF successor evaluates disabled Azure AI diagnostic logging."},
+    {"legacyPolicyId":"SENSITIVE_AI_DATA_SOURCE_WITH_PUBLIC_CONTENT_ACCESS","legacyVersion":"1.0.0","successorPolicyIds":["AGCF-AWS-024","AGCF-AZR-048"],"disposition":"RETIRE_AFTER_PARITY","rationale":"Provider-specific AGCF policies cover confirmed sensitive data with public content access."},
+    {"legacyPolicyId":"AWS_BEDROCK_GUARDRAIL_NOT_ATTACHED","legacyVersion":"1.0.0","successorPolicyIds":["AGCF-AWS-001"],"disposition":"RETIRE_AFTER_PARITY","rationale":"The AGCF successor evaluates a Bedrock agent without an attached guardrail."},
+    {"legacyPolicyId":"AWS_BEDROCK_INVOCATION_LOGGING_DISABLED","legacyVersion":"2.0.0","successorPolicyIds":["AGCF-AWS-009"],"disposition":"RETIRE_AFTER_PARITY","rationale":"The AGCF successor evaluates disabled Bedrock invocation logging."},
+    {"legacyPolicyId":"AWS_BEDROCK_PUBLIC_KB_S3","legacyVersion":"2.0.0","successorPolicyIds":["AGCF-AWS-017"],"disposition":"RETIRE_AFTER_PARITY","rationale":"The AGCF successor evaluates public-policy exposure on the knowledge-base S3 source."},
+    {"legacyPolicyId":"AWS_BEDROCK_UNAUTH_LAMBDA_URL","legacyVersion":"2.0.0","successorPolicyIds":["AGCF-AWS-006"],"disposition":"RETIRE_AFTER_PARITY","rationale":"The AGCF successor evaluates unauthenticated action-group Lambda URLs."},
+    {"legacyPolicyId":"AWS_BEDROCK_WILDCARD_AGENT_ROLE","legacyVersion":"2.0.0","successorPolicyIds":["AGCF-AWS-005"],"disposition":"RETIRE_AFTER_PARITY","rationale":"The AGCF successor evaluates wildcard actions in the Bedrock execution role."}
+  ]
+}

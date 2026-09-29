@@ -11,6 +11,9 @@ async function walk(directory) {
     // (scripts/compile-ai-grid-phase1.mjs); this legacy validator only covers
     // the original flat-shape example packages.
     if (entry.isDirectory() && entry.name === 'agcf') continue;
+    // This repository-level governance manifest describes legacy-to-AGCF parity;
+    // it is not itself a policy package.
+    if (!entry.isDirectory() && entry.name === 'legacy-policy-parity.json') continue;
     const path = join(directory, entry.name);
     if (entry.isDirectory()) await walk(path);
     else if (entry.name.endsWith('.json')) files.push(path);

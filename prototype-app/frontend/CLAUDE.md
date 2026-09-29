@@ -49,6 +49,10 @@ Role checks **must** go through the helper functions in `src/features/auth/roles
 
 `ActorContext.platformScope = true` means the user is a platform owner who has not yet entered a tenant. In this state, tenant-scoped routes redirect to `/platform/tenants`. After selecting a tenant, `actingAsPlatformOwner = true`.
 
+AI Grid follows that boundary explicitly. `PlatformAiPolicyStudio` may call the global `/ai-frameworks` registry without tenant context, but must not call tenant-bound framework coverage, assessment-state, or runtime-telemetry endpoints. Those queries and panels belong on `AiPoliciesPage` under `/policies`, after a tenant workspace has been selected. A failed telemetry request must render `Unavailable`, not `Blocked`, because transport/auth failure is not a gate result.
+
+Bounded runtime metadata belongs on `AiAgentExecutionsPage` at `/inventory/ai/executions`. It lists filterable execution metadata and loads per-execution timelines; it must not imply or render raw prompts, responses, conversations, tool payloads, or provider log streams.
+
 ## Source layout
 
 ```
@@ -172,6 +176,8 @@ expect(el.props.className).toContain('eol-badge--eol');
 Pages that use `isPending` in a loading guard will show a spinner forever in tests when a dependent query is disabled. **Fix:** provide non-empty data so the page's `hasData` flag becomes `true`, bypassing the loading branch. Pages that use `isLoading` work normally with disabled queries.
 
 The test `QueryClient` uses `retry: false` so failed queries settle immediately without network retries.
+
+For `AiPoliciesPage` tests, mock all four independent read paths: policy catalog, global framework registry/framework coverage, runtime telemetry readiness, and latest assessment-state summaries. Production framework fixtures use `OWASP_GENAI_LLM_TOP_10` version `2026`.
 
 ## Coverage thresholds
 

@@ -17,6 +17,12 @@ const required = (key) => {
 const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
 const sha256 = (file) => createHash('sha256').update(readFileSync(file)).digest('hex');
 const policyId = (prefix, value) => `${prefix}-${String(value).padStart(3, '0')}`;
+const writableMappingTypes = new Set(['DIRECT', 'PARTIAL', 'SUPPORTING']);
+const frameworkVersions = new Map([
+  ['OWASP_GENAI_LLM_TOP_10', '2026'],
+  ['OWASP_AGENTIC_TOP_10', '2026'],
+  ['CSA_AICM', '1.1'],
+]);
 
 const manifestFile = required('--manifest');
 const packageRoot = required('--package-root');
@@ -80,11 +86,29 @@ const compiled = expected.map((id) => {
   if (policy.evaluationMode === 'CORRELATION_PATH' && !policy.evaluationDefinition.correlationPath) {
     throw new Error(`Correlation package has no correlation contract: ${id}`);
   }
-  if (policy.evaluationMode !== 'CORRELATION_PATH' && !policy.evaluationDefinition.artifactFacts?.predicate) {
+  const runtimeMode = ['RUNTIME_FACTS', 'RUNTIME_SEQUENCE', 'RUNTIME_AGGREGATE', 'RUNTIME_COVERAGE']
+    .includes(policy.evaluationMode);
+  if (policy.evaluationMode !== 'CORRELATION_PATH' && !runtimeMode
+      && !policy.evaluationDefinition.artifactFacts?.predicate) {
     throw new Error(`Posture package has no bounded predicate: ${id}`);
+  }
+  if (runtimeMode && policy.evaluationDefinition.mode !== policy.evaluationMode) {
+    throw new Error(`Runtime package has no matching evaluation contract: ${id}`);
   }
   if (!Array.isArray(policy.frameworkMappings) || policy.frameworkMappings.length === 0) {
     throw new Error(`Package has no framework mappings: ${id}`);
+  }
+  for (const mapping of policy.frameworkMappings) {
+    if (frameworkVersions.get(mapping.framework) !== mapping.frameworkVersion
+        || !mapping.controlId || !mapping.rationale || !writableMappingTypes.has(mapping.mappingType)) {
+      throw new Error(`Package has an invalid framework mapping: ${id}`);
+    }
+    if (mapping.framework === 'OWASP_GENAI_LLM_TOP_10' && !/^LLM(0[1-9]|10)$/.test(mapping.controlId)) {
+      throw new Error(`Package has an invalid OWASP LLM control: ${id}`);
+    }
+    if (mapping.framework === 'OWASP_AGENTIC_TOP_10' && !/^ASI(0[1-9]|10)$/.test(mapping.controlId)) {
+      throw new Error(`Package has an invalid OWASP Agentic control: ${id}`);
+    }
   }
   return {
     policyId: id,

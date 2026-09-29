@@ -45,4 +45,18 @@ class AiGridCapabilityServiceTest {
         org.mockito.Mockito.verify(tenantExecution).run(org.mockito.ArgumentMatchers.same(tenant),
                 org.mockito.ArgumentMatchers.<java.util.function.Supplier<?>>any());
     }
+
+    @Test
+    void runtimeCapabilityFromAnotherProviderDoesNotSatisfyTheEvidenceContract() {
+        Instant now = Instant.now();
+        var aws = new AiGridCapabilityService.CapabilityKey(
+                "AWS", "RUNTIME_EVENT_DECISIONS", "account", "GLOBAL");
+        var index = Map.of(aws, new AiGridCapabilityService.CapabilityState(
+                "COMPLETE", now, now.plusSeconds(3600)));
+
+        assertEquals(java.util.List.of("capability:RUNTIME_EVENT_DECISIONS:MISSING_OR_STALE"),
+                service.runtimeGaps(index, "AZURE_FOUNDRY", java.util.List.of("RUNTIME_EVENT_DECISIONS")));
+        assertEquals(java.util.List.of(),
+                service.runtimeGaps(index, "AWS", java.util.List.of("RUNTIME_EVENT_DECISIONS")));
+    }
 }

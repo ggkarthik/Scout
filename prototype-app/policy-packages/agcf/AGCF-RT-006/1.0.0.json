@@ -1,0 +1,87 @@
+{
+  "policyId": "AGCF-RT-006",
+  "version": "1.0.0",
+  "name": "Policy-denied action succeeded",
+  "description": "Fails when an enforcement point recorded a denial for an action that nevertheless completed successfully.",
+  "securityIntent": "Confirm that policy denials actually prevent the action they deny.",
+  "remediationIntent": "Investigate the enforcement point's bypass path and confirm the denial is enforced inline.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-RT-006",
+  "provider": "MULTI_CLOUD",
+  "evaluationMode": "RUNTIME_SEQUENCE",
+  "evaluationDefinition": {
+    "mode": "RUNTIME_SEQUENCE",
+    "runtimeSequence": {
+      "steps": [
+        {
+          "conditions": [
+            {
+              "field": "event.policy_state",
+              "operator": "IN",
+              "value": ["DENIED", "BLOCKED"]
+            },
+            {
+              "field": "event.action_outcome",
+              "operator": "EQ",
+              "value": "SUCCEEDED"
+            },
+            {
+              "field": "event.action_category",
+              "operator": "IN",
+              "value": ["WRITE", "DELETE", "SEND", "EXECUTE", "ADMIN", "PAYMENT", "PUBLISH"]
+            }
+          ]
+        }
+      ],
+      "maximumDurationSeconds": 3600,
+      "allowedLatenessSeconds": 300,
+      "deduplicationKey": "execution.agent_artifact_id",
+      "maximumEventsExamined": 1000,
+      "explanationFields": [
+        "event.action_category",
+        "event.enforcement_point",
+        "event.decision_reason"
+      ]
+    }
+  },
+  "baseEvidenceTiers": [
+    "E1"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "PREVIEW",
+  "releaseFamily": "AGCF_PHASE_2",
+  "wave": "WAVE_2B",
+  "workflowClass": "RUNTIME_FINDING",
+  "evaluationSubject": "EXECUTION",
+  "artifactTypes": [],
+  "nativeKinds": [],
+  "requiredCapabilities": [
+    "RUNTIME_EVENT_DECISIONS",
+    "RUNTIME_ACTION_OUTCOMES"
+  ],
+  "requiredRelationships": [],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [],
+  "reasonCode": "AGCF_RT_006_DENIED_ACTION_SUCCEEDED",
+  "frameworkMappings": [
+    {
+      "framework": "OWASP_AGENTIC_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "ASI05",
+      "mappingType": "DIRECT",
+      "rationale": "A denial that does not stop the action is unchecked autonomy."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "GRC-05",
+      "mappingType": "PARTIAL",
+      "rationale": "Denial enforcement is a governance control."
+    }
+  ],
+  "parameterDefinitions": [],
+  "certificationParameterProfile": null,
+  "packageSourceRef": "policy-packages/agcf/AGCF-RT-006/1.0.0.json"
+}

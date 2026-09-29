@@ -30,17 +30,6 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class AiSecurityObservationService {
 
     public static final String CONTRACT_VERSION = "1.0";
-    private static final Set<String> RELATIONSHIP_TYPES = Set.of(
-            "USES_MODEL", "USES_GUARDRAIL", "USES_KNOWLEDGE_BASE", "USES_DATA_SOURCE",
-            "BACKED_BY_DATA_STORE", "USES_SEARCH_INDEX", "EXPOSES_MCP", "CONNECTS_TO_MCP",
-            "CONTAINS_MCP_TARGET", "ROUTES_TO", "INVOKES_LAMBDA", "ASSUMES_ROLE", "READS_FROM_S3", "LOGS_TO", "SUPERVISES_AGENT",
-            "CONTAINS_PROJECT", "DEPLOYS_MODEL", "USES_TOOL",
-            "USES_MANAGED_IDENTITY", "HAS_PRIVATE_ENDPOINT", "USES_KEY_VAULT_KEY",
-            "CONTAINS_RESOURCE", "HAS_DEPLOYMENT", "RUNS_PIPELINE", "HAS_CHANNEL",
-            "HAS_ROLE_ASSIGNMENT", "CONTAINS", "USES_EXECUTION_ROLE", "USES_NETWORK",
-            "USES_ENDPOINT_CONFIGURATION", "PRODUCES_MODEL", "USES_DATA_CONNECTION",
-            "READS_FROM_STORAGE_ACCOUNT");
-
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
     private final TenantSchemaExecutionService tenantExecution;
@@ -48,7 +37,7 @@ public class AiSecurityObservationService {
     private final AiSecuritySyncRunFacade syncRunFacade;
     private final AiSecurityMetadataSanitizer metadataSanitizer;
     private AiGridPipelineService aiGridPipelineService;
-    private AiGridCapabilityService aiGridCapabilityService;
+    private AiSecurityDigestBaselineService digestBaselines;
 
     public AiSecurityObservationService(
             NamedParameterJdbcTemplate jdbc,
@@ -72,8 +61,8 @@ public class AiSecurityObservationService {
     }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
-    public void setAiGridCapabilityService(AiGridCapabilityService aiGridCapabilityService) {
-        this.aiGridCapabilityService = aiGridCapabilityService;
+    public void setDigestBaselines(AiSecurityDigestBaselineService digestBaselines) {
+        this.digestBaselines = digestBaselines;
     }
 
     public IngestionResult ingest(Tenant tenant, ObservationEnvelopeV1 envelope) {
@@ -131,16 +120,20 @@ public class AiSecurityObservationService {
             if (!sanitized.rejectedFieldNames().isEmpty()) {
                 metadataDiagnostics.add(metadataDiagnostic(envelope, sanitized.rejectedFieldNames()));
             }
+            if (sanitized.rejectedFieldNames().contains("nativeKind")) {
+                continue;
+            }
             UUID artifactId = upsertArtifact(tenant, envelope, artifact, sanitized.attributes());
             artifactIds.put(artifact.providerResourceId(), artifactId);
             upsertSource(tenant, envelope, artifact, artifactId);
+            compareApprovedDigests(tenant, envelope, artifactId, sanitized.attributes());
         }
 
         List<Diagnostic> combinedDiagnostics = new ArrayList<>(diagnostics(envelope));
         combinedDiagnostics.addAll(metadataDiagnostics.stream().limit(1).toList());
         boolean unknownRelationship = false;
         for (RelationshipObservation relationship : safe(envelope.relationships())) {
-            if (!RELATIONSHIP_TYPES.contains(relationship.relationshipType())) {
+            if (!AiGridRelationshipSemantics.ALLOWED_RELATIONSHIPS.contains(relationship.relationshipType())) {
                 unknownRelationship = true;
                 combinedDiagnostics.add(new Diagnostic(
                         "UNKNOWN_RELATIONSHIP_TYPE",
@@ -164,7 +157,6 @@ public class AiSecurityObservationService {
                     ? ScopeStatus.PARTIAL
                     : envelope.completionStatus();
             finishScope(envelope, finalStatus, accepted, combinedDiagnostics);
-            if (aiGridCapabilityService != null) aiGridCapabilityService.recordScope(tenant, envelope, finalStatus);
             if (finalStatus == ScopeStatus.COMPLETE) {
                 reconcileCompleteScope(envelope);
                 if (aiGridPipelineService != null) {
@@ -175,6 +167,24 @@ public class AiSecurityObservationService {
             updateAcceptedChunks(envelope, accepted);
         }
         return new IngestionResult(false, finalStatus, accepted, envelope.expectedChunks(), combinedDiagnostics);
+    }
+
+    private void compareApprovedDigests(Tenant tenant, ObservationEnvelopeV1 envelope, UUID artifactId,
+                                        Map<String, Object> attributes) {
+        if (digestBaselines == null) return;
+        String algorithm = string(attributes.get("digestAlgorithm"));
+        String keyVersion = string(attributes.get("digestKeyVersion"));
+        if (algorithm == null || keyVersion == null) return;
+        String prompt = string(attributes.get("promptDigest"));
+        if (prompt != null) digestBaselines.observeCurrentTenant(tenant, artifactId, "PROMPT", algorithm,
+                keyVersion, prompt, envelope.runId(), envelope.observedAt());
+        String tool = string(attributes.get("toolDefinitionDigest"));
+        if (tool != null) digestBaselines.observeCurrentTenant(tenant, artifactId, "TOOL_DEFINITION", algorithm,
+                keyVersion, tool, envelope.runId(), envelope.observedAt());
+    }
+
+    private static String string(Object value) {
+        return value instanceof String text && !text.isBlank() ? text : null;
     }
 
     private void validate(Tenant tenant, ObservationEnvelopeV1 envelope) {
@@ -198,6 +208,17 @@ public class AiSecurityObservationService {
 
     void validateCurrentTenantOwnership(Tenant tenant, ObservationEnvelopeV1 envelope) {
         syncRunFacade.loadForTenant(tenant.getId(), envelope.runId());
+        if ("MICROSOFT_COPILOT".equalsIgnoreCase(envelope.provider())) {
+            Integer matches = jdbc.queryForObject("""
+                    select count(*) from ai_security_copilot_studio_configs
+                     where id=:connectorId and tenant_id=:tenantId and organization_url=:organizationUrl
+                    """, new MapSqlParameterSource().addValue("connectorId", envelope.connectorId())
+                    .addValue("tenantId", tenant.getId()).addValue("organizationUrl", envelope.accountId()), Integer.class);
+            if (matches == null || matches != 1) {
+                throw new IllegalArgumentException("Copilot observation connector does not belong to the claimed tenant and organization");
+            }
+            return;
+        }
         List<String> connectors = jdbc.query("""
                 select provider_tenant_id
                   from ai_security_connector_configs
@@ -265,6 +286,22 @@ public class AiSecurityObservationService {
     private UUID upsertArtifact(Tenant tenant, ObservationEnvelopeV1 envelope, ArtifactObservation artifact,
                                 Map<String, Object> attributes) {
         UUID id = UUID.randomUUID();
+        boolean replaceOwnedAttributes = envelope.completionStatus() == ScopeStatus.COMPLETE
+                && envelope.expectedChunks() == 1;
+        List<String> previouslyOwnedAttributes = replaceOwnedAttributes ? jdbc.query("""
+                select o.attribute_key
+                  from ai_security_artifact_attribute_ownership o
+                  join ai_security_artifacts a on a.id=o.artifact_id and a.tenant_id=o.tenant_id
+                 where o.tenant_id=:tenantId and a.provider=:provider
+                   and a.provider_resource_id=:providerResourceId and o.scope_key=:scopeKey
+                   and not exists (
+                       select 1 from ai_security_artifact_attribute_ownership other
+                        where other.tenant_id=o.tenant_id and other.artifact_id=o.artifact_id
+                          and other.attribute_key=o.attribute_key and other.scope_key<>o.scope_key
+                   )
+                """, new MapSqlParameterSource().addValue("tenantId", tenant.getId())
+                .addValue("provider", envelope.provider()).addValue("providerResourceId", artifact.providerResourceId())
+                .addValue("scopeKey", envelope.scopeKey()), (rs, rowNum) -> rs.getString(1)) : List.of();
         MapSqlParameterSource params = base(envelope)
                 .addValue("id", id)
                 .addValue("tenantId", tenant.getId())
@@ -278,8 +315,9 @@ public class AiSecurityObservationService {
                 .addValue("piiInfoTypes", json(artifact.piiInfoTypes()))
                 .addValue("piiFindingCount", artifact.piiFindingCount())
                 .addValue("piiLastScannedAt", artifact.piiLastScannedAt() == null ? null : timestamp(artifact.piiLastScannedAt()))
+                .addValue("previouslyOwnedAttributes", previouslyOwnedAttributes.toArray(String[]::new))
                 .addValue("observedAt", timestamp(envelope.observedAt()));
-        return jdbc.queryForObject("""
+        UUID artifactId = jdbc.queryForObject("""
                 insert into ai_security_artifacts (
                     id, tenant_id, provider, provider_resource_id, artifact_type, native_kind, name,
                     account_id, region, active, attributes_json, first_observed_at, last_observed_at,
@@ -299,7 +337,8 @@ public class AiSecurityObservationService {
                             else excluded.region
                         end,
                         active = true,
-                        attributes_json = ai_security_artifacts.attributes_json || excluded.attributes_json,
+                        attributes_json = (ai_security_artifacts.attributes_json - cast(:previouslyOwnedAttributes as text[]))
+                            || excluded.attributes_json,
                         last_observed_at = excluded.last_observed_at,
                         deactivated_at = null,
                         pii_scan_status = excluded.pii_scan_status,
@@ -309,6 +348,25 @@ public class AiSecurityObservationService {
                         pii_last_scanned_at = excluded.pii_last_scanned_at
                 returning id
                 """, params, UUID.class);
+        if (replaceOwnedAttributes) {
+            jdbc.update("""
+                    delete from ai_security_artifact_attribute_ownership
+                     where tenant_id=:tenantId and artifact_id=:artifactId and scope_key=:scopeKey
+                    """, Map.of("tenantId", tenant.getId(), "artifactId", artifactId, "scopeKey", envelope.scopeKey()));
+        }
+        if (!attributes.isEmpty()) {
+            jdbc.update("""
+                    insert into ai_security_artifact_attribute_ownership
+                        (tenant_id,artifact_id,scope_key,attribute_key,observed_at)
+                    select :tenantId,:artifactId,:scopeKey,key,:observedAt
+                      from jsonb_object_keys(cast(:attributes as jsonb)) key
+                    on conflict (tenant_id,artifact_id,scope_key,attribute_key) do update
+                        set observed_at=excluded.observed_at
+                    """, new MapSqlParameterSource().addValue("tenantId", tenant.getId())
+                    .addValue("artifactId", artifactId).addValue("scopeKey", envelope.scopeKey())
+                    .addValue("observedAt", timestamp(envelope.observedAt())).addValue("attributes", json(attributes)));
+        }
+        return artifactId;
     }
 
     private void upsertSource(
@@ -390,7 +448,9 @@ public class AiSecurityObservationService {
     private Map<String, Object> safeRelationshipAttributes(
             RelationshipObservation relationship, ObservationEnvelopeV1 envelope) {
         Map<String, Object> attributes = new LinkedHashMap<>();
-        if (relationship.attributes() != null) attributes.putAll(relationship.attributes());
+        if (relationship.attributes() != null) {
+            attributes.putAll(AiSecurityFieldContract.storageSafe(relationship.attributes()));
+        }
         attributes.putIfAbsent("confidence", "DIRECT");
         attributes.putIfAbsent("evidence", Map.of("scopeKey", envelope.scopeKey()));
         return attributes;

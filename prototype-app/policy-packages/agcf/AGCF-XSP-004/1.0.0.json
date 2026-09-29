@@ -15,7 +15,7 @@
     "mode": "CORRELATION_PATH",
     "correlationPath": {
       "correlationId": "R2_EXTERNAL_MCP_SENSITIVE_ACCESS",
-      "correlationVersion": "1.0.0"
+      "correlationVersion": "2.0.0"
     }
   },
   "baseEvidenceTiers": [

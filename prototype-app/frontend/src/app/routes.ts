@@ -6,6 +6,7 @@ export type AppTab =
   | 'exposure'
   | 'dashboard'
   | 'findings'
+  | 'fix-intelligence'
   | 'policies'
   | 'platform-policies'
   | 'operations'
@@ -32,6 +33,7 @@ export type ConfigurationsRouteView =
   | 'findings-score'
   | 'suppress'
   | 'auto-findings';
+export type FixIntelligenceRouteView = 'all' | 'patches' | 'workarounds' | 'compensating-controls';
 
 export const INVENTORY_DEFAULT_VIEW: InventoryViewKey = 'overview';
 export const OPERATIONS_DEFAULT_VIEW: OperationsRouteView = 'pipeline';
@@ -39,6 +41,7 @@ export const CONNECT_DEFAULT_VIEW: ConnectRouteView = 'sources';
 export const ADMIN_DEFAULT_VIEW: AdminRouteView = 'users';
 export const PLATFORM_DEFAULT_VIEW: PlatformRouteView = 'tenants';
 export const CONFIGURATIONS_DEFAULT_VIEW: ConfigurationsRouteView = 'sla';
+export const FIX_INTELLIGENCE_DEFAULT_VIEW: FixIntelligenceRouteView = 'all';
 
 const OPERATIONS_VIEW_ALIASES: Record<string, OperationsRouteView> = {
   dashboard: 'pipeline',
@@ -98,6 +101,13 @@ const CONFIGURATIONS_VIEWS = new Set<ConfigurationsRouteView>([
   'findings-score',
   'suppress',
   'auto-findings'
+]);
+
+const FIX_INTELLIGENCE_VIEWS = new Set<FixIntelligenceRouteView>([
+  'all',
+  'patches',
+  'workarounds',
+  'compensating-controls'
 ]);
 
 export function normalizeOperationsRouteView(value: string | null | undefined): OperationsRouteView {
@@ -174,6 +184,17 @@ export function pathForConfigurationsView(view: ConfigurationsRouteView): string
   return `/configurations/${normalizeConfigurationsRouteView(view)}`;
 }
 
+export function normalizeFixIntelligenceRouteView(value: string | null | undefined): FixIntelligenceRouteView {
+  if (!value) {
+    return FIX_INTELLIGENCE_DEFAULT_VIEW;
+  }
+  return FIX_INTELLIGENCE_VIEWS.has(value as FixIntelligenceRouteView) ? value as FixIntelligenceRouteView : FIX_INTELLIGENCE_DEFAULT_VIEW;
+}
+
+export function pathForFixIntelligenceView(view: FixIntelligenceRouteView): string {
+  return `/fix-intelligence/${normalizeFixIntelligenceRouteView(view)}`;
+}
+
 export function pathForPlatformView(view: PlatformRouteView): string {
   return `/platform/${normalizePlatformRouteView(view)}`;
 }
@@ -186,6 +207,8 @@ export function pathForTab(tab: AppTab): string {
       return '/';
     case 'findings':
       return '/findings';
+    case 'fix-intelligence':
+      return '/fix-intelligence';
     case 'policies':
       return '/policies';
     case 'platform-policies':
@@ -405,6 +428,7 @@ export function pathForFindingDetail(displayId: string, returnTo?: string): stri
 export function activeTabForPath(pathname: string): AppTab {
   if (pathname.startsWith('/exposure')) return 'exposure';
   if (pathname.startsWith('/findings')) return 'findings';
+  if (pathname.startsWith('/fix-intelligence')) return 'fix-intelligence';
   if (pathname.startsWith('/policies')) return 'policies';
   if (pathname.startsWith('/operations')) return 'operations';
   if (pathname.startsWith('/vulnerability-intelligence')) return 'vuln-repo';
@@ -430,6 +454,8 @@ export function titleForTab(tab: AppTab): string {
       return 'Overview';
     case 'findings':
       return 'Findings';
+    case 'fix-intelligence':
+      return 'Fix Intelligence';
     case 'policies':
       return 'AI Policies';
     case 'platform-policies':

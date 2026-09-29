@@ -33,6 +33,8 @@ function buildNode(overrides: Partial<AiSecurityArtifact> = {}): AiSecurityArtif
     piiInfoTypes: [],
     piiFindingCount: 0,
     piiLastScannedAt: null,
+    attachmentState: 'ROOT',
+    systemIds: [],
     ...overrides,
   };
 }
@@ -45,7 +47,7 @@ function buildGraph(overrides: Partial<AiSecurityGraph> = {}): AiSecurityGraph {
     ],
     edges: [{
       id: 'edge-1',
-      relationshipType: 'INVOKES_LAMBDA',
+      relationshipType: 'IMPLEMENTED_BY',
       sourceArtifactId: 'artifact-1',
       sourceName: 'depth-agent',
       targetArtifactId: 'artifact-2',
@@ -175,5 +177,26 @@ describe('AiDependencyGraph', () => {
   it('shows a truncation notice when the graph was capped', async () => {
     renderWithProviders(<AiDependencyGraph graph={buildGraph({ truncated: true })} rootArtifactId="artifact-1" />);
     expect(await screen.findByText('Graph capped for safe rendering.')).toBeInTheDocument();
+  });
+
+  it('shows runtime details without offering artifact navigation for a synthetic node', async () => {
+    const onNodeClick = vi.fn(); const onViewExecutions = vi.fn();
+    const graph = buildGraph({
+      runtimeOverlay: {
+        status: 'AVAILABLE', diagnostic: null, windowStart: '2026-09-10T00:00:00Z', windowEnd: '2026-09-17T00:00:00Z',
+        executionCount: 3, resolvedCount: 3, unresolvedCount: 0, notApplicableCount: 0, truncated: false,
+        groups: [{ id: 'runtime-aggregate:abc', provider: 'AZURE', source: 'AZURE_FOUNDRY_RUNTIME', agentArtifactId: 'artifact-1', agentVersionArtifactId: null,
+          executionCount: 3, successCount: 2, failureCount: 1, unknownCount: 0, resolvedCount: 3, unresolvedCount: 0, notApplicableCount: 0,
+          firstEvidenceTime: '2026-09-16T00:00:00Z', lastEvidenceTime: '2026-09-17T00:00:00Z' }],
+        edges: [{ id: 'runtime-edge:executed', relationshipType: 'EXECUTED_AS', runtimeGroupId: 'runtime-aggregate:abc', artifactId: 'artifact-1', participantRole: null, executionCount: 3, firstEvidenceTime: '2026-09-16T00:00:00Z', lastEvidenceTime: '2026-09-17T00:00:00Z' }],
+      },
+    });
+    renderWithProviders(<AiDependencyGraph graph={graph} rootArtifactId="artifact-1" onNodeClick={onNodeClick} onViewExecutions={onViewExecutions} />);
+    fireEvent.click(await screen.findByText('3 executions'));
+    expect(screen.getByRole('dialog', { name: 'Runtime activity details' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'View Details' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'View executions' }));
+    expect(onViewExecutions).toHaveBeenCalledWith(expect.objectContaining({ id: 'runtime-aggregate:abc' }));
+    expect(onNodeClick).not.toHaveBeenCalled();
   });
 });

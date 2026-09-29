@@ -68,6 +68,27 @@ class DashboardServiceTest {
     private TenantSchemaExecutionService tenantSchemaExecutionService;
 
     @Test
+    void exposureSummarySkipsUnusedAnalyticsAndInventoryReads() {
+        DashboardService service = new DashboardService(assetRepository, inventoryComponentRepository,
+                inventoryComponentCpeMapRepository, componentVulnerabilityStateRepository, findingRepository,
+                findingEventRepository, findingQueryService, dashboardNoiseReductionProjectionService,
+                syncRunRepository, new ObjectMapper(), tenantSchemaExecutionService);
+        Tenant tenant = new Tenant();
+        tenant.setId(UUID.randomUUID());
+        doAnswer(invocation -> invocation.getArgument(1, java.util.function.Supplier.class).get())
+                .when(tenantSchemaExecutionService).run(eq(tenant), org.mockito.ArgumentMatchers.<java.util.function.Supplier<Object>>any());
+        when(findingQueryService.countOpen(tenant)).thenReturn(26L);
+        when(findingRepository.countByStatusAndSeverity(eq(FindingStatus.OPEN), any(String.class)))
+                .thenAnswer(invocation -> "HIGH".equals(invocation.getArgument(1)) ? 8L : 0L);
+        var response = service.getExposureSummary(tenant);
+        assertEquals(26L, response.openFindings());
+        assertEquals(8L, response.openHigh());
+        verifyNoInteractions(assetRepository, inventoryComponentRepository, inventoryComponentCpeMapRepository,
+                componentVulnerabilityStateRepository, findingEventRepository,
+                dashboardNoiseReductionProjectionService, syncRunRepository);
+    }
+
+    @Test
     void buildNoiseReductionUsesProjectionInsteadOfLiveCorrelationRead() {
         DashboardService service = new DashboardService(
                 assetRepository,

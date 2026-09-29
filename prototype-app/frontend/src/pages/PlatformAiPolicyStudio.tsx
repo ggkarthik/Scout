@@ -5,27 +5,26 @@ import { api } from '../api/client';
 import { pathForPlatformPolicyDetail } from '../app/routes';
 import type { AiGridPolicyDistribution, AiGridPolicySelection } from '../features/ai-security/types';
 
-const DEFAULTS: AiGridPolicySelection[] = ['REQUIRED', 'ENABLED', 'DISABLED'];
+const DEFAULTS: AiGridPolicySelection[] = ['REQUIRED', 'ENABLED', 'PREVIEW', 'DISABLED'];
 const ROLLOUTS: AiGridPolicyDistribution['rolloutStage'][] = ['GENERAL_AVAILABILITY', 'CANARY', 'DEV', 'PAUSED', 'RETIRED'];
 
 function owaspMappings(value?: string): string {
   try {
     return (JSON.parse(value ?? '[]') as Array<{ framework?: string; controlId?: string; mappingType?: string }>)
-      .filter((mapping) => mapping.framework === 'OWASP_GENAI_LLM_TOP_10' && /^LLM\d{2}$/.test(mapping.controlId ?? ''))
-      .map((mapping) => `${mapping.controlId} (${mapping.mappingType})`).join(', ') || '—';
+      .filter((mapping) => mapping.framework?.startsWith('OWASP_') && Boolean(mapping.controlId))
+      .map((mapping) => `${mapping.controlId} (${mapping.mappingType === 'INFORMATIVE' ? 'SUPPORTING (legacy)' : mapping.mappingType})`).join(', ') || '—';
   } catch { return '—'; }
 }
 
-function frameworkMappings(value?: string): string {
+function frameworkMappings(value?: string, labels: Map<string, string> = new Map()): string {
   try {
     const mappings = JSON.parse(value ?? '[]') as Array<{ framework?: string; frameworkVersion?: string; controlId?: string; mappingType?: string }>;
     return mappings.map((mapping) => {
-      const framework = mapping.framework === 'OWASP_GENAI_LLM_TOP_10'
-        ? 'OWASP GenAI LLM Top 10'
-        : mapping.framework === 'CSA_AICM' ? 'CSA AI Controls Matrix' : (mapping.framework ?? 'Unknown framework').replace(/_/g, ' ');
+      const framework = labels.get(`${mapping.framework}:${mapping.frameworkVersion}`)
+        ?? (mapping.framework ?? 'Unknown framework').replace(/_/g, ' ');
       const version = mapping.frameworkVersion ? ` ${mapping.frameworkVersion}` : '';
       const control = mapping.controlId ? ` · ${mapping.controlId}` : '';
-      const kind = mapping.mappingType ? ` (${mapping.mappingType})` : '';
+      const kind = mapping.mappingType ? ` (${mapping.mappingType === 'INFORMATIVE' ? 'SUPPORTING (legacy)' : mapping.mappingType})` : '';
       return `${framework}${version}${control}${kind}`;
     }).filter(Boolean).join(', ') || '—';
   } catch { return '—'; }
@@ -55,12 +54,16 @@ export function PlatformAiPolicyStudio() {
   const [owasp, setOwasp] = React.useState('ALL');
   const [query, setQuery] = React.useState('');
   const catalog = useQuery({ queryKey: ['platform-ai-grid-policies'], queryFn: () => api.listPlatformAiGridPolicies() });
+  const frameworks = useQuery({ queryKey: ['ai-frameworks'], queryFn: api.getAiFrameworks });
   const shipping = useQuery({ queryKey: ['platform-ai-grid-shipping-status'], queryFn: api.getPlatformAiGridShippingStatus });
   const rollouts = useQuery({ queryKey: ['platform-ai-grid-policy-rollouts'], queryFn: api.listPlatformAiGridPolicyRollouts });
   const retry = useMutation({
     mutationFn: api.retryPlatformAiGridPolicyRollout,
     onSuccess: () => void client.invalidateQueries({ queryKey: ['platform-ai-grid-policy-rollouts'] }),
   });
+  const frameworkLabels = React.useMemo(() => new Map((frameworks.data ?? [])
+    .map((framework) => [`${framework.framework}:${framework.frameworkVersion}`, framework.displayName])), [frameworks.data]);
+  const frameworkControls = React.useMemo(() => (frameworks.data ?? []).flatMap((framework) => framework.controls), [frameworks.data]);
   const policies = React.useMemo(() => (catalog.data ?? []).filter((item) => {
     const searchable = `${item.name} ${item.policyId} ${item.provider} ${owaspMappings(item.frameworkMappingsJson)}`.toLowerCase();
     return (provider === 'ALL' || item.provider === provider)
@@ -89,7 +92,7 @@ export function PlatformAiPolicyStudio() {
         <label>Provider <select value={provider} onChange={(event) => setProvider(event.target.value)}><option value="ALL">All providers</option><option value="AWS">AWS</option><option value="AZURE">Azure</option><option value="MULTI_CLOUD">Multi-cloud</option></select></label>
         <label>Rollout <select value={rollout} onChange={(event) => setRollout(event.target.value)}><option value="ALL">All stages</option>{ROLLOUTS.map((value) => <option key={value} value={value}>{rolloutLabel(value)}</option>)}</select></label>
         <label>Default <select value={selection} onChange={(event) => setSelection(event.target.value)}><option value="ALL">All defaults</option>{DEFAULTS.map((value) => <option key={value}>{value}</option>)}</select></label>
-        <label>OWASP <select value={owasp} onChange={(event) => setOwasp(event.target.value)}><option value="ALL">All mappings</option>{Array.from({ length: 10 }, (_, index) => `LLM${String(index + 1).padStart(2, '0')}`).map((value) => <option key={value}>{value}</option>)}</select></label>
+        <label>OWASP <select value={owasp} onChange={(event) => setOwasp(event.target.value)}><option value="ALL">All mappings</option>{frameworkControls.map((control) => <option key={control.controlId}>{control.controlId}</option>)}</select></label>
         {hasFilters ? <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setProvider('ALL'); setRollout('ALL'); setSelection('ALL'); setOwasp('ALL'); setQuery(''); }}>Clear filters</button> : null}
       </div>
       {catalog.isLoading ? <p role="status">Loading shipped policies…</p> : null}
@@ -98,7 +101,7 @@ export function PlatformAiPolicyStudio() {
         <div className="table-scroll policy-catalog-table"><table className="data-table"><thead><tr><th>Policy</th><th>Applicability</th><th>Native types</th><th>Framework mapping</th><th>Availability</th><th>Default selection</th><th>Rollout</th><th>Lifecycle</th><th aria-label="Actions" /></tr></thead>
           <tbody>{policies.length === 0 ? <tr><td colSpan={9} className="policy-empty-cell">No policies match the selected filters.</td></tr> : policies.map((policy) => <tr key={policy.policyId} className="policy-catalog-row">
             <td><strong>{policy.name}</strong><br /><small>{policy.policyId} · {policy.provider} · {policy.severity}</small></td>
-            <td>{jsonLabels(policy.artifactTypesJson)}</td><td>{jsonLabels(policy.nativeKindsJson)}</td><td>{frameworkMappings(policy.frameworkMappingsJson)}</td><td><span className={statusClass(policy.available ? 'available' : 'unavailable')}>{policy.available ? 'Available' : 'Unavailable'}</span></td>
+            <td>{jsonLabels(policy.artifactTypesJson)}</td><td>{jsonLabels(policy.nativeKindsJson)}</td><td>{frameworkMappings(policy.frameworkMappingsJson, frameworkLabels)}</td><td><span className={statusClass(policy.available ? 'available' : 'unavailable')}>{policy.available ? 'Available' : 'Unavailable'}</span></td>
             <td><span className={statusClass(policy.defaultSelection)}>{policy.defaultSelection}</span><br /><small>Tenant default</small></td><td><span className={statusClass(policy.rolloutStage)}>{rolloutLabel(policy.rolloutStage)}</span></td><td><span className={statusClass(policy.lifecycle)}>{policy.lifecycle}</span></td>
             <td><button type="button" className="btn btn-secondary btn-sm" aria-label={`Open ${policy.name}`} onClick={() => navigate(pathForPlatformPolicyDetail(policy.policyId))}>Open policy</button></td>
           </tr>)}</tbody></table></div>

@@ -2,6 +2,7 @@ package com.prototype.vulnwatch.aisecurity.service;
 
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.service.TenantSchemaExecutionService;
+import com.prototype.vulnwatch.service.AuditEventService;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -26,13 +27,15 @@ public class AiGridApiService {
     private final AiGridExposureService exposures;
     private final AiGridSystemService systemService;
     private final AiGridHostContextService hostContext;
+    private final AuditEventService audit;
 
     public AiGridApiService(NamedParameterJdbcTemplate jdbc, TenantSchemaExecutionService tenantExecution,
                             TransactionTemplate transactions, AiGridAssessmentService assessments,
                             AiGridOwnershipService ownership, AiGridRunMetricsService metrics,
                             AiGridCoverageService coverage, AiGridReconciliationService reconciliation,
                             AiGridReadinessService readiness, AiGridExposureService exposures,
-                            AiGridSystemService systemService, AiGridHostContextService hostContext) {
+                            AiGridSystemService systemService, AiGridHostContextService hostContext,
+                            AuditEventService audit) {
         this.jdbc = jdbc;
         this.tenantExecution = tenantExecution;
         this.transactions = transactions;
@@ -45,6 +48,7 @@ public class AiGridApiService {
         this.exposures = exposures;
         this.systemService = systemService;
         this.hostContext = hostContext;
+        this.audit = audit;
     }
 
     public List<SystemSummary> systems(Tenant tenant) {
@@ -142,6 +146,50 @@ public class AiGridApiService {
 
     public List<AiGridReadinessService.PolicyReadinessView> policyReadiness(Tenant tenant) {
         return readiness.latestReadiness(tenant);
+    }
+
+    public List<PolicyAssessmentStateSummary> latestAssessmentStates(Tenant tenant) {
+        return tenantExecution.run(tenant, () -> {
+            record StateRow(String policyId, String policyVersion, String decision, String reasonCode) {}
+            record PolicyKey(String policyId, String policyVersion) {}
+            List<StateRow> rows = jdbc.query("""
+                    with policy_runs as (
+                        select policy_id, policy_version, run_id, max(evaluated_at) evaluated_at
+                          from ai_grid_assessments
+                         group by policy_id, policy_version, run_id
+                    ), latest_runs as (
+                        select policy_id, policy_version, run_id,
+                               row_number() over (partition by policy_id, policy_version
+                                                  order by evaluated_at desc, run_id desc) position
+                          from policy_runs
+                    )
+                    select a.policy_id, a.policy_version, a.decision, a.reason_code
+                      from ai_grid_assessments a
+                      join latest_runs r on r.policy_id = a.policy_id
+                                        and r.policy_version = a.policy_version
+                                        and r.run_id = a.run_id
+                                        and r.position = 1
+                     order by a.policy_id, a.policy_version, a.id
+                    """, (rs, n) -> new StateRow(rs.getString("policy_id"), rs.getString("policy_version"),
+                    rs.getString("decision"), rs.getString("reason_code")));
+            Map<PolicyKey, long[]> counts = new java.util.LinkedHashMap<>();
+            for (StateRow row : rows) {
+                PolicyKey key = new PolicyKey(row.policyId(), row.policyVersion());
+                long[] stateCounts = counts.computeIfAbsent(key, ignored -> new long[4]);
+                switch (AiGridFindingService.AssessmentResult.deriveAssessmentState(row.decision(), row.reasonCode())) {
+                    case "PASS" -> stateCounts[0]++;
+                    case "FAIL" -> stateCounts[1]++;
+                    case "UNKNOWN" -> stateCounts[2]++;
+                    default -> stateCounts[3]++;
+                }
+            }
+            return counts.entrySet().stream().map(entry -> {
+                PolicyKey key = entry.getKey();
+                long[] value = entry.getValue();
+                return new PolicyAssessmentStateSummary(key.policyId(), key.policyVersion(),
+                        value[0], value[1], value[2], value[3]);
+            }).toList();
+        });
     }
 
     public List<AiGridReadinessService.SetupActionView> setupActions(Tenant tenant) {
@@ -265,9 +313,9 @@ public class AiGridApiService {
                          )
                   ) assessment_totals on true
                  where p.release_family in ('AGCF_PHASE_1', 'AGCF_PHASE_2')
-                   and p.lifecycle in ('VALIDATED', 'APPROVED', 'PUBLISHED', 'CANARY') and d.available = true
-                   and ((d.rollout_stage = 'GENERAL_AVAILABILITY')
-                        or (d.rollout_stage in ('CANARY', 'DEV') and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
+                   and p.lifecycle in ('VALIDATED', 'APPROVED', 'PUBLISHED', 'CANARY')
+                   and platform.ai_grid_policy_visible_to_tenant(
+                           d.available, d.rollout_stage, d.canary_tenant_ids_json, cast(:tenantId as uuid))
                  order by p.policy_id, p.published_at desc, p.version desc
                 """, Map.of("tenantId", tenant.getId().toString()), (rs, n) -> new PolicyView(rs.getString("policy_id"), rs.getString("version"),
                 rs.getString("name"), rs.getString("severity"), rs.getString("lifecycle"),
@@ -313,9 +361,9 @@ public class AiGridApiService {
         tenantExecution.run(tenant, () -> transactions.executeWithoutResult(status -> {
             List<String> defaults = jdbc.query("""
                     select d.default_selection from platform.ai_grid_policy_distribution d
-                     where d.policy_id = :id and d.available = true
-                       and ((d.rollout_stage = 'GENERAL_AVAILABILITY')
-                        or (d.rollout_stage in ('CANARY', 'DEV') and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
+                     where d.policy_id = :id
+                       and platform.ai_grid_policy_visible_to_tenant(
+                               d.available, d.rollout_stage, d.canary_tenant_ids_json, cast(:tenantId as uuid))
                        and exists (select 1 from platform.ai_grid_policy_versions p
                                     where p.policy_id=d.policy_id
                                       and p.lifecycle in ('VALIDATED','APPROVED','CANARY','PUBLISHED'))
@@ -348,6 +396,97 @@ public class AiGridApiService {
                     .addValue("selection", selection).addValue("actor", actor).addValue("reason", reason));
             AiGridCoverageService.CurrentState currentCoverage = coverage.currentState();
             if (currentCoverage != null) refreshCurrentProjection(tenant, currentCoverage.triggerRunId());
+        }));
+    }
+
+    /**
+     * Enables every policy package currently distributed to the tenant. Platform-required
+     * policies remain REQUIRED; every other visible AGCF policy becomes ENABLED.
+     */
+    public BulkPolicySelectionResult enableAllDistributedPolicies(
+            Tenant tenant,
+            String actor,
+            String reason
+    ) {
+        return tenantExecution.run(tenant, () -> transactions.execute(status -> {
+            List<DistributedPolicyBaseline> policies = jdbc.query("""
+                    select d.policy_id, p.version, d.default_selection
+                      from platform.ai_grid_policy_distribution d
+                      join lateral (
+                            select v.version
+                              from platform.ai_grid_policy_versions v
+                             where v.policy_id = d.policy_id
+                               and v.release_family in ('AGCF_PHASE_1', 'AGCF_PHASE_2')
+                               and v.lifecycle in ('VALIDATED','APPROVED','CANARY','PUBLISHED')
+                               and (d.pinned_version is null or d.pinned_version = v.version)
+                             order by v.published_at desc nulls last, v.version desc
+                             limit 1
+                      ) p on true
+                     where platform.ai_grid_policy_visible_to_tenant(
+                               d.available, d.rollout_stage, d.canary_tenant_ids_json,
+                               cast(:tenantId as uuid))
+                     order by d.policy_id
+                    """, Map.of("tenantId", tenant.getId().toString()), (rs, row) ->
+                    new DistributedPolicyBaseline(
+                            rs.getString("policy_id"),
+                            rs.getString("version"),
+                            rs.getString("default_selection")));
+
+            int changed = 0;
+            int required = 0;
+            for (DistributedPolicyBaseline policy : policies) {
+                String selection = "REQUIRED".equals(policy.platformDefault()) ? "REQUIRED" : "ENABLED";
+                if ("REQUIRED".equals(selection)) required++;
+                List<String> current = jdbc.query(
+                        "select selection from ai_grid_policy_selections where policy_id = :id",
+                        Map.of("id", policy.policyId()), (rs, row) -> rs.getString(1));
+                String previous = current.isEmpty() ? null : current.get(0);
+                String effectivePrevious = previous == null ? policy.platformDefault() : previous;
+                if (!selection.equals(effectivePrevious)) {
+                    jdbc.update("""
+                        insert into ai_grid_policy_selections
+                            (policy_id, tenant_id, selection, updated_by, reason,
+                             platform_policy_version, platform_default_selection,
+                             configuration_source, tenant_configured_at)
+                        values (:policyId, :tenantId, :selection, :actor, :reason,
+                                :version, :platformDefault, 'TENANT_OVERRIDE', now())
+                        on conflict (policy_id) do update set
+                            selection = excluded.selection,
+                            updated_by = excluded.updated_by,
+                            reason = excluded.reason,
+                            updated_at = now(),
+                            platform_policy_version = excluded.platform_policy_version,
+                            platform_default_selection = excluded.platform_default_selection,
+                            configuration_source = 'TENANT_OVERRIDE',
+                            tenant_configured_at = now()
+                        """, new MapSqlParameterSource()
+                        .addValue("policyId", policy.policyId())
+                        .addValue("tenantId", tenant.getId())
+                        .addValue("selection", selection)
+                        .addValue("actor", actor)
+                        .addValue("reason", reason)
+                        .addValue("version", policy.version())
+                        .addValue("platformDefault", policy.platformDefault()));
+                    changed++;
+                    jdbc.update("""
+                            insert into ai_grid_policy_selection_history
+                                (id, tenant_id, policy_id, previous_selection, selection, actor, reason)
+                            values (:id, :tenantId, :policyId, :previous, :selection, :actor, :reason)
+                            """, new MapSqlParameterSource()
+                            .addValue("id", UUID.randomUUID())
+                            .addValue("tenantId", tenant.getId())
+                            .addValue("policyId", policy.policyId())
+                            .addValue("previous", previous)
+                            .addValue("selection", selection)
+                            .addValue("actor", actor)
+                            .addValue("reason", reason));
+                }
+            }
+            AiGridCoverageService.CurrentState currentCoverage = coverage.currentState();
+            if (changed > 0 && currentCoverage != null) refreshCurrentProjection(tenant, currentCoverage.triggerRunId());
+            audit.record("ai_grid.policies.bulk_enabled", "tenant", tenant.getId().toString(),
+                    "{\"distributedPolicies\":" + policies.size() + ",\"changedPolicies\":" + changed + "}");
+            return new BulkPolicySelectionResult(policies.size(), changed, policies.size() - required, required);
         }));
     }
 
@@ -567,6 +706,10 @@ public class AiGridApiService {
     public record AssessmentRun(UUID runId, Instant startedAt, Instant completedAt,
                                 long assessments, long noDecision) {}
     public record PolicyExecutionResult(UUID runId, int requestedPolicies, int evaluatedPolicies) {}
+    public record BulkPolicySelectionResult(int distributedPolicies, int changedPolicies,
+                                            int enabledPolicies, int requiredPolicies) {}
+    public record PolicyAssessmentStateSummary(String policyId, String policyVersion, long pass,
+                                               long fail, long unknown, long notAssessed) {}
     public record PolicyView(String policyId, String version, String name, String severity,
                              String lifecycle, String workflowClass, String selection,
                              String controlObjectiveId, String provider, String evaluationMode,
@@ -594,4 +737,5 @@ public class AiGridApiService {
     public record ExposureDetail(ExposureSummary exposure, List<ExposureObservation> observations,
                                  List<ExposureAssociation> associations) {}
     private record Cursor(Instant time, UUID id) {}
+    private record DistributedPolicyBaseline(String policyId, String version, String platformDefault) {}
 }

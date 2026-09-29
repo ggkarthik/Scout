@@ -7709,8 +7709,10 @@ label {
 
 .connect-card-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(260px, 1fr));
-  gap: 10px;
+  /* Exactly five per row on a full-width workspace. The narrower steps live in connect.css,
+     which loads after cve-workbench.css and so overrides its single-column rule. */
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
 }
 
 .connect-source-card {
@@ -7719,12 +7721,14 @@ label {
   background: color-mix(in srgb, var(--panel-muted) 78%, var(--panel-solid));
   color: var(--text);
   width: 100%;
-  text-align: left;
-  padding: var(--space-3);
-  display: grid;
-  grid-template-columns: 42px minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
+  text-align: center;
+  padding: var(--space-5) var(--space-4);
+  min-height: 190px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 14px;
 }
 
 .connect-source-card:hover {
@@ -7733,33 +7737,35 @@ label {
 }
 
 .connect-source-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
+  width: 56px;
+  height: 56px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in srgb, var(--panel-solid) 76%, transparent);
-  border: 1px solid var(--border);
   color: var(--muted);
   flex-shrink: 0;
 }
 
+/* Brand marks carry their own colours, so the icon well is borderless and unfilled here --
+   a tinted chip behind a multi-colour logo reads as a rendering fault. The aws and Azure
+   marks are wider than tall, so height rather than width is what keeps every logo optically
+   the same size. */
 .connect-source-icon svg {
-  width: 20px;
-  height: 20px;
+  width: auto;
+  height: 40px;
+  max-width: 100%;
 }
 
 .connect-source-card--active .connect-source-icon {
   color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
 }
 
 .connect-source-name {
   color: var(--title);
   font-family: var(--font-display);
-  font-size: 1.04rem;
-  margin-bottom: 4px;
+  font-size: 1.06rem;
+  font-weight: 700;
+  margin-bottom: 0;
 }
 
 .connect-source-card--active {
@@ -7770,14 +7776,16 @@ label {
 .connect-source-body {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 6px;
 }
 
 .connect-source-name-row {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  margin-bottom: 2px;
+  margin-bottom: 0;
 }
 
 .connect-source-dot {
@@ -7785,6 +7793,7 @@ label {
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
+  cursor: help;
 }
 
 .connect-source-dot--ok { background: #22c55e; }

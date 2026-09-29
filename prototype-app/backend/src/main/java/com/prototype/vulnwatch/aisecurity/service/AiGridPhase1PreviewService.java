@@ -265,7 +265,7 @@ public class AiGridPhase1PreviewService {
         Integer valid = jdbc.queryForObject("""
                 select count(*) from platform.tenants t join platform.tenant_schema_versions v on v.tenant_id=t.id
                  where t.id=:id and t.status='ACTIVE' and t.deleted_at is null and t.purged_at is null
-                   and v.status='CURRENT' and v.current_version=v.target_version and v.current_version>=67
+                   and v.status='CURRENT' and v.current_version=v.target_version and v.current_version>=1
                 """, Map.of("id", tenantId), Integer.class);
         if (valid == null || valid != 1) throw conflict("tenant is inactive, unknown, deleted, or schema-stale: " + tenantId);
     }

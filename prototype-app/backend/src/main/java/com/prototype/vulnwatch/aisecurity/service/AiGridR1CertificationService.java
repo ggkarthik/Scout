@@ -314,7 +314,7 @@ public class AiGridR1CertificationService {
     private List<Tenant> measurableTenants() {
         List<UUID> tenantIds = jdbc.query("""
                 select tenant_id from platform.tenant_schema_versions
-                 where status = 'CURRENT' and current_version >= 55
+                 where status = 'CURRENT' and current_version >= 1
                  order by schema_name
                 """, (rs, n) -> rs.getObject("tenant_id", UUID.class));
         return tenantIds.stream().map(tenants::findById).flatMap(java.util.Optional::stream).toList();

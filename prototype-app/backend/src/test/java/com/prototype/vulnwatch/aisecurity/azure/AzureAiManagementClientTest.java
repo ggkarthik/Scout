@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyRegistry;
 import java.net.URI;
 import java.net.http.HttpHeaders;
 import java.time.Duration;
@@ -19,7 +18,7 @@ class AzureAiManagementClientTest {
 
     private final AzureAiManagementClient client = new AzureAiManagementClient(
             new ObjectMapper(),
-            new AzurePolicyPermissionMatrix(new AiSecurityPolicyRegistry()));
+            new AzurePolicyPermissionMatrix());
 
     @Test
     void acceptsOnlyThePinnedAzureManagementHost() {

@@ -242,6 +242,16 @@ describe('Demo public pages', () => {
     expect(getActorContextSpy).not.toHaveBeenCalled();
   });
 
+  it('routes demo analysts to exposure instead of connectors', async () => {
+    vi.spyOn(api, 'login').mockResolvedValue({ token: 'analyst-token', tokenType: 'Bearer', expiresAt: '2026-12-01T00:00:00Z' });
+    vi.spyOn(api, 'getAuthContext').mockResolvedValue({ creator: false, principal: 'analyst@example.test', userId: 'analyst', tenantId: 'tenant-1', tenantName: 'Demo', demo: true, roles: ['SECURITY_ANALYST'] });
+    renderWithProviders(<Routes><Route path="/login" element={<LoginPage />} /><Route path="/exposure" element={<div>Analyst exposure</div>} /></Routes>, { route: '/login' });
+    fireEvent.change(screen.getByLabelText(/^Email$/i), { target: { value: 'analyst@example.test' } });
+    fireEvent.change(screen.getByLabelText(/^Password$/i), { target: { value: 'password-123' } });
+    fireEvent.click(screen.getByRole('button', { name: /Sign in/i }));
+    expect(await screen.findByText('Analyst exposure')).toBeInTheDocument();
+  });
+
   it('routes platform owners to platform tenants after credential login', async () => {
     vi.spyOn(api, 'login').mockResolvedValue({
       token: 'platform-token',

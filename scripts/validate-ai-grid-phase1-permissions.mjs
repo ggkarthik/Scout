@@ -71,10 +71,17 @@ async function main() {
   ]);
   const source = (await Promise.all(sourceFiles.map((file) => readFile(file, 'utf8')))).join('\n');
   const awsUsed = awsActionsFromSource(source);
+  const awsProhibited = new Set([
+    'iam:CreateAccessKey', 'iam:UpdateAccessKey', 'iam:DeleteAccessKey', 'iam:PassRole',
+    'cloudformation:*', 'cloudtrail:PutEventSelectors', 'logs:Put*', 's3:Put*', 's3:Delete*', 'xray:Put*',
+  ]);
+  awsProhibited.forEach((action) => awsUsed.delete(action));
   const awsPolicy = JSON.parse(awsPolicyBytes);
   const awsAllowed = new Set(awsPolicy.Statement.flatMap((statement) => statement.Action ?? []));
   const missingAws = [...awsUsed].filter((action) => !awsAllowed.has(action)).sort();
   assert(missingAws.length === 0, `AWS permission policy is missing implemented actions: ${missingAws.join(', ')}`);
+  assert([...awsAllowed].every((action) => !awsProhibited.has(action)),
+    'AWS permission policy contains an explicitly prohibited mutation action');
   assert([...awsAllowed].every(isReadOnlyAws), 'AWS permission policy must contain only Get, List, or Describe actions');
 
   const azureActions = azureActionsFromMatrix(azureMatrix);

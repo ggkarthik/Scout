@@ -1,10 +1,11 @@
 package com.prototype.vulnwatch.aisecurity.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ReviewDisposition;
-import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyRegistry.PolicyDefinition;
-import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyRegistry.PolicyParameterSpec;
+import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyDefinition.PolicyDefinition;
+import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyDefinition.PolicyParameterSpec;
 import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyScopeMatcher;
 import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyScopeMatcher.ArtifactScopeFacts;
 import com.prototype.vulnwatch.aisecurity.policy.AiSecurityPolicyScopeMatcher.ScopeCondition;
@@ -17,6 +18,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.time.Instant;
+import java.time.Duration;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -24,6 +27,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -33,6 +38,25 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class AiSecurityApiService {
+
+    private static final Logger LOG = LoggerFactory.getLogger(AiSecurityApiService.class);
+    private static final String ARTIFACT_SELECT_FIELDS = """
+            id, provider, provider_resource_id, artifact_type, native_kind, name,
+            account_id, region, active, attributes_json::text, owner_name, owner_state,
+            owner_source, owner_confidence, owner_confidence_method,
+            owner_confidence_method_version, business_criticality, environment,
+            first_observed_at, last_observed_at, pii_scan_status, pii_source,
+            pii_info_types::text, pii_finding_count, pii_last_scanned_at,
+            array(select distinct s.id
+                    from ai_grid_systems s
+                    join ai_grid_system_revisions revision
+                      on revision.system_id=s.id and revision.revision=s.current_revision
+                    join ai_grid_system_memberships membership
+                      on membership.system_revision_id=revision.id
+                   where s.status='ACTIVE' and membership.valid_until is null
+                     and membership.artifact_id=ai_security_artifacts.id
+                   order by s.id) system_ids
+            """;
 
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
@@ -45,6 +69,7 @@ public class AiSecurityApiService {
     private final AuditEventService auditEventService;
     private final AiSecurityMetadataSanitizer metadataSanitizer;
     private final AiGridTenantPolicyDefaultsService policyDefaults;
+    private final AiAgentExecutionRelationshipProjectionService runtimeRelationships;
 
     public AiSecurityApiService(
             NamedParameterJdbcTemplate jdbc,
@@ -57,7 +82,8 @@ public class AiSecurityApiService {
             AiSecuritySyncRunFacade syncRunFacade,
             AuditEventService auditEventService,
             AiSecurityMetadataSanitizer metadataSanitizer,
-            AiGridTenantPolicyDefaultsService policyDefaults
+            AiGridTenantPolicyDefaultsService policyDefaults,
+            AiAgentExecutionRelationshipProjectionService runtimeRelationships
     ) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
@@ -70,6 +96,7 @@ public class AiSecurityApiService {
         this.auditEventService = auditEventService;
         this.metadataSanitizer = metadataSanitizer;
         this.policyDefaults = policyDefaults;
+        this.runtimeRelationships = runtimeRelationships;
     }
 
     public SummaryResponse summary(Tenant tenant) {
@@ -119,7 +146,7 @@ public class AiSecurityApiService {
                     """, Map.of());
             long incomplete = count("""
                     select count(*) from ai_security_snapshot_scopes
-                     where status in ('PARTIAL','FAILED','UNSUPPORTED')
+                     where status in ('PARTIAL','ERROR','UNSUPPORTED_API')
                     """, Map.of());
             Instant lastCompleted = jdbc.query("""
                     select max(completed_at) from ai_security_snapshot_scopes where status = 'COMPLETE'
@@ -239,6 +266,7 @@ public class AiSecurityApiService {
     }
 
     public PageResponse<ArtifactResponse> artifacts(Tenant tenant, String artifactType, int page, int size) {
+        validateArtifactTypeFilter(artifactType);
         return artifacts(tenant, artifactType, null, null, null, null, page, size);
     }
 
@@ -267,12 +295,12 @@ public class AiSecurityApiService {
                     .addValue("types", types.toArray(String[]::new))
                     .addValue("provider", normalizedProvider(provider), Types.VARCHAR)
                     .addValue("kind", blankToNull(kind), Types.VARCHAR)
-                    .addValue("sourceType", blankToNull(sourceType), Types.VARCHAR)
-                    .addValue("sensitivity", blankToNull(sensitivity), Types.VARCHAR)
-                    .addValue("publicContentAccess", blankToNull(publicContentAccess), Types.VARCHAR)
-                    .addValue("authenticationType", blankToNull(authenticationType), Types.VARCHAR)
-                    .addValue("endpointExposure", blankToNull(endpointExposure), Types.VARCHAR)
-                    .addValue("synchronizationStatus", blankToNull(synchronizationStatus), Types.VARCHAR)
+                    .addValue("sourceType", filterValue("sourceType", sourceType), Types.VARCHAR)
+                    .addValue("sensitivity", filterValue("sensitivity", sensitivity), Types.VARCHAR)
+                    .addValue("publicContentAccess", filterValue("publicContentAccess", publicContentAccess), Types.VARCHAR)
+                    .addValue("authenticationType", filterValue("configuredAuthType", authenticationType), Types.VARCHAR)
+                    .addValue("endpointExposure", filterValue("endpointExposure", endpointExposure), Types.VARCHAR)
+                    .addValue("synchronizationStatus", filterValue("status", synchronizationStatus), Types.VARCHAR)
                     .addValue("active", active, Types.BOOLEAN)
                     .addValue("limit", safeSize, Types.INTEGER).addValue("offset", safePage * safeSize, Types.INTEGER);
             String where = """
@@ -288,8 +316,7 @@ public class AiSecurityApiService {
                       and (:synchronizationStatus is null or attributes_json ->> 'status' = :synchronizationStatus)
                       and (:active is null or active = :active)
                     """;
-            String fields = "id, provider, provider_resource_id, artifact_type, native_kind, name, account_id, region, active, attributes_json::text, owner_name, owner_state, owner_source, owner_confidence, owner_confidence_method, owner_confidence_method_version, business_criticality, environment, first_observed_at, last_observed_at, pii_scan_status, pii_source, pii_info_types::text, pii_finding_count, pii_last_scanned_at";
-            List<ArtifactResponse> items = jdbc.query("select " + fields + " from ai_security_artifacts " + where
+            List<ArtifactResponse> items = jdbc.query("select " + ARTIFACT_SELECT_FIELDS + " from ai_security_artifacts " + where
                     + " order by active desc, last_observed_at desc, id limit :limit offset :offset", params, this::artifact);
             return new PageResponse<>(items, safePage, safeSize, count("select count(*) from ai_security_artifacts " + where, params));
         });
@@ -305,6 +332,7 @@ public class AiSecurityApiService {
             int page,
             int size
     ) {
+        validateArtifactTypeFilter(artifactType);
         int safePage = Math.max(0, page);
         int safeSize = Math.max(1, Math.min(100, size));
         return tenantExecution.run(tenant, () -> {
@@ -328,16 +356,10 @@ public class AiSecurityApiService {
                                   when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) = :severity
                        ))
                     """;
-            List<ArtifactResponse> items = jdbc.query("""
-                    select id, provider, provider_resource_id, artifact_type, native_kind, name,
-                           account_id, region, active, attributes_json::text, owner_name, owner_state,
-                           owner_source, owner_confidence, owner_confidence_method,
-                           owner_confidence_method_version, business_criticality, environment,
-                           first_observed_at, last_observed_at,
-                           pii_scan_status, pii_source, pii_info_types::text, pii_finding_count, pii_last_scanned_at
+            List<ArtifactResponse> items = jdbc.query("select " + ARTIFACT_SELECT_FIELDS + """
                       from ai_security_artifacts
                      where (:artifactType is null
-                        or (:otherArtifacts = true and artifact_type not in ('AI_AGENT', 'AI_MODEL'))
+                        or (:otherArtifacts = true and artifact_type = 'OTHER_AI_ARTIFACT')
                         or (:otherArtifacts = false and artifact_type = :artifactType))
                        and (:nativeKind is null or native_kind = any(string_to_array(:nativeKind, ',')))
                        and (:provider is null or provider = :provider)
@@ -349,7 +371,7 @@ public class AiSecurityApiService {
             long total = count("""
                     select count(*) from ai_security_artifacts
                      where (:artifactType is null
-                        or (:otherArtifacts = true and artifact_type not in ('AI_AGENT', 'AI_MODEL'))
+                        or (:otherArtifacts = true and artifact_type = 'OTHER_AI_ARTIFACT')
                         or (:otherArtifacts = false and artifact_type = :artifactType))
                        and (:nativeKind is null or native_kind = any(string_to_array(:nativeKind, ',')))
                        and (:provider is null or provider = :provider)
@@ -376,6 +398,7 @@ public class AiSecurityApiService {
             int page,
             int size
     ) {
+        validateArtifactTypeFilter(artifactType);
         int safePage = Math.max(0, page);
         int safeSize = Math.max(1, Math.min(100, size));
         return tenantExecution.run(tenant, () -> {
@@ -403,7 +426,7 @@ public class AiSecurityApiService {
                     """;
             String baseFilter = """
                      where (:artifactType is null
-                        or (:otherArtifacts = true and a.artifact_type not in ('AI_AGENT', 'AI_MODEL'))
+                        or (:otherArtifacts = true and a.artifact_type = 'OTHER_AI_ARTIFACT')
                         or (:otherArtifacts = false and a.artifact_type = :artifactType))
                        and (:nativeKind is null or a.native_kind = any(string_to_array(:nativeKind, ',')))
                        and (:excludeNativeKinds is null or not (a.native_kind = any(string_to_array(:excludeNativeKinds, ','))))
@@ -477,20 +500,78 @@ public class AiSecurityApiService {
 
     public ArtifactResponse artifact(Tenant tenant, UUID artifactId) {
         return tenantExecution.run(tenant, () -> {
-            List<ArtifactResponse> rows = jdbc.query("""
-                    select id, provider, provider_resource_id, artifact_type, native_kind, name,
-                           account_id, region, active, attributes_json::text, owner_name, owner_state,
-                           owner_source, owner_confidence, owner_confidence_method,
-                           owner_confidence_method_version, business_criticality, environment,
-                           first_observed_at, last_observed_at,
-                           pii_scan_status, pii_source, pii_info_types::text, pii_finding_count, pii_last_scanned_at
-                      from ai_security_artifacts where id = :id
-                    """, Map.of("id", artifactId), this::artifact);
+            List<ArtifactResponse> rows = jdbc.query("select " + ARTIFACT_SELECT_FIELDS
+                    + " from ai_security_artifacts where id = :id", Map.of("id", artifactId), this::artifact);
             if (rows.isEmpty()) {
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, "AI Security artifact not found");
             }
             return rows.get(0);
         });
+    }
+
+    public List<ActivityEvidenceResponse> activityEvidence(Tenant tenant, UUID artifactId) {
+        return tenantExecution.run(tenant, () -> jdbc.query("""
+                select fact_key,value_json::text,state,evidence_reference,observed_at,valid_from,valid_until,
+                       confidence,producer_id,(valid_until is not null and valid_until <= now()) expired
+                  from ai_grid_host_context_facts
+                 where artifact_id=:artifactId and fact_key like 'activity.%'
+                 order by observed_at desc,fact_key
+                 limit 100
+                """, Map.of("artifactId", artifactId), (rs, row) -> new ActivityEvidenceResponse(
+                rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4),
+                rs.getTimestamp(5).toInstant(), rs.getTimestamp(6).toInstant(),
+                rs.getTimestamp(7) == null ? null : rs.getTimestamp(7).toInstant(),
+                (Double) rs.getObject(8), rs.getString(9), rs.getBoolean(10))));
+    }
+
+    public String exportArtifacts(Tenant tenant) {
+        return tenantExecution.run(tenant, () -> {
+            StringBuilder csv = new StringBuilder("id,name,provider,artifactType,nativeKind,accountId,region,active,metadata\n");
+            jdbc.query("""
+                    select id,name,provider,artifact_type,native_kind,account_id,region,active,attributes_json::text
+                      from ai_security_artifacts order by name,id limit 50000
+                    """, rs -> {
+                while (rs.next()) {
+                    Map<String, Object> metadata = AiSecurityFieldContract.responseSafe(readMap(rs.getString("attributes_json")));
+                    csv.append(csv(rs.getObject("id"))).append(',').append(csv(rs.getString("name"))).append(',')
+                            .append(csv(rs.getString("provider"))).append(',').append(csv(rs.getString("artifact_type"))).append(',')
+                            .append(csv(rs.getString("native_kind"))).append(',').append(csv(rs.getString("account_id"))).append(',')
+                            .append(csv(rs.getString("region"))).append(',').append(csv(rs.getBoolean("active"))).append(',')
+                            .append(csv(json(metadata))).append('\n');
+                }
+                return null;
+            });
+            return csv.toString();
+        });
+    }
+
+    static String csv(Object value) {
+        String text = value == null ? "" : value.toString();
+        int firstMeaningful = 0;
+        while (firstMeaningful < text.length()
+                && isSpreadsheetIgnorablePrefix(text.charAt(firstMeaningful))) {
+            firstMeaningful++;
+        }
+        boolean controlPrefix = !text.isEmpty() && (text.charAt(0) == '\t'
+                || text.charAt(0) == '\r' || text.charAt(0) == '\n');
+        boolean formulaPrefix = firstMeaningful < text.length()
+                && "=+-@".indexOf(text.charAt(firstMeaningful)) >= 0;
+        if (controlPrefix || formulaPrefix) {
+            text = "'" + text;
+        }
+        return "\"" + text.replace("\"", "\"\"") + "\"";
+    }
+
+    private static boolean isSpreadsheetIgnorablePrefix(char value) {
+        return Character.isWhitespace(value) || Character.isSpaceChar(value)
+                || Character.isISOControl(value) || value == '\uFEFF' || value == '\u200B';
+    }
+
+    private String filterValue(String field, String value) {
+        if (!AiSecurityFieldContract.allows(field, AiSecurityFieldContract.Tier.FILTER_ALLOWED)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Metadata field is not filterable");
+        }
+        return blankToNull(value);
     }
 
     public List<RelationshipResponse> relationships(Tenant tenant, UUID artifactId) {
@@ -511,7 +592,7 @@ public class AiSecurityApiService {
                 rs.getString("source_name"),
                 rs.getObject("target_artifact_id", UUID.class),
                 rs.getString("target_name"),
-                readMap(rs.getString("attributes_json")))));
+                AiSecurityFieldContract.responseSafe(readMap(rs.getString("attributes_json"))))));
     }
 
     /** Bounded above the exposure-correlation engine's HARD_MAX_DEPTH (6) — this is a live,
@@ -523,18 +604,18 @@ public class AiSecurityApiService {
     }
 
     public GraphResponse graph(Tenant tenant, UUID rootArtifactId, int depth) {
+        return graph(tenant, rootArtifactId, depth, false, null, null);
+    }
+
+    public GraphResponse graph(Tenant tenant, UUID rootArtifactId, int depth, boolean includeRuntime,
+                               Instant runtimeFrom, Instant runtimeTo) {
+        RuntimeWindow runtimeWindow = runtimeWindow(rootArtifactId, includeRuntime, runtimeFrom, runtimeTo);
         int boundedDepth = Math.max(1, Math.min(depth, MAX_GRAPH_DEPTH));
         return tenantExecution.run(tenant, () -> {
             List<ArtifactResponse> nodes;
             List<RelationshipResponse> edges;
             if (rootArtifactId == null) {
-                nodes = jdbc.query("""
-                        select id, provider, provider_resource_id, artifact_type, native_kind, name,
-                               account_id, region, active, attributes_json::text, owner_name, owner_state,
-                               owner_source, owner_confidence, owner_confidence_method,
-                               owner_confidence_method_version, business_criticality, environment,
-                               first_observed_at, last_observed_at,
-                           pii_scan_status, pii_source, pii_info_types::text, pii_finding_count, pii_last_scanned_at
+                nodes = jdbc.query("select " + ARTIFACT_SELECT_FIELDS + """
                           from ai_security_artifacts where active = true
                          order by last_observed_at desc limit 500
                         """, this::artifact);
@@ -550,10 +631,55 @@ public class AiSecurityApiService {
                 });
                 nodes = artifactsByIds(ids.stream().limit(500).toList());
             }
+            AiAgentExecutionRelationshipProjectionService.RuntimeOverlay runtimeOverlay = null;
+            if (runtimeWindow != null) {
+                try {
+                    runtimeOverlay = runtimeRelationships.aggregate(tenant.getId(), rootArtifactId,
+                            runtimeWindow.from(), runtimeWindow.to());
+                    Set<UUID> present = nodes.stream().map(ArtifactResponse::id)
+                            .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+                    List<UUID> missing = AiAgentExecutionRelationshipProjectionService.referencedArtifactIds(runtimeOverlay)
+                            .stream().filter(id -> !present.contains(id)).toList();
+                    if (!missing.isEmpty()) {
+                        List<ArtifactResponse> enriched = new ArrayList<>(nodes);
+                        enriched.addAll(artifactsByIds(missing));
+                        nodes = enriched;
+                    }
+                } catch (RuntimeException error) {
+                    LOG.warn("AI runtime relationship overlay is unavailable: {}",
+                            error.getClass().getSimpleName());
+                    runtimeOverlay = AiAgentExecutionRelationshipProjectionService.unavailable(
+                            runtimeWindow.from(), runtimeWindow.to());
+                }
+            }
             boolean truncated = nodes.size() >= 500 || edges.size() > 1000;
-            return new GraphResponse(nodes.stream().limit(500).toList(), edges.stream().limit(1000).toList(), truncated);
+            return new GraphResponse(nodes.stream().limit(500).toList(), edges.stream().limit(1000).toList(),
+                    truncated, runtimeOverlay);
         });
     }
+
+    static RuntimeWindow runtimeWindow(UUID rootArtifactId, boolean includeRuntime,
+                                       Instant runtimeFrom, Instant runtimeTo) {
+        if (!includeRuntime) return null;
+        if (rootArtifactId == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Runtime graph requires rootArtifactId");
+        }
+        Instant now = Instant.now();
+        Instant to = runtimeTo == null ? now : runtimeTo;
+        Instant from = runtimeFrom == null ? to.minus(7, ChronoUnit.DAYS) : runtimeFrom;
+        if (!from.isBefore(to)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "runtimeFrom must be before runtimeTo");
+        }
+        if (!from.isBefore(now)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Runtime graph window cannot be future-only");
+        }
+        if (Duration.between(from, to).compareTo(Duration.ofDays(90)) > 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Runtime graph window cannot exceed 90 days");
+        }
+        return new RuntimeWindow(from, to);
+    }
+
+    record RuntimeWindow(Instant from, Instant to) { }
 
     /** BFS over ai_security_relationships from root, up to `depth` hops. Runs inside the caller's
      * tenantExecution.run(...) lambda (see graph() above) — search_path is already pinned to the
@@ -584,7 +710,7 @@ public class AiSecurityApiService {
                             rs.getString("source_name"),
                             rs.getObject("target_artifact_id", UUID.class),
                             rs.getString("target_name"),
-                            readMap(rs.getString("attributes_json"))));
+                            AiSecurityFieldContract.responseSafe(readMap(rs.getString("attributes_json")))));
             Set<UUID> nextFrontier = new java.util.LinkedHashSet<>();
             for (RelationshipResponse edge : hopEdges) {
                 collected.putIfAbsent(edge.id(), edge);
@@ -604,15 +730,8 @@ public class AiSecurityApiService {
         if (ids.isEmpty()) {
             return List.of();
         }
-        return jdbc.query("""
-                select id, provider, provider_resource_id, artifact_type, native_kind, name,
-                       account_id, region, active, attributes_json::text, owner_name, owner_state,
-                       owner_source, owner_confidence, owner_confidence_method,
-                       owner_confidence_method_version, business_criticality, environment,
-                       first_observed_at, last_observed_at,
-                           pii_scan_status, pii_source, pii_info_types::text, pii_finding_count, pii_last_scanned_at
-                  from ai_security_artifacts where id in (:ids)
-                """, Map.of("ids", ids), this::artifact);
+        return jdbc.query("select " + ARTIFACT_SELECT_FIELDS
+                + " from ai_security_artifacts where id in (:ids)", Map.of("ids", ids), this::artifact);
     }
 
     public PageResponse<FindingResponse> findings(Tenant tenant, String policyId, String status, int page, int size) {
@@ -645,15 +764,19 @@ public class AiSecurityApiService {
             String filter = """
                      where (:policyId is null or f.policy_id = :policyId)
                        and (:status is null or f.status = :status)
-                       and (:provider is null or a.provider = :provider)
+                       and (:provider is null or coalesce(a.provider,x.provider) = :provider)
                        and (:subscription is null or a.account_id = :subscription)
                        and (:nativeKind is null or a.native_kind = any(string_to_array(:nativeKind, ',')))
                        and (:severity is null or coalesce(f.severity_override, case when f.risk_score >= 9 then 'CRITICAL'
                            when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) = :severity)
                     """;
             List<FindingResponse> items = jdbc.query("""
-                    select f.id, f.display_id, f.policy_id, f.policy_version, fs.subject_id artifact_id,
-                           a.name as artifact_name,
+                    select f.id, f.display_id, f.policy_id, f.policy_version,
+                           case when fs.subject_type='ARTIFACT' then fs.subject_id end artifact_id,
+                           case when fs.subject_type='EXECUTION' then fs.subject_id end execution_id,
+                           fs.subject_type,
+                           coalesce(a.name, 'Runtime execution ' || left(fs.subject_id::text,8)) artifact_name,
+                           x.evidence_source, x.evidence_class,
                            coalesce(f.severity_override, case when f.risk_score >= 9 then 'CRITICAL'
                                when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) severity,
                            f.status, f.title, f.evidence::text evidence_json,
@@ -661,19 +784,21 @@ public class AiSecurityApiService {
                            f.closed_reason,
                            coalesce(review.disposition, 'UNREVIEWED') as disposition
                       from findings f
-                      join finding_subjects fs on fs.finding_id = f.id and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
-                      join ai_security_artifacts a on a.id = fs.subject_id
+                      join finding_subjects fs on fs.finding_id = f.id and fs.subject_role = 'PRIMARY'
+                      left join ai_security_artifacts a on a.id = fs.subject_id and fs.subject_type='ARTIFACT'
+                      left join ai_agent_executions x on x.id = fs.subject_id and fs.subject_type='EXECUTION'
                       left join lateral (
                           select disposition from finding_reviews r
                            where r.finding_id = f.id order by reviewed_at desc limit 1
                       ) review on true
-                    """ + filter + " and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE') order by f.last_observed_at desc, f.id limit :limit offset :offset",
+                    """ + filter + " and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE','AI_RUNTIME') order by f.last_observed_at desc, f.id limit :limit offset :offset",
                     params, this::finding);
             long total = count("""
                     select count(*) from findings f
-                    join finding_subjects fs on fs.finding_id = f.id and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
-                    join ai_security_artifacts a on a.id = fs.subject_id
-                    """ + filter + " and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE')", params);
+                    join finding_subjects fs on fs.finding_id = f.id and fs.subject_role = 'PRIMARY'
+                    left join ai_security_artifacts a on a.id = fs.subject_id and fs.subject_type='ARTIFACT'
+                    left join ai_agent_executions x on x.id = fs.subject_id and fs.subject_type='EXECUTION'
+                    """ + filter + " and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE','AI_RUNTIME')", params);
             return new PageResponse<>(items, safePage, safeSize, total);
         });
     }
@@ -1012,7 +1137,7 @@ public class AiSecurityApiService {
         }
     }
 
-    /** Compatibility projection: tenant pages read governed catalog metadata while legacy configuration remains usable. */
+    /** Tenant policy projections are populated exclusively from the governed catalog. */
     private List<PolicyDefinition> catalogPolicies(Tenant tenant) {
         return jdbc.query("""
                 select distinct on (p.policy_id) p.policy_id,p.version,p.name,p.severity,p.artifact_types_json::text,
@@ -1020,10 +1145,10 @@ public class AiSecurityApiService {
                   from platform.ai_grid_policy_versions p
                   join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id
                    and (p.version=d.pinned_version or (d.pinned_version is null and p.package_digest is null))
-                 where p.lifecycle in ('PUBLISHED', 'CANARY', 'DEPRECATED')
-                   and (d.available=true or p.lifecycle='DEPRECATED')
-                   and (d.rollout_stage='GENERAL_AVAILABILITY'
-                        or (d.rollout_stage in ('CANARY','DEV') and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
+                 where p.lifecycle in ('VALIDATED', 'PUBLISHED', 'CANARY', 'DEPRECATED')
+                   and platform.ai_grid_policy_visible_to_tenant(
+                           d.available or p.lifecycle='DEPRECATED', d.rollout_stage,
+                           d.canary_tenant_ids_json, cast(:tenantId as uuid))
                  order by p.policy_id,p.version
                 """, Map.of("tenantId", tenant.getId().toString()), (rs, n) -> catalogDefinition(rs));
     }
@@ -1035,20 +1160,20 @@ public class AiSecurityApiService {
                   from platform.ai_grid_policy_versions p
                   join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id
                    and (p.version=d.pinned_version or (d.pinned_version is null and p.package_digest is null))
-                 where p.policy_id=:id and p.lifecycle in ('PUBLISHED', 'CANARY', 'DEPRECATED')
-                   and (d.available=true or p.lifecycle='DEPRECATED')
-                   and (d.rollout_stage='GENERAL_AVAILABILITY'
-                        or (d.rollout_stage in ('CANARY','DEV') and jsonb_exists(d.canary_tenant_ids_json, cast(:tenantId as text))))
+                 where p.policy_id=:id and p.lifecycle in ('VALIDATED', 'PUBLISHED', 'CANARY', 'DEPRECATED')
+                   and platform.ai_grid_policy_visible_to_tenant(
+                           d.available or p.lifecycle='DEPRECATED', d.rollout_stage,
+                           d.canary_tenant_ids_json, cast(:tenantId as uuid))
                  order by p.version limit 1
                 """, Map.of("id", policyId, "tenantId", tenant.getId().toString()), (rs, n) -> catalogDefinition(rs));
         return definitions.stream().findFirst();
     }
 
-    /** Catalog definitions are the source of truth; the in-process registry is rollback-only. */
+    /** Parameter definitions are populated exclusively from the governed catalog. */
     private List<PolicyParameterSpec> policyParameterSpecs(String policyId) {
         List<String> definitions = jdbc.query("""
                 select parameter_definitions_json::text from platform.ai_grid_policy_versions
-                 where policy_id=:id and lifecycle in ('PUBLISHED', 'CANARY')
+                 where policy_id=:id and lifecycle in ('VALIDATED', 'PUBLISHED', 'CANARY')
                  order by published_at desc nulls last, version desc limit 1
                 """, Map.of("id", policyId), (rs, n) -> rs.getString(1));
         List<PolicyParameterSpec> catalogSpecs = definitions.isEmpty() ? List.of() : parameterSpecs(definitions.get(0));
@@ -1217,7 +1342,9 @@ public class AiSecurityApiService {
                         || ("AWS".equals(normalized)
                                 && AiSecuritySyncRunFacade.AWS_SYNC_TYPE.equals(run.getSyncType()))
                         || ("AZURE".equals(normalized)
-                                && AiSecuritySyncRunFacade.AZURE_SYNC_TYPE.equals(run.getSyncType())))
+                                && AiSecuritySyncRunFacade.AZURE_SYNC_TYPE.equals(run.getSyncType()))
+                        || ("MICROSOFT_COPILOT".equals(normalized)
+                                && AiSecuritySyncRunFacade.COPILOT_SYNC_TYPE.equals(run.getSyncType())))
                 .map(this::run)
                 .toList();
     }
@@ -1260,7 +1387,7 @@ public class AiSecurityApiService {
         String value = blankToNull(provider);
         if (value == null) return null;
         String normalized = value.toUpperCase(java.util.Locale.ROOT);
-        if (!List.of("AWS", "AZURE").contains(normalized)) {
+        if (!List.of("AWS", "AZURE", "MICROSOFT_COPILOT").contains(normalized)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported AI Security provider");
         }
         return normalized;
@@ -1326,8 +1453,12 @@ public class AiSecurityApiService {
 
     private List<FindingResponse> findingsById(UUID findingId) {
         return jdbc.query("""
-                select f.id, f.display_id, f.policy_id, f.policy_version, fs.subject_id artifact_id,
-                       a.name as artifact_name,
+                select f.id, f.display_id, f.policy_id, f.policy_version,
+                       case when fs.subject_type='ARTIFACT' then fs.subject_id end artifact_id,
+                       case when fs.subject_type='EXECUTION' then fs.subject_id end execution_id,
+                       fs.subject_type,
+                       coalesce(a.name, 'Runtime execution ' || left(fs.subject_id::text,8)) artifact_name,
+                       x.evidence_source, x.evidence_class,
                        coalesce(f.severity_override, case when f.risk_score >= 9 then 'CRITICAL'
                            when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) severity,
                        f.status, f.title, f.evidence::text evidence_json,
@@ -1335,13 +1466,14 @@ public class AiSecurityApiService {
                        f.closed_reason,
                        coalesce(review.disposition, 'UNREVIEWED') as disposition
                   from findings f
-                  join finding_subjects fs on fs.finding_id = f.id and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
-                  join ai_security_artifacts a on a.id = fs.subject_id
+                  join finding_subjects fs on fs.finding_id = f.id and fs.subject_role = 'PRIMARY'
+                  left join ai_security_artifacts a on a.id = fs.subject_id and fs.subject_type='ARTIFACT'
+                  left join ai_agent_executions x on x.id = fs.subject_id and fs.subject_type='EXECUTION'
                   left join lateral (
                       select disposition from finding_reviews r
                        where r.finding_id = f.id order by reviewed_at desc limit 1
                   ) review on true
-                 where f.id = :id and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE')
+                 where f.id = :id and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE','AI_RUNTIME')
                 """, Map.of("id", findingId), this::finding);
     }
 
@@ -1365,23 +1497,35 @@ public class AiSecurityApiService {
                 rs.getString("source_name"),
                 rs.getObject("target_artifact_id", UUID.class),
                 rs.getString("target_name"),
-                readMap(rs.getString("attributes_json"))));
+                AiSecurityFieldContract.responseSafe(readMap(rs.getString("attributes_json")))));
     }
 
     private ArtifactResponse artifact(ResultSet rs, int rowNum) throws SQLException {
         String provider = rs.getString("provider");
         String nativeKind = rs.getString("native_kind");
+        UUID artifactId = rs.getObject("id", UUID.class);
+        String artifactType = rs.getString("artifact_type");
+        List<UUID> systemIds = uuidArray(rs.getArray("system_ids"));
+        Map<String, Object> rawAttributes = readMap(rs.getString("attributes_json"));
+        AiGridRelationshipSemantics.AttachmentContract attachmentContract =
+                AiGridRelationshipSemantics.attachmentContract(artifactType, nativeKind, rawAttributes);
+        String attachmentState = switch (attachmentContract) {
+            case ROOT -> "ROOT";
+            case REQUIRED -> systemIds.isEmpty() ? "UNATTACHED_REQUIRED" : "ATTACHED";
+            case OPTIONAL -> systemIds.isEmpty() ? "STANDALONE_OPTIONAL" : "ATTACHED";
+        };
         return new ArtifactResponse(
-                rs.getObject("id", UUID.class),
+                artifactId,
                 provider,
                 rs.getString("provider_resource_id"),
-                rs.getString("artifact_type"),
+                artifactType,
                 nativeKind,
                 rs.getString("name"),
                 rs.getString("account_id"),
                 rs.getString("region"),
                 rs.getBoolean("active"),
-                metadataSanitizer.sanitize(provider, nativeKind, readMap(rs.getString("attributes_json"))).attributes(),
+                AiSecurityFieldContract.responseSafe(
+                        metadataSanitizer.sanitize(provider, nativeKind, rawAttributes).attributes()),
                 rs.getString("owner_name"),
                 rs.getString("owner_state"),
                 rs.getString("owner_source"),
@@ -1396,7 +1540,26 @@ public class AiSecurityApiService {
                 rs.getString("pii_source"),
                 readStringList(rs.getString("pii_info_types")),
                 rs.getInt("pii_finding_count"),
-                instant(rs, "pii_last_scanned_at"));
+                instant(rs, "pii_last_scanned_at"),
+                attachmentState,
+                systemIds);
+    }
+
+    private List<UUID> uuidArray(java.sql.Array array) throws SQLException {
+        if (array == null) return List.of();
+        Object raw = array.getArray();
+        if (raw instanceof UUID[] values) return List.of(values);
+        if (raw instanceof Object[] values) {
+            return java.util.Arrays.stream(values).map(value -> UUID.fromString(String.valueOf(value))).toList();
+        }
+        return List.of();
+    }
+
+    private void validateArtifactTypeFilter(String artifactType) {
+        if (artifactType != null && !artifactType.isBlank()
+                && !AiSecurityTaxonomy.isExplicitArtifactType(artifactType)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported AI artifact category");
+        }
     }
 
     private FindingResponse finding(ResultSet rs, int rowNum) throws SQLException {
@@ -1406,7 +1569,11 @@ public class AiSecurityApiService {
                 rs.getString("policy_id"),
                 rs.getString("policy_version"),
                 rs.getObject("artifact_id", UUID.class),
+                rs.getObject("execution_id", UUID.class),
+                rs.getString("subject_type"),
                 rs.getString("artifact_name"),
+                rs.getString("evidence_source"),
+                rs.getString("evidence_class"),
                 rs.getString("severity"),
                 rs.getString("status"),
                 rs.getString("title"),
@@ -1513,7 +1680,8 @@ public class AiSecurityApiService {
             String businessCriticality, String environment,
             Instant firstObservedAt, Instant lastObservedAt,
             String piiScanStatus, String piiSource, List<String> piiInfoTypes,
-            int piiFindingCount, Instant piiLastScannedAt
+            int piiFindingCount, Instant piiLastScannedAt,
+            String attachmentState, List<UUID> systemIds
     ) {
     }
 
@@ -1521,6 +1689,13 @@ public class AiSecurityApiService {
             UUID id, String name, String nativeKind, String provider, String accountId, String region,
             long criticalFindings, long highFindings, long totalFindings,
             long policiesFailed, long policiesTotal
+    ) {
+    }
+
+    public record ActivityEvidenceResponse(
+            String factKey, String valueJson, String state, String evidenceReference,
+            Instant observedAt, Instant validFrom, Instant validUntil, Double confidence,
+            String producerId, boolean expired
     ) {
     }
 
@@ -1533,13 +1708,17 @@ public class AiSecurityApiService {
     public record GraphResponse(
             List<ArtifactResponse> nodes,
             List<RelationshipResponse> edges,
-            boolean truncated
+            boolean truncated,
+            @JsonInclude(JsonInclude.Include.NON_NULL)
+            AiAgentExecutionRelationshipProjectionService.RuntimeOverlay runtimeOverlay
     ) {
     }
 
     public record FindingResponse(
             UUID id, String displayId, String policyId, String policyVersion, UUID artifactId,
-            String artifactName, String severity, String status, String title, Map<String, Object> evidence,
+            UUID executionId, String subjectType,
+            String artifactName, String evidenceSource, String evidenceClass,
+            String severity, String status, String title, Map<String, Object> evidence,
             String reviewDisposition, Instant firstObservedAt, Instant lastObservedAt, Instant resolvedAt
             , String closedReason
     ) {

@@ -1,4 +1,5 @@
-export type AiArtifactType = 'AI_AGENT' | 'AI_MODEL' | 'AI_GUARDRAIL' | 'MCP_GATEWAY' | 'MCP_TARGET' | 'MCP_SERVER' | 'KNOWLEDGE_BASE' | 'OTHER_AI_ARTIFACT';
+export type AiArtifactType = 'AI_AGENT' | 'AI_AGENT_VERSION' | 'AI_PROMPT' | 'AI_TOOL' | 'AI_COMPONENT' | 'AI_MODEL' | 'AI_GUARDRAIL' | 'MCP_GATEWAY' | 'MCP_TARGET' | 'MCP_SERVER' | 'KNOWLEDGE_BASE' | 'DATA_SOURCE' | 'DATA_STORE' | 'SEARCH_INDEX' | 'SUPPORTING_RESOURCE' | 'OTHER_AI_ARTIFACT';
+export type AiProvider = 'AWS' | 'AZURE' | 'MICROSOFT_COPILOT';
 
 export type AiSecuritySummary = {
   artifactCounts: Record<string, number>;
@@ -68,7 +69,7 @@ export type AiTopRiskArtifact = {
 
 export type AiGridCoverageDimension = {
   coverageEpochId: string;
-  dimension: 'TECHNOLOGY' | 'PROVIDER' | 'FAMILY' | 'ACCOUNT' | 'ENVIRONMENT' | 'OWNER' | 'POLICY' | 'FRAMEWORK';
+  dimension: 'TECHNOLOGY' | 'PROVIDER' | 'FAMILY' | 'ACCOUNT' | 'ENVIRONMENT' | 'OWNER' | 'POLICY' | 'FRAMEWORK' | 'ASSOCIATION';
   value: string;
   expected: number;
   recorded: number;
@@ -78,7 +79,117 @@ export type AiGridCoverageDimension = {
   noDecision: number;
 };
 
+export type AiFrameworkControlCoverage = {
+  controlId: string;
+  name: string;
+  coverageStatus: 'EFFECTIVE' | 'PARTIAL' | 'PREVIEW' | 'NOT_ASSESSED' | 'BREADTH_ONLY' | 'NOT_COVERED';
+  mappedPolicies: number;
+  distributedPolicies: number;
+  selectedPolicies: number;
+  previewPolicies: number;
+  previewDecisionReadyPolicies: number;
+  effectivePolicies: number;
+  applicableCount: number;
+  decisionReadyCount: number;
+  blockers: string[];
+  mappings: Array<{
+    policyId: string;
+    policyVersion: string;
+    mappingType: 'DIRECT' | 'PARTIAL' | 'SUPPORTING';
+    rationale: string;
+    selection: AiGridPolicySelection | null;
+    readiness: string | null;
+    distributed: boolean;
+  }>;
+};
+
+export type AiFrameworkCoverage = {
+  framework: string;
+  frameworkVersion: string;
+  coverageEpochId: string | null;
+  runId: string | null;
+  tenantSchemaReady: boolean;
+  blockers: string[];
+  controls: AiFrameworkControlCoverage[];
+  legacyCompatibility: {
+    policies: number;
+    distributed: number;
+    required: number;
+    enabled: number;
+    preview: number;
+  };
+};
+
+export type AiFrameworkDefinition = {
+  framework: string;
+  frameworkVersion: string;
+  displayName: string;
+  controls: Array<{ controlId: string; name: string; displayOrder: number }>;
+};
+
+export type AiRuntimeTelemetryReadiness = {
+  windowStart: string;
+  windowEnd: string;
+  windowDays: number;
+  minimumFillRate: number;
+  minimumAgentCorrelationRate: number;
+  minimumVersionCorrelationRate: number;
+  minimumExecutionsPerProvider: number;
+  minimumVersionApplicableExecutions: number;
+  available: boolean;
+  program2EntryGateMet: boolean;
+  blockers: string[];
+  providers: Array<{
+    sourceId: string;
+    provider: string;
+    sourceKind: 'PROVIDER_CONNECTOR' | 'TELEMETRY_ADAPTER';
+    requiredForProgramGate: boolean;
+    configured: boolean;
+    evidenceClass?: string | null;
+    certificationState?: string | null;
+    executions: number;
+    consequentialEvents: number;
+    approvalStateFillRate: number;
+    policyStateFillRate: number;
+    actionOutcomeFillRate: number;
+    executionApprovalStateFillRate: number;
+    executionPolicyStateFillRate: number;
+    agentCorrelationRate: number;
+    versionCorrelationRate: number;
+    versionApplicableExecutions: number;
+    averageDeliveryLatencyMs: number;
+    acceptedEvents: number;
+    duplicateRate: number;
+    quarantineRate: number;
+    receivedBytes: number;
+  quotaAcceptedEvents: number;
+  quotaAcceptedBytes: number;
+  estimatedStorageCostUsd: number;
+    quotaSoftLimit: boolean;
+    quotaExhausted: boolean;
+    entryGateMet: boolean;
+    blockers: string[];
+    alerts: string[];
+  }>;
+};
+
 export type AiGridPolicySelection = 'REQUIRED' | 'ENABLED' | 'PREVIEW' | 'DISABLED';
+
+export type AiGridPolicyAssessmentStateSummary = {
+  policyId: string;
+  policyVersion: string;
+  pass: number;
+  fail: number;
+  unknown: number;
+  notAssessed: number;
+};
+
+export type AiGridBulkPolicySelectionResult = {
+  distributedPolicies: number;
+  changedPolicies: number;
+  enabledPolicies: number;
+  requiredPolicies: number;
+};
 
 export type AiGridPolicy = {
   policyId: string;
@@ -281,35 +392,6 @@ export type AiGridPhase1CorpusCertification = {
   blockedEnvironments: string[];
 };
 
-export type AiGridPhase1MigrationAction = {
-  legacyDetectorId: string;
-  disposition: string;
-  closureReason: string | null;
-  sourceSelection: AiGridPolicySelection;
-  selectionCopies: Array<{ policyId: string; selection: AiGridPolicySelection }>;
-  manualConfigurationReview: boolean;
-  openFindingsToClose: number;
-  removeLegacyConfiguration: boolean;
-  reconcileToPolicyId: string | null;
-  openFindingsToReconcile: number;
-};
-
-export type AiGridPhase1MigrationPreview = {
-  tenantId: string;
-  legacySelections: number;
-  selectionCopies: number;
-  retirements: number;
-  scopeCopies: number;
-  overrideCopies: number;
-  parameterManualReviews: number;
-  openFindingsToClose: number;
-  openFindingsReconciled: number;
-  blockers: string[];
-  actions: AiGridPhase1MigrationAction[];
-};
-
-export type AiGridPhase1MigrationResult = Omit<AiGridPhase1MigrationPreview, 'blockers'>;
-
 export type AiGridPhase1PreviewGate = {
   gateKey: string;
   status: 'PENDING' | 'PASSED' | 'FAILED' | string;
@@ -360,26 +442,6 @@ export type AiGridPolicyRetirementStatus = {
   unmappedRecordCount: number;
 };
 
-export type AiGridOwaspCoverage = { owaspId: string; publishedPolicyCount: number };
-export type AiGridCoverageStatus =
-  | 'AUTOMATED'
-  | 'CONDITIONAL_AUTOMATED'
-  | 'PREVENTIVE_ONLY'
-  | 'REQUIRES_RUNTIME_OR_TEST'
-  | 'NOT_COVERED';
-export type AiGridPolicyControlMapping = {
-  policyId: string;
-  provider: string;
-  mappingType: string;
-  rationale: string;
-  conditional: boolean;
-  baseEvidenceTiersJson: string;
-};
-export type AiGridControlCoverage = {
-  controlId: string;
-  coverageStatus: AiGridCoverageStatus;
-  policies: AiGridPolicyControlMapping[];
-};
 export type AiGridPolicyCandidate = { id: string; title: string; sourceType: string; status: string; technologyId: string | null; rationale: string; riskScore: number; reachScore: number; evidenceMaturity: number; remediationClarity: number; owner: string | null; priorityScore: number };
 
 export type AiGridOwner = {
@@ -449,6 +511,8 @@ export type AiSecurityArtifact = {
   piiInfoTypes: string[];
   piiFindingCount: number;
   piiLastScannedAt: string | null;
+  attachmentState: 'ROOT' | 'ATTACHED' | 'UNATTACHED_REQUIRED' | 'STANDALONE_OPTIONAL';
+  systemIds: string[];
 };
 
 export type AiArtifactSummary = {
@@ -463,6 +527,19 @@ export type AiArtifactSummary = {
   totalFindings: number;
   policiesFailed: number;
   policiesTotal: number;
+};
+
+export type AiActivityEvidence = {
+  factKey: string;
+  valueJson: string;
+  state: string;
+  evidenceReference: string;
+  observedAt: string;
+  validFrom: string;
+  validUntil: string | null;
+  confidence: number | null;
+  producerId: string;
+  expired: boolean;
 };
 
 export type AiSecurityPage<T> = {
@@ -486,6 +563,49 @@ export type AiSecurityGraph = {
   nodes: AiSecurityArtifact[];
   edges: AiSecurityRelationship[];
   truncated: boolean;
+  runtimeOverlay?: AiRuntimeGraphOverlay;
+};
+
+export type AiRuntimeGraphGroup = {
+  id: string;
+  provider: string;
+  source: string;
+  agentArtifactId: string | null;
+  agentVersionArtifactId: string | null;
+  executionCount: number;
+  successCount: number;
+  failureCount: number;
+  unknownCount: number;
+  resolvedCount: number;
+  unresolvedCount: number;
+  notApplicableCount: number;
+  firstEvidenceTime: string;
+  lastEvidenceTime: string;
+};
+
+export type AiRuntimeGraphEdge = {
+  id: string;
+  relationshipType: 'EXECUTED_AS' | 'PARTICIPATED_IN';
+  runtimeGroupId: string;
+  artifactId: string;
+  participantRole: 'MODEL' | 'TOOL' | 'PROMPT' | 'COMPONENT' | null;
+  executionCount: number;
+  firstEvidenceTime: string;
+  lastEvidenceTime: string;
+};
+
+export type AiRuntimeGraphOverlay = {
+  status: 'AVAILABLE' | 'UNAVAILABLE';
+  diagnostic: string | null;
+  windowStart: string;
+  windowEnd: string;
+  executionCount: number;
+  resolvedCount: number;
+  unresolvedCount: number;
+  notApplicableCount: number;
+  groups: AiRuntimeGraphGroup[];
+  edges: AiRuntimeGraphEdge[];
+  truncated: boolean;
 };
 
 export type AiSecurityFinding = {
@@ -493,8 +613,12 @@ export type AiSecurityFinding = {
   displayId: string;
   policyId: string;
   policyVersion: string;
-  artifactId: string;
+  artifactId: string | null;
+  executionId?: string | null;
+  subjectType?: 'ARTIFACT' | 'EXECUTION' | string;
   artifactName: string;
+  evidenceSource?: string | null;
+  evidenceClass?: string | null;
   severity: string;
   status: string;
   title: string;
@@ -650,6 +774,53 @@ export type AiSecurityConnectionTest = {
   message: string;
   retryable: boolean;
   missingPermissions: string[];
+  identity: AiSecurityAwsIdentity | null;
+  preflight: AiSecurityAwsPreflight | null;
+};
+
+export type AiSecurityAwsIdentity = {
+  accountId: string;
+  arn: string;
+  principalId: string;
+};
+
+export type AiSecurityAwsActionVerification = {
+  action: string;
+  status: 'VERIFIED_ALLOWED' | 'VERIFIED_EMPTY' | 'NOT_VERIFIED_EMPTY' | 'UNAUTHORIZED' | 'UNSUPPORTED_API' | 'ERROR' | 'DISABLED';
+  detail: string;
+};
+
+export type AiSecurityAwsFamilyPreflight = {
+  resourceFamily: string;
+  region: string;
+  status: 'COMPLETE' | 'DISABLED' | 'UNAUTHORIZED' | 'UNSUPPORTED_API' | 'PARTIAL' | 'ERROR';
+  actions: AiSecurityAwsActionVerification[];
+  customerRemediation: string;
+};
+
+export type AiSecurityAwsPreflight = {
+  identity: AiSecurityAwsIdentity | null;
+  resourceFamilies: AiSecurityAwsFamilyPreflight[];
+  providerApiCalls: number;
+  explicitlyRequested: boolean;
+};
+
+export type AiSecurityAwsFamilyRequirement = {
+  resourceFamily: string;
+  scope: 'REGIONAL' | 'GLOBAL';
+  requiredActions: string[];
+  optionalEnrichmentActions: string[];
+  verificationProbe: string;
+  capabilities: string[];
+  policies: string[];
+  customerRemediation: string;
+};
+
+export type AiSecurityAwsRequirements = {
+  matrixVersion: number;
+  provider: 'AWS';
+  resourceFamilies: AiSecurityAwsFamilyRequirement[];
+  prohibitedMutationActions: string[];
 };
 
 export type AiSecurityAzureCredentialProfile = {
@@ -691,6 +862,65 @@ export type AiSecurityAzureFoundryConfig = {
   foundryEndpointUrl: string | null;
   connectorId: string | null;
   credentialExpiresAt: string | null;
+};
+
+/** Metadata-only runtime records. Provider execution identifiers are intentionally absent. */
+export type AiAgentExecution = {
+  id: string;
+  provider: string;
+  agentArtifactId: string | null;
+  agentVersionArtifactId: string | null;
+  correlationStatus: 'RESOLVED' | 'UNRESOLVED' | 'NOT_APPLICABLE';
+  correlationDiagnostic: string | null;
+  source: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  status: string;
+  outcomeCategory: string | null;
+  approvalState: string | null;
+  policyState: string | null;
+  classification: string | null;
+  apiVersion: string | null;
+  tokenCount: number | null;
+  latencyMs: number | null;
+  retryCount: number | null;
+  spendMicros: number | null;
+  evidenceTime: string;
+  environmentDigest?: string | null;
+  deploymentDigest?: string | null;
+  actingIdentityDigest?: string | null;
+  delegatedIdentityDigest?: string | null;
+  terminationReason?: string | null;
+  evidenceSource?: string | null;
+  evidenceClass?: string | null;
+  evidenceConfidence?: number | null;
+  stepCount?: number | null;
+  spendCurrency?: string | null;
+  spendUnit?: string | null;
+  collectedAt?: string | null;
+  providerEventTime?: string | null;
+  deliveryLatencyMs?: number | null;
+};
+
+export type AiAgentExecutionPage = { items: AiAgentExecution[]; page: number; size: number; total: number };
+export type AiAgentExecutionEvent = {
+  id: string; executionId: string; sequence: number; eventTime: string; eventType: string;
+  status: string | null; classification: string | null; evidenceTime: string;
+  ingestedAt?: string; actionCategory?: string | null; targetClass?: string | null;
+  toolDigest?: string | null; toolVersionDigest?: string | null; targetDigest?: string | null;
+  actionCorrelationDigest?: string | null; dataSensitivity?: string | null; dataOperation?: string | null;
+  approvalState?: string | null; policyState?: string | null; decisionReason?: string | null;
+  enforcementPoint?: string | null; actionOutcome?: string | null; evidenceClass?: string | null;
+};
+
+export type CopilotStudioConnector = {
+  id: string; organizationUrl: string; credentialProfileId: string; discoveryEnabled: boolean;
+  executionEnabled: boolean; killSwitch: boolean; scheduleCron: string; allowedDataverseHosts: string[];
+  createdAt: string; updatedAt: string;
+};
+
+export type AiSecurityConnectorFeatureFlag = {
+  featureKey: string; enabled: boolean; killSwitch: boolean; updatedBy: string | null; updatedAt: string | null;
 };
 
 export type AiSecurityAzureFamilyPermission = {
@@ -765,7 +995,7 @@ export type AiGridExposurePage = { items: AiGridExposureSummary[]; nextCursor: s
 export type AiExposurePriority = {
   id: string; title: string; severity: string; priority: number;
   severityPoints: number; confidencePoints: number; publicExposurePoints: number;
-  criticalityPoints: number; recencyPoints: number; confidence: number;
+  criticalityPoints: number; recencyPoints: number; activityPoints: number; confidence: number;
   rootCauseArtifactId: string; breakpoint: string; owner: string; provider: string;
   accountId: string; lastObservedAt: string;
 };

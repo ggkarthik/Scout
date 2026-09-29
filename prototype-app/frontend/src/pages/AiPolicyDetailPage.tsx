@@ -76,6 +76,10 @@ const SCOPE_MODE_OPTIONS: Array<{ value: PolicyScopeMode; label: string }> = [
 const CONDITION_VALUE_OPTIONS: Record<string, Array<{ value: string; label: string }>> = {
   ARTIFACT_TYPE: [
     { value: 'AI_AGENT', label: 'AI agent' },
+    { value: 'AI_AGENT_VERSION', label: 'AI agent version' },
+    { value: 'AI_PROMPT', label: 'AI prompt' },
+    { value: 'AI_TOOL', label: 'AI tool' },
+    { value: 'AI_COMPONENT', label: 'AI component' },
     { value: 'AI_MODEL', label: 'AI model' },
     { value: 'AI_GUARDRAIL', label: 'AI guardrail' },
     { value: 'MCP_GATEWAY', label: 'MCP gateway' },
@@ -142,6 +146,7 @@ type ImpactedArtifact = {
 function buildImpactedArtifacts(findings: AiSecurityFinding[]): ImpactedArtifact[] {
   const byArtifact = new Map<string, ImpactedArtifact>();
   findings.forEach((finding) => {
+    if (!finding.artifactId) return;
     const isOpen = finding.status === 'OPEN';
     const existing = byArtifact.get(finding.artifactId);
     if (!existing) {
@@ -240,8 +245,8 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
   const [findingsStatusFilter, setFindingsStatusFilter] = React.useState('OPEN');
 
   const policiesQuery = useQuery({
-    queryKey: ['ai-security-policies'],
-    queryFn: api.listAiGridPolicyDetails,
+    queryKey: ['ai-security-policy', policyId],
+    queryFn: () => api.getAiGridPolicyDetail(policyId),
   });
   const policyMetadataQuery = useQuery({
     queryKey: ['ai-grid-policies'],
@@ -261,7 +266,7 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
 
   const policyMetadata: AiGridPolicy | null = policyMetadataQuery.data?.find((item) => item.policyId === policyId) ?? null;
   const nativeKinds = inferredNativeKinds(policyMetadata);
-  const legacyPolicy = policiesQuery.data?.find((item) => item.id === policyId) ?? null;
+  const legacyPolicy = policiesQuery.data ?? null;
   const policy: AiSecurityPolicy | null = legacyPolicy ?? (policyMetadata ? {
     id: policyMetadata.policyId,
     version: policyMetadata.version,

@@ -1,0 +1,93 @@
+{
+  "policyId": "AGCF-RT-009",
+  "version": "1.0.0",
+  "name": "Agent retry volume exceeded its governed threshold",
+  "description": "Fails when total retries across an agent's executions exceed the configured threshold within the lookback window, indicating a runaway or looping agent.",
+  "securityIntent": "Detect looping or runaway agent behaviour before it consumes unbounded resource.",
+  "remediationIntent": "Investigate the retry loop, then tune the agent's retry policy or its stop condition.",
+  "owner": "AI Grid Security",
+  "lifecycle": "VALIDATED",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AGCF-OBJ-RT-009",
+  "provider": "MULTI_CLOUD",
+  "evaluationMode": "RUNTIME_AGGREGATE",
+  "evaluationDefinition": {
+    "mode": "RUNTIME_AGGREGATE",
+    "runtimeAggregate": {
+      "metric": "RETRIES",
+      "lookbackSeconds": 86400,
+      "groupingKey": "execution.agent_artifact_id",
+      "operator": "GT",
+      "threshold": 50,
+      "thresholdParameter": "retryThreshold",
+      "maximumRowsExamined": 2000,
+      "maximumEventsExamined": 20000,
+      "explanationFields": [
+        "execution.agent_artifact_id"
+      ]
+    }
+  },
+  "baseEvidenceTiers": [
+    "E1"
+  ],
+  "conditionalCapabilities": [],
+  "defaultSelection": "PREVIEW",
+  "releaseFamily": "AGCF_PHASE_2",
+  "wave": "WAVE_2B",
+  "workflowClass": "RUNTIME_FINDING",
+  "evaluationSubject": "EXECUTION",
+  "artifactTypes": [],
+  "nativeKinds": [],
+  "requiredCapabilities": [
+    "RUNTIME_EXECUTION_METADATA"
+  ],
+  "requiredRelationships": [],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [],
+  "reasonCode": "AGCF_RT_009_RETRY_THRESHOLD_EXCEEDED",
+  "frameworkMappings": [
+    {
+      "framework": "OWASP_AGENTIC_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "ASI05",
+      "mappingType": "DIRECT",
+      "rationale": "Unbounded retry volume is unchecked autonomy."
+    },
+    {
+      "framework": "OWASP_GENAI_LLM_TOP_10",
+      "frameworkVersion": "2026",
+      "controlId": "LLM10",
+      "mappingType": "PARTIAL",
+      "rationale": "Unbounded consumption is the direct risk."
+    },
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "GRC-05",
+      "mappingType": "PARTIAL",
+      "rationale": "Runtime resource bounding is a governance control."
+    }
+  ],
+  "parameterDefinitions": [
+    {
+      "key": "retryThreshold",
+      "valueType": "NUMBER",
+      "default": 50,
+      "minimum": 5,
+      "maximum": 5000
+    }
+  ],
+  "certificationParameterProfile": {
+    "immutable": true,
+    "pass": {
+      "retryThreshold": 50
+    },
+    "fail": {
+      "retryThreshold": 5
+    },
+    "invalid": {
+      "retryThreshold": -1
+    }
+  },
+  "packageSourceRef": "policy-packages/agcf/AGCF-RT-009/1.0.0.json"
+}

@@ -166,6 +166,17 @@ const FINDING_QUEUES: FindingQueueDefinition[] = [
   },
 ];
 
+function mockFindingsWorkspace() {
+  const listFindings = vi.spyOn(api, 'listFindings').mockResolvedValue(pageOf([buildFinding()]));
+  const summary = vi.spyOn(api, 'getFindingSummary').mockResolvedValue(FINDING_SUMMARY);
+  const distributions = vi.spyOn(api, 'getFindingDistributions').mockResolvedValue(FINDING_DISTRIBUTIONS);
+  const backlog = vi.spyOn(api, 'getFindingBacklogHealth').mockResolvedValue(FINDING_BACKLOG_HEALTH);
+  vi.spyOn(api, 'listFindingQueues').mockResolvedValue(FINDING_QUEUES);
+  vi.spyOn(api, 'listFindingFilters').mockResolvedValue(FILTER_VALUES);
+  vi.spyOn(api, 'getRiskPolicy').mockResolvedValue(RISK_POLICY);
+  return { listFindings, summary, distributions, backlog };
+}
+
 describe('FindingsPage', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -190,8 +201,9 @@ describe('FindingsPage', () => {
 
     await screen.findByText('F-001');
     expect(screen.getByText('CVE-2026-1234')).toBeInTheDocument();
-    expect(screen.getByText(/Last updated/i)).toBeInTheDocument();
-    expect(screen.getByText(/Projection healthy/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Last updated/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Projection healthy/i)).not.toBeInTheDocument();
+    expect(api.getFindingProjectionStatus).not.toHaveBeenCalled();
     // Asset name appears in both the row and the "Top Assets at Risk" widget
     expect(screen.getAllByText('web-prod-01').length).toBeGreaterThan(0);
     expect(screen.getByRole('columnheader', { name: /Finding ID/ })).toBeInTheDocument();
@@ -241,6 +253,51 @@ describe('FindingsPage', () => {
     expect(screen.getByText('Exposure by Severity')).toBeInTheDocument();
     expect(screen.getByText('Findings by Status')).toBeInTheDocument();
     expect(screen.getByText('SLA & Due Date')).toBeInTheDocument();
+  });
+
+  it('keeps queue-level widget totals while a key indicator filters only the list', async () => {
+    const spies = mockFindingsWorkspace();
+
+    renderWithProviders(<FindingsPage />);
+
+    await screen.findByText('F-001');
+    const unassignedCard = screen.getByText('Unassigned remediation').closest('.fpl-kpi-card');
+    expect(unassignedCard).not.toBeNull();
+    fireEvent.click(unassignedCard!);
+
+    await waitFor(() => {
+      expect(spies.listFindings).toHaveBeenCalledWith(expect.objectContaining({
+        status: ['OPEN'],
+        unassignedOnly: true,
+      }));
+    });
+    for (const spy of [spies.summary, spies.distributions, spies.backlog]) {
+      expect(spy.mock.calls.every(([params]) => !params?.unassignedOnly && !params?.dueDateBand)).toBe(true);
+    }
+  });
+
+  it('loads full-dataset groups and applies a clicked group to the findings list', async () => {
+    const { listFindings } = mockFindingsWorkspace();
+    const groups = vi.spyOn(api, 'getFindingGroups').mockResolvedValue([{ key: 'CRITICAL', count: 90 }]);
+
+    renderWithProviders(<FindingsPage />);
+
+    await screen.findByText('F-001');
+    fireEvent.click(screen.getByRole('button', { name: 'None' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Severity' }));
+
+    await waitFor(() => {
+      expect(groups).toHaveBeenCalledWith('severity', expect.objectContaining({ queueKey: expect.any(String) }));
+    });
+    const criticalGroup = await screen.findByRole('button', { name: /CRITICAL.*90/ });
+    fireEvent.click(criticalGroup);
+
+    await waitFor(() => {
+      expect(listFindings).toHaveBeenCalledWith(expect.objectContaining({
+        groupField: 'severity',
+        groupValue: 'CRITICAL',
+      }));
+    });
   });
 
   it('passes the default queueKey through the findings queries', async () => {

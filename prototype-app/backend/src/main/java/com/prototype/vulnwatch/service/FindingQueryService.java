@@ -283,7 +283,11 @@ public class FindingQueryService {
                 finding.getClosedAt(),
                 finding.getClosedBy(),
                 finding.getClosedReason(),
-                finding.getClosedRuleId());
+                finding.getClosedRuleId(),
+                asset == null ? Map.of("displayName", "Unassigned") : Map.of(
+                        "displayName", hasText(asset.getOwnerTeam()) ? asset.getOwnerTeam().trim()
+                                : hasText(asset.getOwnerEmail()) ? asset.getOwnerEmail().trim() : "Unassigned",
+                        "supportGroup", asset.getSupportGroup() == null ? "" : asset.getSupportGroup()));
     }
 
     private Double safeFindingsScore(String scoreConfig, Finding finding) {

@@ -673,6 +673,32 @@
   opacity: 0.6;
 }
 
+.ai-dependency-graph-node--runtime {
+  border-color: color-mix(in srgb, #7c3aed 65%, var(--border));
+  background: linear-gradient(90deg, var(--panel-muted), color-mix(in srgb, #7c3aed 12%, var(--panel-muted)));
+  box-shadow: 0 0 0 2px color-mix(in srgb, #7c3aed 12%, transparent);
+}
+
+.ai-dependency-graph-legend {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  z-index: 4;
+  display: flex;
+  gap: 12px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--panel-solid) 92%, transparent);
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.ai-runtime-graph-controls {
+  align-items: end;
+  margin-bottom: 10px;
+}
+
 .ai-dependency-graph-node-text {
   display: grid;
   overflow: hidden;

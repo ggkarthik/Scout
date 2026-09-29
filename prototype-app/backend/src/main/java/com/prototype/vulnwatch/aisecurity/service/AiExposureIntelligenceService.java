@@ -29,8 +29,8 @@ public class AiExposureIntelligenceService {
             List<ExposurePriority> priorities = prioritiesInternal();
             long systems = count("select count(*) from ai_grid_systems where retired_at is null");
             long assets = count("select count(*) from ai_grid_current_coverage_artifacts");
-            long incomplete = count("select count(*) from ai_security_snapshot_scopes where status in ('PARTIAL','FAILED')");
-            long unsupported = count("select count(*) from ai_security_snapshot_scopes where status = 'UNSUPPORTED'");
+            long incomplete = count("select count(*) from ai_security_snapshot_scopes where status in ('PARTIAL','ERROR')");
+            long unsupported = count("select count(*) from ai_security_snapshot_scopes where status = 'UNSUPPORTED_API'");
             Instant authoritativeAt = jdbc.query("select materialized_at from ai_grid_current_coverage_state",
                     rs -> rs.next() && rs.getTimestamp(1) != null ? rs.getTimestamp(1).toInstant() : null);
             return new Overview(systems, assets, priorities.size(),
@@ -99,13 +99,23 @@ public class AiExposureIntelligenceService {
         return jdbc.query("""
                 select p.id,p.title,p.severity,p.confidence,p.root_cause_artifact_id,p.breakpoint,p.last_observed_at,
                        coalesce(a.owner_name,'UNOWNED'),coalesce(a.provider,'UNKNOWN'),coalesce(a.account_id,'UNKNOWN'),
-                       coalesce(a.business_criticality,''),coalesce(a.attributes_json::text,'{}')
+                       coalesce(a.business_criticality,''),coalesce(a.attributes_json::text,'{}'),
+                       exists(select 1 from ai_grid_host_context_facts h
+                               where h.artifact_id=a.id and h.fact_key like 'activity.%'
+                                 and h.state='KNOWN' and h.valid_until > now()
+                                 and (h.value_json = 'true'::jsonb
+                                      or (h.fact_key='activity.invocation_count_observed'
+                                          and jsonb_typeof(h.value_json)='number'
+                                          and (h.value_json #>> '{}')::numeric > 0)
+                                      or (h.fact_key='activity.agent_last_observed_at'
+                                          and h.value_json <> 'null'::jsonb))) activity_observed
                   from ai_grid_exposure_paths p
                   join ai_security_artifacts a on a.id=p.root_cause_artifact_id
                  where p.status='OPEN' and p.state='VALIDATED_EXPOSURE'
                 """, (rs, n) -> priority(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3),
                 rs.getDouble(4), rs.getObject(5, UUID.class), rs.getString(6), rs.getTimestamp(7).toInstant(),
-                rs.getString(8), rs.getString(9), rs.getString(10), rs.getString(11), rs.getString(12), now))
+                rs.getString(8), rs.getString(9), rs.getString(10), rs.getString(11), rs.getString(12),
+                rs.getBoolean(13), now))
                 .stream().sorted(Comparator.comparingInt(ExposurePriority::priority).reversed()
                         .thenComparing(ExposurePriority::lastObservedAt, Comparator.reverseOrder())).toList();
     }
@@ -130,7 +140,8 @@ public class AiExposureIntelligenceService {
 
     private ExposurePriority priority(UUID id, String title, String severity, double confidence, UUID rootCauseArtifactId,
                                       String breakpoint, Instant lastObservedAt, String owner, String provider,
-                                      String accountId, String criticality, String attributes, Instant now) {
+                                      String accountId, String criticality, String attributes,
+                                      boolean activityObserved, Instant now) {
         int severityPoints = switch (normalized(severity)) {
             case "CRITICAL" -> 35; case "HIGH" -> 27; case "MEDIUM" -> 16; default -> 8;
         };
@@ -141,9 +152,11 @@ public class AiExposureIntelligenceService {
         };
         long ageDays = Math.max(0, Duration.between(lastObservedAt, now).toDays());
         int recencyPoints = ageDays <= 7 ? 10 : ageDays <= 30 ? 6 : 2;
-        int total = severityPoints + confidencePoints + exposurePoints + criticalityPoints + recencyPoints;
+        int activityPoints = activityObserved ? 10 : 0;
+        int total = severityPoints + confidencePoints + exposurePoints + criticalityPoints + recencyPoints
+                + activityPoints;
         return new ExposurePriority(id, title, severity, Math.min(100, total), severityPoints, confidencePoints,
-                exposurePoints, criticalityPoints, recencyPoints, confidence, rootCauseArtifactId, breakpoint,
+                exposurePoints, criticalityPoints, recencyPoints, activityPoints, confidence, rootCauseArtifactId, breakpoint,
                 owner, provider, accountId, lastObservedAt);
     }
 
@@ -158,7 +171,7 @@ public class AiExposureIntelligenceService {
                            List<ExposurePriority> topPriorities, List<ActivityItem> recentActivity) {}
     public record ExposurePriority(UUID id, String title, String severity, int priority, int severityPoints,
                                    int confidencePoints, int publicExposurePoints, int criticalityPoints,
-                                   int recencyPoints, double confidence, UUID rootCauseArtifactId, String breakpoint,
+                                   int recencyPoints, int activityPoints, double confidence, UUID rootCauseArtifactId, String breakpoint,
                                    String owner, String provider, String accountId, Instant lastObservedAt) {}
     public record ActionQueueItem(UUID id, String kind, String title, String severity, int priority, String owner,
                                   String provider, String accountId, String remediation, Double confidence,

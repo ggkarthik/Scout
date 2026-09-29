@@ -90,7 +90,12 @@ export function AiSecurityConnectorPage() {
           {testResult && (
             <div className={`notice ${testResult.success ? 'success' : 'error'}`}>
               <strong>{testResult.message}</strong>
+              {testResult.identity && <p>{testResult.identity.arn}</p>}
               {testResult.missingPermissions.length > 0 && <p>Missing: {testResult.missingPermissions.join(', ')}</p>}
+              {testResult.preflight && (
+                <p>{testResult.preflight.resourceFamilies.filter((family) => family.status === 'COMPLETE').length}
+                  /{testResult.preflight.resourceFamilies.length} family scopes verified · {testResult.preflight.providerApiCalls} provider calls</p>
+              )}
               {!testResult.success && testResult.code && <small>Code: {testResult.code}</small>}
             </div>
           )}

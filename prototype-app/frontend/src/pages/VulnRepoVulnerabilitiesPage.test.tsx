@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cveWorkbenchApi } from '../features/cve-workbench/api';
 import { renderWithProviders } from '../test/test-utils';
@@ -159,5 +159,33 @@ describe('VulnRepoVulnerabilitiesPage', () => {
 
     await screen.findByText('CVE-2026-9999');
     expect(screen.getByText('Reviewed')).toBeInTheDocument();
+  });
+
+  it('shows readable filter properties and labels in the column filter popover', async () => {
+    vi.spyOn(cveWorkbenchApi, 'listVulnRepoVulnerabilities').mockResolvedValue({
+      summary: {
+        reviewQueueCount: 0,
+        applicableCount: 0,
+        impactedCount: 0,
+        underInvestigationCount: 0,
+        resolvedCount: 0,
+      },
+      items: [],
+      page: 0,
+      size: 25,
+      totalItems: 0,
+      totalPages: 0,
+    });
+
+    renderWithProviders(<VulnRepoVulnerabilitiesPage />);
+
+    fireEvent.click(await screen.findByTitle('Filter Severity'));
+
+    expect(screen.getByRole('dialog', { name: 'Column filter options' })).toBeInTheDocument();
+    expect(screen.getByText('Critical')).toBeVisible();
+    expect(screen.getByText('High')).toBeVisible();
+    expect(screen.getByText('Medium')).toBeVisible();
+    expect(screen.getByText('Low')).toBeVisible();
+    expect(screen.getByText('Unknown')).toBeVisible();
   });
 });

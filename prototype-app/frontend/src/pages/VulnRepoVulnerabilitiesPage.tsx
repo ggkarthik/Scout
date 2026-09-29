@@ -179,10 +179,10 @@ function dashboardFilterLabel(key: string, value: string): string {
     return 'Impact: High / Medium / Low';
   }
   if (key === 'hasFindings' && value === 'true') {
-    return 'Open Findings: Yes';
+    return 'Findings: Created';
   }
   if (key === 'hasFindings' && value === 'false') {
-    return 'Open Findings: None';
+    return 'Findings: None';
   }
   return `${formatLabel(key)}: ${value}`;
 }
@@ -290,10 +290,8 @@ export function VulnRepoVulnerabilitiesPage() {
       : (initialIncludeAll || undefined),
     // When applicable column filter is YES, push the filter server-side so pagination is correct
     impactedOnly: initialImpactedOnly || (colFilters.applicable === 'YES') || undefined,
-    // Source filtering is client-side only to avoid the backend switching to a
-    // different query path (vulnerability_intel_summary vs org_cve_records) which
-    // caused the counter-intuitive jump from 876 → 5,427 CVEs when a source pill was clicked.
-    source: undefined,
+    source: sourceFilters.join(',') || undefined,
+    hasFindings: initialHasFindings ? initialHasFindings === 'yes' : undefined,
   }, platformScope);
   const policyQuery = useRiskPolicyQuery();
   const items = React.useMemo(() => vulnRepoQuery.data?.items ?? [], [vulnRepoQuery.data?.items]);
@@ -389,7 +387,7 @@ export function VulnRepoVulnerabilitiesPage() {
       return (
         <div className="fpl-col-filter-checks">
           {options.map((v) => (
-            <label key={v} className="fpl-col-filter-check" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, padding: '13px 16px', fontSize: 14, cursor: 'pointer', color: '#1a1a2e' }}>
+            <label key={v} className="fpl-col-filter-check" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, padding: '13px 16px', fontSize: 14, cursor: 'pointer', color: 'var(--title)' }}>
               <input type="checkbox" checked={selected.includes(v)} onChange={() => toggleColArr(key, v)} style={{ flexShrink: 0 }} />
               {renderLabel(v)}
             </label>
@@ -403,12 +401,12 @@ export function VulnRepoVulnerabilitiesPage() {
       top: filterAnchorPos?.top ?? 100,
       left: filterAnchorPos?.left ?? 200,
       zIndex: 9999,
-      background: '#ffffff',
+      background: 'var(--panel-solid)',
       boxShadow: '0 4px 24px rgba(0,0,0,0.18)',
     };
 
     return ReactDOM.createPortal(
-      <div className="fpl-col-filter-popover" ref={colFilterRef} style={style}>
+      <div className="fpl-col-filter-popover" role="dialog" aria-label="Column filter options" ref={colFilterRef} style={style}>
         {hasColFilter(colKey) && (
           <div className="fpl-col-filter-clear-row">
             <button type="button" className="fpl-col-filter-clear" onClick={() => clearColFilter(colKey)}>Clear filter</button>
@@ -441,7 +439,7 @@ export function VulnRepoVulnerabilitiesPage() {
         {colKey === 'applicable' && (
           <div className="fpl-col-filter-checks">
             {(['YES', 'NO'] as const).map((v) => (
-              <label key={v} className="fpl-col-filter-check" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, padding: '13px 16px', fontSize: 14, cursor: 'pointer', color: '#1a1a2e' }}>
+              <label key={v} className="fpl-col-filter-check" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, padding: '13px 16px', fontSize: 14, cursor: 'pointer', color: 'var(--title)' }}>
                 <input type="radio" name="intel-applicable-filter" style={{ flexShrink: 0 }}
                   checked={colFilters.applicable === v}
                   onChange={() => { setColFilters((f) => ({ ...f, applicable: f.applicable === v ? '' : v })); setPage(0); }} />
@@ -461,7 +459,7 @@ export function VulnRepoVulnerabilitiesPage() {
         {colKey === 'openFindings' && (
           <div className="fpl-col-filter-checks">
             {(['yes', 'no'] as const).map((v) => (
-              <label key={v} className="fpl-col-filter-check" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, padding: '13px 16px', fontSize: 14, cursor: 'pointer', color: '#1a1a2e' }}>
+              <label key={v} className="fpl-col-filter-check" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, padding: '13px 16px', fontSize: 14, cursor: 'pointer', color: 'var(--title)' }}>
                 <input type="radio" name="intel-openfindings-filter" style={{ flexShrink: 0 }}
                   checked={colFilters.openFindings === v}
                   onChange={() => { setColFilters((f) => ({ ...f, openFindings: f.openFindings === v ? '' : v })); setPage(0); }} />
@@ -473,7 +471,7 @@ export function VulnRepoVulnerabilitiesPage() {
         {colKey === 'hasAiSummary' && (
           <div className="fpl-col-filter-checks">
             {(['yes', 'no'] as const).map((v) => (
-              <label key={v} className="fpl-col-filter-check" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, padding: '13px 16px', fontSize: 14, cursor: 'pointer', color: '#1a1a2e' }}>
+              <label key={v} className="fpl-col-filter-check" style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 12, padding: '13px 16px', fontSize: 14, cursor: 'pointer', color: 'var(--title)' }}>
                 <input type="radio" name="intel-aisum-filter" style={{ flexShrink: 0 }}
                   checked={colFilters.hasAiSummary === v}
                   onChange={() => { setColFilters((f) => ({ ...f, hasAiSummary: f.hasAiSummary === v ? '' : v })); setPage(0); }} />
@@ -499,12 +497,6 @@ export function VulnRepoVulnerabilitiesPage() {
       }
       // Guard: applicable filter is server-side but add client-side guard for items that slip through
       if (initialApplicable && !isApplicableByInventory(item)) {
-        return false;
-      }
-      if (initialHasFindings === 'yes' && item.openFindings === 0) {
-        return false;
-      }
-      if (initialHasFindings === 'no' && item.openFindings > 0) {
         return false;
       }
       // Column-level filters
@@ -546,17 +538,9 @@ export function VulnRepoVulnerabilitiesPage() {
         const hasSummary = item.hasInvestigationSummary || getLocalSummaryMode(item.externalId) !== null || item.hasAiSolution;
         if (hasSummary) return false;
       }
-      if (sourceFilters.length > 0) {
-        const itemSources = (item.sources ?? []).map((s) => s.toLowerCase());
-        const matchesSource = sourceFilters.some((sf) => {
-          const lower = sf.toLowerCase();
-          return itemSources.includes(lower) || (lower === 'kev' && item.inKev);
-        });
-        if (!matchesSource) return false;
-      }
       return true;
     })
-  ), [items, severityFilters, statusFilters, initialApplicable, initialHasFindings, colFilters, policyQuery.data, sourceFilters]);
+  ), [items, severityFilters, statusFilters, initialApplicable, colFilters, policyQuery.data]);
 
   const writeFilterParams = React.useCallback((updates: {
     severity?: string[];

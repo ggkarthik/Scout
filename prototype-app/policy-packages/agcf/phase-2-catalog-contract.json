@@ -2,6 +2,35 @@
   "release": "AGCF_PHASE_2",
   "catalogVersion": 1,
   "technicalVersion": "1.0.0",
+  "certificationWave": {
+    "id": "PHASE2_EVIDENCE_CERTIFICATION_1",
+    "description": "Evidence-backed priority policies eligible for certification. Eligibility does not publish or enable a policy.",
+    "policyIds": [
+      "AGCF-AWS-039",
+      "AGCF-AWS-040",
+      "AGCF-AWS-041",
+      "AGCF-AWS-042",
+      "AGCF-AZR-033",
+      "AGCF-AZR-034",
+      "AGCF-AZR-035",
+      "AGCF-AZR-036",
+      "AGCF-AZR-037",
+      "AGCF-AZR-038",
+      "AGCF-AZR-039",
+      "AGCF-AWS-048",
+      "AGCF-AWS-049",
+      "AGCF-AWS-050",
+      "AGCF-AWS-071",
+      "AGCF-AWS-072"
+    ],
+    "requiredGates": [
+      "ANSWER_KEY",
+      "PRECISION_REVIEW",
+      "INDEPENDENT_MAPPING_REVIEW",
+      "APPROVAL",
+      "CANARY_ROLLOUT"
+    ]
+  },
   "newPolicyRanges": [
     {
       "provider": "AWS",

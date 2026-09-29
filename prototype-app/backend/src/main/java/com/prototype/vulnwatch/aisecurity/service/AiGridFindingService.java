@@ -91,7 +91,8 @@ public class AiGridFindingService {
     private boolean openOrUpdate(Tenant tenant, AssessmentResult assessment) {
         Instant observedAt = Instant.now();
         double risk = risk(assessment.severity());
-        String owner = authoritativeOwner(assessment.subjectId());
+        String owner = "ARTIFACT".equals(assessment.subjectType())
+                ? authoritativeOwner(assessment.subjectId()) : null;
         String evidence = json(Map.of("assessmentId", assessment.assessmentId(),
                 "runId", assessment.runId(), "policyId", assessment.policyId(),
                 "policyVersion", assessment.policyVersion(), "facts", assessment.inputFacts()));
@@ -99,9 +100,10 @@ public class AiGridFindingService {
         if (finding == null) {
             finding = new Finding();
             finding.setTenant(tenant);
-            finding.setFindingKind("AI_POSTURE");
+            finding.setFindingKind("EXECUTION".equals(assessment.subjectType()) ? "AI_RUNTIME" : "AI_POSTURE");
             finding.setFingerprint(assessment.fingerprint());
-            finding.setWorkflowClass("POSTURE_FINDING");
+            finding.setWorkflowClass("EXECUTION".equals(assessment.subjectType())
+                    ? "RUNTIME_FINDING" : "POSTURE_FINDING");
             finding.setStatus(FindingStatus.OPEN);
             finding.setDecisionState(FindingDecisionState.AFFECTED);
             finding.setCreationSource(FindingCreationSource.AI_SECURITY);
@@ -131,7 +133,7 @@ public class AiGridFindingService {
             finding.touch();
             finding = findings.save(finding);
         }
-        linkSubject(tenant, finding.getId(), assessment.subjectId());
+        linkSubject(tenant, finding.getId(), assessment.subjectType(), assessment.subjectId());
         return true;
     }
 
@@ -201,13 +203,13 @@ public class AiGridFindingService {
         return sla.deriveDueAt(observedAt, risk, null, policy);
     }
 
-    private void linkSubject(Tenant tenant, UUID findingId, UUID subjectId) {
+    private void linkSubject(Tenant tenant, UUID findingId, String subjectType, UUID subjectId) {
         jdbc.update("""
                 insert into finding_subjects (id, tenant_id, finding_id, subject_type, subject_id, subject_role)
-                values (:id, :tenantId, :findingId, 'ARTIFACT', :subjectId, 'PRIMARY')
+                values (:id, :tenantId, :findingId, :subjectType, :subjectId, 'PRIMARY')
                 on conflict do nothing
                 """, new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("tenantId", tenant.getId())
-                .addValue("findingId", findingId).addValue("subjectId", subjectId));
+                .addValue("findingId", findingId).addValue("subjectType", subjectType).addValue("subjectId", subjectId));
     }
 
     private String authoritativeOwner(UUID artifactId) {
@@ -235,5 +237,31 @@ public class AiGridFindingService {
     public record AssessmentResult(UUID assessmentId, UUID runId, String policyId, String policyVersion,
                                    String title, String severity, String selection, String decision,
                                    String reasonCode, UUID subjectId, String fingerprint,
-                                   Map<String, Object> inputFacts) {}
+                                   Map<String, Object> inputFacts, String subjectType) {
+        public AssessmentResult(UUID assessmentId, UUID runId, String policyId, String policyVersion,
+                                String title, String severity, String selection, String decision,
+                                String reasonCode, UUID subjectId, String fingerprint,
+                                Map<String, Object> inputFacts) {
+            this(assessmentId, runId, policyId, policyVersion, title, severity, selection, decision,
+                    reasonCode, subjectId, fingerprint, inputFacts, "ARTIFACT");
+        }
+        @com.fasterxml.jackson.annotation.JsonProperty("assessmentState")
+        public String assessmentState() {
+            return deriveAssessmentState(decision, reasonCode);
+        }
+
+        public static String deriveAssessmentState(String decision, String reasonCode) {
+            if ("PASS".equals(decision) || "FAIL".equals(decision)) return decision;
+            if ("ERROR".equals(decision)) return "UNKNOWN";
+            if ("NO_DECISION".equals(decision)) {
+                return switch (reasonCode == null ? "" : reasonCode) {
+                    case "OUT_OF_SCOPE", "CAPABILITY_UNAVAILABLE", "DECISION_SCOPE_UNSUPPORTED",
+                            "POLICY_PAUSED_PENDING_EVIDENCE" -> "NOT_ASSESSED";
+                    default -> "UNKNOWN";
+                };
+            }
+            if ("NOT_APPLICABLE".equals(decision)) return "NOT_ASSESSED";
+            return "UNKNOWN";
+        }
+    }
 }

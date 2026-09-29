@@ -156,7 +156,6 @@ class ProductionBootstrapCliPostgresIntegrationTest {
             clear("APP_SECURITY_BOOTSTRAP_PLATFORM_OWNERS_USERS_0_EMAIL");
             clear("APP_SECURITY_BOOTSTRAP_PLATFORM_OWNERS_USERS_0_DISPLAY_NAME");
             clear("BOOTSTRAP_REPORT_ONLY");
-            clear("BOOTSTRAP_REPAIR_TENANT_V45_CHECKSUM");
         }
     }
 
