@@ -473,6 +473,68 @@ export type BomDetail = BomInventoryItem & {
   components: BomComponent[];
 };
 
+/** A declared AI-BOM resource (model or dataset) and its deployment-linking state. */
+export type AiBomDeclaredResource = {
+  id: string;
+  sourceId: string;
+  bomId: string;
+  bomComponentId: string | null;
+  resourceKind: 'MODEL' | 'DATASET';
+  name: string;
+  version: string | null;
+  identityKind: 'DIGEST' | 'VERSIONED_IDENTIFIER' | 'SOURCE_SCOPED_REF';
+  identityValue: string;
+  deploymentState: 'UNVERIFIED' | 'LINKED' | 'AMBIGUOUS';
+  linkedArtifactId: string | null;
+  linkMethod: 'DIGEST_MATCH' | 'VERSIONED_IDENTIFIER_MATCH' | 'REVIEWED' | null;
+  linkReviewedBy: string | null;
+  linkReviewedAt: string | null;
+  proposedArtifactId: string | null;
+  proposedBy: string | null;
+  proposedAt: string | null;
+  firstDeclaredAt: string;
+  lastDeclaredAt: string;
+};
+
+export type AiBomDeclaredResourceDetail = {
+  resource: AiBomDeclaredResource;
+  sourceBomType: string | null;
+  sourceState: string | null;
+  sourceRevision: number;
+  /** false = a later BOM replacement was ingested without re-declaring this resource. */
+  currentInLatestRevision: boolean;
+  component: {
+    componentId: string;
+    name: string;
+    version: string | null;
+    purl: string | null;
+    license: string | null;
+    scope: string | null;
+    componentType: string | null;
+  } | null;
+  completeness: {
+    completeness: string | null;
+    assertedBy: string | null;
+    assertedAt: string | null;
+  } | null;
+  projection: {
+    provenanceProjected: boolean;
+    provenanceProjectedAt: string | null;
+    bomFormat: string | null;
+    specVersion: string | null;
+    latestReceiptOperation: string | null;
+    latestReceiptCompletedAt: string | null;
+  };
+};
+
+export type BomSetupAction = {
+  category: string;
+  priority: string;
+  title: string;
+  detail: string;
+  evidenceId: string;
+};
+
 export type VulnIntelSourceStatus = {
   status: 'completed' | 'failed' | 'running' | 'never';
   completedAt?: string;
@@ -949,6 +1011,9 @@ function buildFindingsSearchParams(params?: FindingsFilterModel): URLSearchParam
   if (params?.patchAvailable != null) searchParams.set('patchAvailable', String(params.patchAvailable));
   if (params?.suppressedUntilBand) searchParams.set('suppressedUntilBand', params.suppressedUntilBand);
   params?.assetType?.forEach((value) => searchParams.append('assetType', value));
+  params?.findingKind?.forEach((value) => searchParams.append('findingKind', value));
+  params?.affectedAiResourceId?.forEach((value) => searchParams.append('affectedAiResourceId', value));
+  if (params?.hasAffectedAiResource != null) searchParams.set('hasAffectedAiResource', String(params.hasAffectedAiResource));
   return searchParams;
 }
 
@@ -2171,6 +2236,28 @@ export const api = {
     request<BomLineageItem[]>(`/bom/inventory/${encodeURIComponent(bomId)}/lineage`),
   deleteBom: (bomId: string) =>
     request<void>(`/bom/inventory/${encodeURIComponent(bomId)}`, { method: 'DELETE' }),
+  listAiBomDeclaredResources: (deploymentState?: 'UNVERIFIED' | 'LINKED' | 'AMBIGUOUS') =>
+    request<AiBomDeclaredResource[]>(
+      `/bom/declared-resources${deploymentState ? `?deploymentState=${deploymentState}` : ''}`),
+  listAiBomSetupActions: () =>
+    request<BomSetupAction[]>('/bom/declared-resources/setup-actions'),
+  getAiBomDeclaredResource: (resourceId: string) =>
+    request<AiBomDeclaredResourceDetail>(`/bom/declared-resources/${encodeURIComponent(resourceId)}`),
+  getAiBomDeclaredResourceFindings: (resourceId: string) =>
+    request<Finding[]>(`/bom/declared-resources/${encodeURIComponent(resourceId)}/findings`),
+  proposeAiBomMapping: (resourceId: string, artifactId: string) =>
+    request<AiBomDeclaredResource>(`/bom/declared-resources/${encodeURIComponent(resourceId)}/mapping/propose`, {
+      method: 'POST',
+      body: JSON.stringify({ artifactId }),
+    }),
+  approveAiBomMapping: (resourceId: string) =>
+    request<AiBomDeclaredResource>(`/bom/declared-resources/${encodeURIComponent(resourceId)}/mapping/approve`, {
+      method: 'POST',
+    }),
+  removeAiBomMapping: (resourceId: string) =>
+    request<AiBomDeclaredResource>(`/bom/declared-resources/${encodeURIComponent(resourceId)}/mapping/remove`, {
+      method: 'POST',
+    }),
   listCbomPosture: () =>
     request<CbomPostureSummary[]>('/bom/cbom/posture'),
   getCbomPosture: (assetId: string) =>

@@ -1,8 +1,8 @@
 # VulnWatch Database
 
-Last updated: 2026-09-24
+Last updated: 2026-09-29
 
-The runtime database is PostgreSQL, with two independent Flyway lines. `postgres_reset/V1__platform_schema.sql` and `tenant/V1__tenant_schema.sql` are the reset baselines; the current heads are platform and tenant `V3__ai_grid_runtime_policy_contract.sql`. Tenant migrations are applied once per tenant schema by `TenantSchemaMigrationService` / `ProductionBootstrapCli`.
+The runtime database is PostgreSQL, with two independent Flyway lines. `postgres_reset/V1__platform_schema.sql` and `tenant/V1__tenant_schema.sql` are the reset baselines; the current heads are platform `postgres_reset/V5__ai_bom_provenance_fact.sql` and tenant `tenant/V11__ai_bom_resource_mapping_review.sql`. The AI Security/AI Grid module's own migrations stop at platform/tenant V3 (see "AI Security / AI Grid Tables" below), with platform V4 a separate AI Grid Phase 2 file also unrelated to AI-BOM; only platform V5 and tenant V4-V11 are the AI-BOM → AI Grid integration (see "AI-BOM Common Lifecycle" and "AI-BOM Declared Resources" below). Tenant migrations are applied once per tenant schema by `TenantSchemaMigrationService` / `ProductionBootstrapCli`.
 
 ---
 
@@ -11,7 +11,7 @@ The runtime database is PostgreSQL, with two independent Flyway lines. `postgres
 - **Database name (local):** `vulnwatch`
 - **JDBC URL default:** `jdbc:postgresql://localhost:5432/vulnwatch`
 - **Migration directories:** `backend/src/main/resources/db/migration/postgres_reset/` (platform/`public` schema) and `backend/src/main/resources/db/migration/tenant/` (per-tenant schema, applied by the tenant schema control plane, not by the application's own startup Flyway run)
-- **Flyway baselines:** `postgres_reset/V1__platform_schema.sql` and `tenant/V1__tenant_schema.sql`; both lines currently have append-only V2 migrations
+- **Flyway baselines:** `postgres_reset/V1__platform_schema.sql` and `tenant/V1__tenant_schema.sql`; both lines currently have append-only migrations through platform V5 / tenant V11
 - **Replay rule:** the V1 reset baselines use defensive creation patterns for the documented bootstrap repair path; post-baseline migrations are Flyway-managed and must not be replayed manually
 - **`ddl-auto`:** `none` (Flyway owns all DDL; Hibernate never creates or alters tables)
 
@@ -166,7 +166,7 @@ Unique: `(tenant_id, entitlement_key)`. Index: `(tenant_id)`.
 
 ### `platform.tenant_schema_versions`
 
-Operational projection of each tenant's per-schema Flyway state, populated by `TenantSchemaMigrationService` / `ProductionBootstrapCli`. The `tenant` migration line's own `<schema>.tenant_schema_history` table (one per tenant schema) remains the authoritative Flyway record; this table is a queryable rollup across all tenants for the platform console and the readiness health indicator. The packaged target is currently `3`; the configured minimum-compatible version remains `1` as a separate rollout/readiness floor.
+Operational projection of each tenant's per-schema Flyway state, populated by `TenantSchemaMigrationService` / `ProductionBootstrapCli`. The `tenant` migration line's own `<schema>.tenant_schema_history` table (one per tenant schema) remains the authoritative Flyway record; this table is a queryable rollup across all tenants for the platform console and the readiness health indicator. The packaged target is currently `11`; the configured minimum-compatible version remains `1` as a separate rollout/readiness floor.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -710,6 +710,8 @@ Analyst-visible finding records. One row per `(component, vulnerability)` pair t
 
 Unique: `(component_id, vulnerability_id)`. Indexes: `idx_findings_tenant_status_updated`, `idx_findings_tenant_component_vuln`, `idx_findings_asset_id`, `idx_findings_vulnerability_id`, `idx_findings_vulnerability_status`.
 
+**`finding_kind`** (tenant `V5__finding_kind_projection.sql`, not shown above): `varchar`, defaulted/backfilled to `VULNERABILITY`, also `AI_POSTURE`/`AI_EXPOSURE`/`AI_RUNTIME` for the AI Security/AI Grid pipeline (see below). The uniqueness above is really `uk_findings_component_vulnerability` — one finding per resolved component/vulnerability pair regardless of how many documents or declared AI resources reference it. `finding_subjects` (added `V48`, see "AI Security / AI Grid Tables") gained a third `subject_type='AI_RESOURCE'`/`subject_role='AFFECTED_AI_RESOURCE'` combination with Milestone 3 part 5.1 — no migration needed, since `finding_subjects` carries no check constraint on those columns — recording that a `VULNERABILITY` finding transitively affects a declared AI-BOM resource. See "AI-BOM Declared Resources" below for the `ai_bom_resource_vulnerability_links` table that also records this, and `docs/business-logic-guide.md` for `FindingsFilter.findingKind`/`affectedAiResourceId`/`hasAffectedAiResource`.
+
 ---
 
 ### `finding_list_projection` / `finding_workspace_projection_status`
@@ -1093,7 +1095,7 @@ Backs `CampaignController` (`/api/campaigns`) and the `/vuln-repo/campaigns` fro
 
 ### BOM / CBOM
 
-Backs `BomController` (`/api/bom`) and `CbomController` (`/api/bom/cbom`). Not covered in earlier drafts of this doc.
+Backs `BomController` (`/api/bom`) and `CbomController` (`/api/bom/cbom`). These are the original per-document tables from before the AI-BOM → AI Grid integration; see "BOM Common Lifecycle" and "AI-BOM Declared Resources" immediately below for the source/completeness/contribution/declared-resource tables that integration added on top of them.
 
 **`bom_ingestion_records`** — one row per ingested BOM document. Key fields: `tenant_id`, `sbom_upload_id`/`asset_id` (optional links), `bom_type` (SBOM/CBOM/HBOM), `format`/`format_version`/`spec_family`, `serial_number`, `supplier`, `source_type` (URL/UPLOAD/API)/`source_system`/`source_reference`, `component_count`, `status` (ACTIVE/SUPERSEDED/ARCHIVED), `superseded_by`/`previous_bom_id` (self-referencing), `checksum_sha256`, `ingested_at`/`ingested_by`. Indexes on `(tenant_id, bom_type, status)`, `(tenant_id, ingested_at DESC)`, `(tenant_id, source_system)`.
 
@@ -1104,6 +1106,42 @@ Backs `BomController` (`/api/bom`) and `CbomController` (`/api/bom/cbom`). Not c
 **`bom_component_vulnerability_links`** — matches a BOM component to a known vulnerability. Fields: `bom_component_id`/`bom_id` (FK, cascade), `vulnerability_key` (CVE/GHSA ID), `vulnerability_source`, `relation_type`, `match_source`, `match_confidence` (0–100), `direct_match`, `correlation_evidence_json`.
 
 **`bom_component_workflows`** — remediation/investigation workflow per component-vulnerability pair. Fields: `bom_component_id`/`vulnerability_link_id` (FK, cascade), `workflow_type` (INVESTIGATION/REMEDIATION), `workflow_status` (DISCOVERED/IN_PROGRESS/RESOLVED/REJECTED), `workflow_reason`, `investigation_key`, `finding_id`, `started_at`/`updated_at`/`closed_at`.
+
+---
+
+### BOM Common Lifecycle (tenant `V4`, `V6`)
+
+Shared infrastructure introduced for the AI-BOM → AI Grid integration (Milestone 1) that SBOM, AI-BOM, vendor-BOM, and CBOM ingestion all now go through — a stable logical source, an auditable completeness assertion, and a source-scoped contribution ledger, none of which existed before this work (a document upload used to replace-by-inference on asset+supplier alone, with no way to withdraw one source's support without looking like the component had vanished).
+
+**`bom_sources`** (`V4`) — a stable logical source that outlives any individual document version. Fields: `tenant_id`, `bom_type`, `asset_id` (nullable until resolved), `supplier`, `source_reference`, `source_key` (deterministic identity for scheduled/automated callers, so a re-run replaces its own source rather than accumulating one per run; null for manual uploads), `current_bom_id`, `revision` (monotonic per source; keys Milestone 2 projection work so obsolete work can be discarded rather than reprocessed), `completeness` (`PARTIAL` default / `COMPLETE_ASSET_SOFTWARE`), `state` (`ACTIVE` / `HELD_ENTITLEMENT` / `DEFERRED` — see "AI-BOM Declared Resources" below for the latter two). Indexes on `(tenant_id, asset_id, bom_type)` and `(tenant_id, state)`.
+
+**`bom_source_completeness_assertions`** — append-only record of a completeness claim: `source_id`, `bom_id` (the document version the assertion accompanied), `completeness`, `asset_scope_json`, `asserted_by`, `asserted_at`. Asserting `COMPLETE_ASSET_SOFTWARE` is what later authorizes retiring a component on replacement; every replacement must repeat the assertion rather than inheriting the previous one. Authorization-gated at the API layer, not the schema.
+
+**`bom_component_contributions`** — one row per (source, inventory component) standing claim of presence; this is the mapping the pipeline previously discarded entirely (a BOM-to-inventory match was recomputed at ingest and never stored). Fields: `source_id`, `bom_id`, `bom_component_id` (nullable for backfilled rows that reconstruct the link without identifying the original BOM component), `inventory_component_id`, `resolved_identity_key`, `contribution_state` (`SUPPORTED` default / `WITHDRAWN` / conflict states — see `BomContributionState`), `authoritative_absence` (boolean; set only when a replacement under an asserted complete scope omitted the component — the sole path to component retirement), `first_contributed_at`/`last_contributed_at`, `withdrawn_at`. Unique on `(tenant_id, source_id, inventory_component_id)`. Indexes support "every claim standing against a component" (`(tenant_id, inventory_component_id, contribution_state)`) and "every claim a source carries" (`(tenant_id, source_id, contribution_state)`) lookups.
+
+**`bom_asset_backfill_state`** — per-asset migration gate: `state` (`PENDING` / `BACKFILLED` / `FAILED`), `attempt_count`, `backfilled_at`, `failure_message`. Until an asset is `BACKFILLED`, its components are treated as `LEGACY_UNKNOWN` evidence state and no absence may be inferred from missing contribution rows — the guard ships in the same migration as the schema it protects so it can never lag behind.
+
+**`bom_component_relationships`** (`V6`) — the dependency/composition edges a BOM document declares between its own components, recorded verbatim and deliberately *not* interpreted (a CycloneDX `dependsOn` edge states one component depends on another; it does not state a model was trained on a dataset or a dataset is served at inference time — inferring that would manufacture a provenance claim the document never made). Fields: `bom_id`, `source_ref`/`target_ref` (bom-ref strings as they appear in the document — kept as text rather than resolved to component ids, since a document may reference a ref it never defines and dropping those edges would silently lose declared structure), `source_component_id`/`target_component_id` (resolved when possible), `relationship_type` (`DEPENDS_ON` / `COMPOSED_OF`). Unique on `(tenant_id, bom_id, source_ref, target_ref, relationship_type)`. This is what Milestone 3 part 5.1's transitive-dependency correlation (below) walks.
+
+---
+
+### AI-BOM Declared Resources (tenant `V7`–`V11`, platform `V5`)
+
+The models and datasets an uploaded AI-BOM declares, kept deliberately separate from `ai_security_artifacts` (a connector-observed cloud resource) — a declaration is not a deployment, and the AI Grid policy-assessment pipeline must never evaluate a document's claim as though it were observed provider configuration. Backs `AiBomDeclaredResourceController` (`/api/bom/declared-resources`) and the `/inventory/ai/declared-resources[/:resourceId]` frontend pages.
+
+**`ai_bom_declared_resources`** (`V7`, widened `V11`) — one row per declared model/dataset. Fields: `source_id` (FK `bom_sources`, cascade), `bom_id`/`bom_component_id` (the document version and BOM component that last declared it), `resource_kind` (`MODEL` / `DATASET`), `name`, `version`, `identity_kind` (`DIGEST` / `VERSIONED_IDENTIFIER` / `SOURCE_SCOPED_REF`, descending trustworthiness — a display name is never an identity, since two unrelated models are routinely both called "classifier"), `identity_value`, `deployment_state` (`UNVERIFIED` default / `LINKED` / `AMBIGUOUS`), `linked_artifact_id` (FK `ai_security_artifacts`, `ON DELETE SET NULL`), `link_method` (`DIGEST_MATCH` / `VERSIONED_IDENTIFIER_MATCH` / `REVIEWED`), `link_reviewed_by`/`link_reviewed_at`, `proposed_artifact_id`/`proposed_by`/`proposed_at` (`V11` — a reviewer's not-yet-confirmed candidate mapping, kept separate from the `linked_*` columns because those require `deployment_state='LINKED'`), `attributes_json`. Unique on `(tenant_id, source_id, identity_value)` — the same model declared by two sources stays two declarations until something actually establishes equivalence. Check constraints enforce: `LINKED` requires both `linked_artifact_id` and `link_method` non-null (and vice versa, so a link is always explainable); `link_method='REVIEWED'` requires `link_reviewed_by` (an automatic match must not claim a reviewer); the `V11` proposal columns are all-or-nothing together. A partial index on `deployment_state <> 'LINKED'` drives the unlinked/ambiguous coverage queue.
+
+Automatic linking (`AiBomDeploymentLinkingService`) only matches `MODEL` resources identified by `VERSIONED_IDENTIFIER` against `ai_security_artifacts` by name (+ version when the candidate exposes one); two same-named candidates with no matching version become `AMBIGUOUS` rather than a guess. `DIGEST`-identified and `DATASET` resources, and any `SOURCE_SCOPED_REF` resource, have no automatic match path — only the reviewed propose/approve workflow (`AiBomResourceMappingService`) can link them. Propose (role `SECURITY_ANALYST`+) stages `proposed_artifact_id` after checking the artifact exists for the tenant; approve (role `INVENTORY_ADMIN`/`TENANT_ADMIN`/`CREATOR` — narrower than propose) promotes it to `linked_artifact_id`/`link_method='REVIEWED'`/`link_reviewed_by`; remove clears everything back to `UNVERIFIED`. Each mutation is a `@SensitiveTenantAction` with an explicit `audit_events` row.
+
+**`ai_bom_resource_vulnerability_links`** (`V10`) — bridges a declared resource to the canonical `VULNERABILITY` finding of a real software component it transitively depends on (Milestone 3 part 5.1). Fields: `declared_resource_id`, `finding_id`, `via_component_id`, `correlation_method` (currently only `TRANSITIVE_DEPENDENCY`), `detected_at`. Written by `AiBomResourceVulnerabilityCorrelationService.reconcileAllForTenant`, walking `bom_component_relationships` `DEPENDS_ON` edges to a real `inventory_components` row and its open finding — never the component assessment path's own writer of applicability, only a reference to it. Each link also gets a mirrored `finding_subjects` row (`subject_type='AI_RESOURCE'`, `subject_role='AFFECTED_AI_RESOURCE'`) so a finding can report which declared resources it affects without a schema change to `finding_subjects` itself. Deliberately excluded: a model/dataset's own identity matching a CVE directly — models/datasets never get an `inventory_component_id` (by M1 design), so `bom_component_vulnerability_links` (pre-M3) already covers that case without needing a `Finding` bridge.
+
+**`ai_bom_provenance_facts`** (`V8`) — durable storage for the `provenance.ai_bom_present` fact (registered in the platform fact catalog by `postgres_reset/V5`), deliberately not `ai_grid_facts` (that table requires a connector-observed artifact/snapshot/run, which a BOM-only asset never has). Fields: `asset_id`, `source_id`, `bom_id` (the document version that produced the projection), `fact_key` (default `provenance.ai_bom_present`), `value_boolean`, `evidence_class` (default `BOM_DOCUMENT`, distinct from provider-configuration evidence classes — a document assertion must not satisfy a policy meaning to require observed configuration), `bom_format`, `spec_version`, `document_ingested_at`, `projected_at`, `projection_version`. Unique on `(tenant_id, asset_id, fact_key)`. The platform-side fact definition (`postgres_reset/V5__ai_bom_provenance_fact.sql`) registers `provenance.ai_bom_present` with `allowed_workflow_uses_json=["COVERAGE_CONTEXT"]` and deliberately *not* `POSTURE_FINDING` — a document's existence is not a posture claim, and allowing it as a finding input would enable the BOM coverage policies that are meant to stay disabled (see `business-logic-guide.md`).
+
+**`ai_bom_projection_receipts`** (`V8`) — durable completed-work receipt, since a job's queued/running dedupe only prevents duplicate *queued* work; a receipt is what stops a redelivered or re-claimed job from projecting the same source revision twice after the real work already finished. Fields: `source_id`, `source_revision`, `operation`, `projection_version`, `completed_at`. Unique on `(tenant_id, source_id, source_revision, operation, projection_version)`.
+
+**`ai_bom_projection_admissions`** (`V9`) — daily admission budget for AI-BOM projection, deliberately not `ai_grid_budget_admissions` (that table is keyed by a connector `run_id` and tracks cadence rules for recurring scheduled scans, neither of which apply to a document-upload-triggered job — a different provider label alone would not isolate the budgets from each other). Fields: `tenant_id`, `admission_date` (composite PK), `admitted_count`, `throttled_count`, `updated_at`. Default daily limit is 100 (`app.ai-bom.projection.daily-admission-limit`), excluded from connector scan-count usage. `AiBomProjectionSchedulingService` additionally caps queued/running jobs at 100 per tenant (`app.ai-bom.projection.max-queued-per-tenant`) and coalesces overflow as durable per-source dirty state, surfaced as a `DEFERRED` `bom_sources.state` rather than dropped.
+
+Non-entitled tenants keep ordinary BOM ingestion and vulnerability processing; their sources are marked `HELD_ENTITLEMENT` instead of enqueuing a job per upload, and on entitlement grant each held source's latest revision is scheduled through the bounded queue.
 
 ---
 
@@ -1144,7 +1182,7 @@ Backs the `com.prototype.vulnwatch.aisecurity` module (19 controllers, 63 servic
 
 **A note on the version numbers below:** a one-time migration-history reset consolidated the prior numbered history into `postgres_reset/V1__platform_schema.sql` and `tenant/V1__tenant_schema.sql` (see "Tenant Schema Control Plane" further down). Historical `V<n>` citations describe pre-reset provenance; current post-reset V2 additions are called out explicitly.
 
-Current heads are platform `postgres_reset/V3` and tenant `tenant/V3`, both pinned by `MigrationCatalogTest`. V2-to-V3 is the production upgrade gate; V1-to-V3 is the clean-install gate.
+This module's own migration provenance stops at platform `postgres_reset/V3` and tenant `tenant/V3` — V2-to-V3 was its production upgrade gate, V1-to-V3 its clean-install gate. Both lines have since moved further (platform to `V5`, tenant to `V11`) for the unrelated AI-BOM → AI Grid integration; see "AI-BOM Common Lifecycle" and "AI-BOM Declared Resources" below, and `MigrationCatalogTest`, which pins the packaged targets at `(5, 11)`.
 
 ### Tenant schema tables (pre-reset provenance: `V45`–`V64`)
 
@@ -1176,7 +1214,7 @@ Governance-only — no tenant data. `platform.ai_grid_policy_distribution` (`V67
 
 ### Known anomalies
 
-Both anomalies previously logged here (a pre-reset platform-only file missing its guard comment, and a `target_version`/actual-latest-file mismatch between `61` and `V64`) were artifacts of the pre-reset numbered migration line and no longer apply. Both current V3 files carry their required migration guards, and `PackagedMigrationCatalog` resolves both lines to version `3`.
+Both anomalies previously logged here (a pre-reset platform-only file missing its guard comment, and a `target_version`/actual-latest-file mismatch between `61` and `V64`) were artifacts of the pre-reset numbered migration line and no longer apply. All current head files carry their required migration guards, and `PackagedMigrationCatalog` resolves the platform line to version `5` and the tenant line to version `11` (`MigrationCatalogTest`).
 
 `app.tenancy.minimum-compatible-schema-version` defaults to `1`; it is a compatibility floor during the V2 rollout, not the packaged target.
 
@@ -1211,15 +1249,15 @@ There are **two independent Flyway migration lines**, never applied by the same 
 | Line | Location | Applies to | History table | Notes |
 |---|---|---|---|---|
 | Platform/reset | `postgres_reset/` | `public` schema only (plus the `tenant_default` template, which lives under `public` for baselining purposes) | `public.flyway_schema_history` | Each file must open with a `-- migration-guard: platform-only` comment; `PostgresResetMigrationGuardTest` enforces this so tenant-schema DDL can't leak into the shared line by accident. |
-| Tenant | `tenant/` | Every tenant schema (`tenant_default` and each `tenant_<id>`), one Flyway run per schema | `<schema>.tenant_schema_history` | Each file begins `-- migration-guard: tenant-only`; tenant V1 is the reset baseline, and later files, currently through V3, may use `${tenantId}` / `${tenantSchema}` placeholders. |
+| Tenant | `tenant/` | Every tenant schema (`tenant_default` and each `tenant_<id>`), one Flyway run per schema | `<schema>.tenant_schema_history` | Each file begins `-- migration-guard: tenant-only`; tenant V1 is the reset baseline, and later files, currently through V11, may use `${tenantId}` / `${tenantSchema}` placeholders. |
 
-Current latest: `postgres_reset/V3__ai_grid_runtime_policy_contract.sql` and `tenant/V3__ai_grid_runtime_policy_contract.sql`.
+Current latest: `postgres_reset/V5__ai_bom_provenance_fact.sql` and `tenant/V11__ai_bom_resource_mapping_review.sql`.
 
 **Rollout mechanics** (`TenantSchemaMigrationService.migrateAll()`, mirrored by `ProductionBootstrapCli` for the standalone production bootstrap path):
 1. Hold a Postgres advisory lock (`scout-tenant-schema-migrator` / `scout-production-bootstrap`, 30s timeout) so only one migration run proceeds at a time.
 2. Migrate the `tenant_default` template schema first and compute its **structural fingerprint** — a SHA-256 hash over a normalized, schema-name-and-tenant-id-scrubbed dump of every column, constraint, index, sequence, and RLS policy definition (`information_schema` + `pg_catalog` introspection).
 3. Migrate one canary tenant, then remaining tenants in batches of 10; each tenant's post-migration fingerprint is compared against the template's — any mismatch fails that tenant as `DRIFTED` and halts the batch rather than silently diverging.
-4. Every step (start, success, failure) is recorded to `platform.tenant_schema_versions` via `TenantSchemaStatusService`, which also serves `GET /api/platform/tenant-schema-status` (backing the Platform Console's tenant schema status view) and `TenantSchemaReadinessHealthIndicator` (an actuator health contributor gated behind `app.tenancy.enforce-schema-version=true`; `/actuator/health` reports `DOWN` if any `ACTIVE` tenant is below `app.tenancy.minimum-compatible-schema-version`, default **1**, while the packaged target is **3**).
+4. Every step (start, success, failure) is recorded to `platform.tenant_schema_versions` via `TenantSchemaStatusService`, which also serves `GET /api/platform/tenant-schema-status` (backing the Platform Console's tenant schema status view) and `TenantSchemaReadinessHealthIndicator` (an actuator health contributor gated behind `app.tenancy.enforce-schema-version=true`; `/actuator/health` reports `DOWN` if any `ACTIVE` tenant is below `app.tenancy.minimum-compatible-schema-version`, default **1**, while the packaged target is **11**).
 5. A `report-only` mode (`reportOnly=true` / `BOOTSTRAP_REPORT_ONLY=true`) runs the same fingerprint comparison read-only, for verifying a restored production clone before committing to a real migration.
 
 **RLS enforcement is driven from the tenant line, not the platform line.** The mechanism is now baked directly into `tenant/V1__tenant_schema.sql` and runs once per tenant schema (via the rollout above): for every table in that schema it adds a `tenant_id` column if missing (backfilled to the tenant's own id, `NOT NULL` with a per-tenant default), fails loudly if it finds rows with a *conflicting* `tenant_id`, and enables `FORCE ROW LEVEL SECURITY` with a `tenant_isolation` policy pinned to `app.current_tenant_id`. `demo_requests` and `demo_invites` are explicitly exempted from the row-conflict check (`ProductionSafetyValidator.isSharedLifecycleTable`) because they hold pre-tenant-existence rows; the RLS-*coverage* check (confirming every table actually has RLS enabled) separately excludes only `demo_requests` by name — `audit_events` is not exempted from either check (it has `FORCE ROW LEVEL SECURITY` enabled like any other tenant table). This is the mechanism referenced by "RLS rollout status" in `architecture.md` — `ProductionSafetyValidator.validateRuntimeRoleCannotBypassRls()` (platform line) remains the pre-flight gate confirming the runtime DB role is non-superuser/non-BYPASSRLS before this per-tenant enforcement is allowed to run in production.

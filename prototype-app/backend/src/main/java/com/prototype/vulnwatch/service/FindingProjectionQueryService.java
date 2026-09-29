@@ -189,6 +189,12 @@ public class FindingProjectionQueryService {
         // (cursor paging uses this one, offset paging the other) and disagreeing on kind would
         // change the result set depending on how the client pages.
         appendInClause(where, params, "findingKind", "finding_kind", upperValues(filter.findingKind()));
+        // Existence-style, not a join: a finding can be reached by more than one declared AI
+        // resource, and a join to ai_bom_resource_vulnerability_links would multiply rows here
+        // (COUNT(*) and LIMIT-based paging both need exactly one row per finding). Must mirror
+        // FindingFilterSpecifications.byAffectedAiResourceId/byHasAffectedAiResource exactly --
+        // same reason findingKind above does.
+        appendAffectedAiResourceFilter(where, params, filter);
         appendNullableUpperMatch(where, params, "vexStatus", "vex_status", filter.vexStatus());
         appendNullableUpperMatch(where, params, "vexFreshness", "vex_freshness", filter.vexFreshness());
         appendNullableLowerMatch(where, params, "vexProvider", "vex_provider", filter.vexProvider());
@@ -228,6 +234,32 @@ public class FindingProjectionQueryService {
             params.addValue("assetTypes", upperValues(filter.assetType()));
         }
         return new SqlFilter(where.toString(), params);
+    }
+
+    private void appendAffectedAiResourceFilter(StringBuilder where, MapSqlParameterSource params, FindingsFilter filter) {
+        List<String> rawIds = filter.affectedAiResourceId();
+        if (rawIds != null && !rawIds.isEmpty()) {
+            List<UUID> ids = FindingFilterSpecifications.normalizeFilterValues(rawIds).stream()
+                    .map(value -> {
+                        try {
+                            return UUID.fromString(value.trim());
+                        } catch (IllegalArgumentException ex) {
+                            return null;
+                        }
+                    })
+                    .filter(java.util.Objects::nonNull)
+                    .toList();
+            if (!ids.isEmpty()) {
+                where.append(" AND finding_id IN (SELECT link.finding_id FROM ai_bom_resource_vulnerability_links link"
+                        + " WHERE link.declared_resource_id IN (:affectedAiResourceIds))");
+                params.addValue("affectedAiResourceIds", ids);
+            }
+        }
+        if (filter.hasAffectedAiResource() != null) {
+            where.append(Boolean.TRUE.equals(filter.hasAffectedAiResource())
+                    ? " AND finding_id IN (SELECT link.finding_id FROM ai_bom_resource_vulnerability_links link)"
+                    : " AND finding_id NOT IN (SELECT link.finding_id FROM ai_bom_resource_vulnerability_links link)");
+        }
     }
 
     private void appendDueDateBand(StringBuilder where, MapSqlParameterSource params, String dueDateBand) {

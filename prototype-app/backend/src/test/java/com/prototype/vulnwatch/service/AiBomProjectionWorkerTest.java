@@ -29,6 +29,7 @@ class AiBomProjectionWorkerTest {
     @Mock private TenantSchemaExecutionService tenantExecution;
     @Mock private AiBomProjectionService projectionService;
     @Mock private AiBomProjectionSchedulingService schedulingService;
+    @Mock private AiBomResourceVulnerabilityCorrelationService vulnerabilityCorrelationService;
 
     private Tenant tenant;
     private UUID jobId;
@@ -52,7 +53,9 @@ class AiBomProjectionWorkerTest {
         lenient().when(jobs.readPayload(job, IngestionJobService.AiGridBomProjectionJobPayload.class))
                 .thenReturn(new IngestionJobService.AiGridBomProjectionJobPayload(sourceId));
 
-        worker = new AiBomProjectionWorker(jobs, tenants, tenantExecution, projectionService, schedulingService, true);
+        worker = new AiBomProjectionWorker(
+                jobs, tenants, tenantExecution, projectionService, schedulingService,
+                vulnerabilityCorrelationService, true);
     }
 
     private void process() {
@@ -107,5 +110,6 @@ class AiBomProjectionWorkerTest {
         worker.reconcile();
 
         verify(schedulingService).reconcileHeldAndDeferredSources(tenant);
+        verify(vulnerabilityCorrelationService).reconcileAllForTenant(tenant);
     }
 }

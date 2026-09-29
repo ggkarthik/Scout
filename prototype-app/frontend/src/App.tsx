@@ -16,6 +16,8 @@ import {
   normalizeOperationsRouteView,
   normalizePlatformRouteView,
   pathForAdminView,
+  pathForAiBomDeclaredResources,
+  pathForAiFindings,
   pathForAiInventoryOverview,
   pathForConfigurationsView,
   pathForConnectView,
@@ -88,6 +90,12 @@ const AiAssetDetailPage = React.lazy(async () => ({
 }));
 const AiAgentExecutionsPage = React.lazy(async () => ({
   default: (await import('./pages/AiAgentExecutionsPage')).AiAgentExecutionsPage
+}));
+const AiBomDeclaredResourcesPage = React.lazy(async () => ({
+  default: (await import('./pages/AiBomDeclaredResourcesPage')).AiBomDeclaredResourcesPage
+}));
+const AiBomDeclaredResourceDetailPage = React.lazy(async () => ({
+  default: (await import('./pages/AiBomDeclaredResourceDetailPage')).AiBomDeclaredResourceDetailPage
 }));
 const CopilotStudioConnectorPage = React.lazy(async () => ({
   default: (await import('./pages/CopilotStudioConnectorPage')).CopilotStudioConnectorPage
@@ -394,9 +402,18 @@ function AiFindingDetailRoute() {
   const params = useParams<{ findingId?: string }>();
   const findingId = params.findingId ? decodeURIComponent(params.findingId) : null;
   if (!findingId) {
-    return <Navigate to="/findings/ai" replace />;
+    return <Navigate to={pathForAiFindings()} replace />;
   }
   return <AiSecurityRoute><AiFindingDetailPage findingId={findingId} /></AiSecurityRoute>;
+}
+
+function AiBomDeclaredResourceDetailRoute() {
+  const params = useParams<{ resourceId?: string }>();
+  const resourceId = params.resourceId ? decodeURIComponent(params.resourceId) : null;
+  if (!resourceId) {
+    return <Navigate to={pathForAiBomDeclaredResources()} replace />;
+  }
+  return <AiSecurityRoute><AiBomDeclaredResourceDetailPage resourceId={resourceId} /></AiSecurityRoute>;
 }
 
 function AiPolicyDetailRoute() {
@@ -1049,7 +1066,7 @@ function AppShell() {
                     { key: 'ai', label: 'AI Findings' },
                   ],
                   (key) => key === 'ai' ? location.pathname.startsWith('/findings/ai') : location.pathname === '/findings',
-                  (key) => navigate(key === 'ai' ? '/findings/ai' : '/findings')
+                  (key) => navigate(key === 'ai' ? pathForAiFindings() : '/findings')
                 );
               }
               if (tab === 'inventory') {
@@ -1251,6 +1268,7 @@ function AppShell() {
               <Route path="/findings/:displayId" element={<FindingDetailRoute />} />
               <Route path="/findings/ai/exposures" element={<AiSecurityRoute><AiExposuresPage /></AiSecurityRoute>} />
               <Route path="/findings/ai/exposures/:exposureId" element={<AiSecurityRoute><AiExposuresPage /></AiSecurityRoute>} />
+              <Route path="/findings/ai/vulnerabilities" element={<AiSecurityRoute><AiFindingsPage /></AiSecurityRoute>} />
               <Route path="/findings/ai/:findingId" element={<AiFindingDetailRoute />} />
               <Route path="/findings/ai" element={<AiSecurityRoute><AiFindingsPage /></AiSecurityRoute>} />
               <Route path="/findings" element={<FindingsRoute />} />
@@ -1280,6 +1298,8 @@ function AppShell() {
               <Route path="/inventory/ai/knowledge-data" element={<AiSecurityRoute><AiKnowledgeMcpInventoryPage kind="knowledge-data" /></AiSecurityRoute>} />
               <Route path="/inventory/ai/mcp" element={<AiSecurityRoute><AiKnowledgeMcpInventoryPage kind="mcp" /></AiSecurityRoute>} />
               <Route path="/inventory/ai/executions" element={<AiSecurityRoute><AiAgentExecutionsPage /></AiSecurityRoute>} />
+              <Route path="/inventory/ai/declared-resources" element={<AiSecurityRoute><AiBomDeclaredResourcesPage /></AiSecurityRoute>} />
+              <Route path="/inventory/ai/declared-resources/:resourceId" element={<AiBomDeclaredResourceDetailRoute />} />
               <Route path="/connect/copilot-studio" element={<AiSecurityRoute><CopilotStudioConnectorPage /></AiSecurityRoute>} />
               <Route path="/inventory/ai/:assetId" element={<InventoryAiAssetRoute />} />
               <Route path="/inventory/software-identities/:softwareIdentityId" element={<SoftwareIdentityDetailRoute />} />

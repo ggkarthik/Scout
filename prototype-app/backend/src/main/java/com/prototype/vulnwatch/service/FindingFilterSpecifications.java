@@ -1,5 +1,6 @@
 package com.prototype.vulnwatch.service;
 
+import com.prototype.vulnwatch.domain.AiBomResourceVulnerabilityLink;
 import com.prototype.vulnwatch.domain.AssetType;
 import com.prototype.vulnwatch.domain.Finding;
 import com.prototype.vulnwatch.domain.FindingCreationSource;
@@ -17,6 +18,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.data.jpa.domain.Specification;
 
@@ -50,6 +52,8 @@ public final class FindingFilterSpecifications {
                 .and(bySuppressedUntilBand(filter.suppressedUntilBand()))
                 .and(byAssetType(filter.assetType()))
                 .and(byFindingKind(filter.findingKind()))
+                .and(byAffectedAiResourceId(filter.affectedAiResourceId()))
+                .and(byHasAffectedAiResource(filter.hasAffectedAiResource()))
                 .and(byGroup(filter.groupField(), filter.groupValue()));
     }
 
@@ -175,6 +179,53 @@ public final class FindingFilterSpecifications {
             upper.add(value.toUpperCase(Locale.ROOT));
         }
         return (root, query, builder) -> root.get("findingKind").in(upper);
+    }
+
+    /**
+     * Restricts to findings transitively affecting one of the given declared AI-BOM resource
+     * ids (Milestone 3 part 5.1's {@code ai_bom_resource_vulnerability_links} bridge). An
+     * existence subquery, not a join: a finding can be reached by more than one declared
+     * resource, and a join would multiply result rows.
+     */
+    private static Specification<Finding> byAffectedAiResourceId(List<String> resourceIds) {
+        Set<String> normalized = normalizeFilterValues(resourceIds);
+        if (normalized.isEmpty()) {
+            return null;
+        }
+        Set<UUID> ids = new HashSet<>();
+        for (String value : normalized) {
+            try {
+                ids.add(UUID.fromString(value.trim()));
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        if (ids.isEmpty()) {
+            return null;
+        }
+        return (root, query, cb) -> {
+            var subquery = query.subquery(Long.class);
+            var linkRoot = subquery.from(AiBomResourceVulnerabilityLink.class);
+            subquery.select(cb.literal(1L));
+            subquery.where(
+                    cb.equal(linkRoot.get("findingId"), root.get("id")),
+                    linkRoot.get("declaredResourceId").in(ids)
+            );
+            return cb.exists(subquery);
+        };
+    }
+
+    /** Same existence-subquery shape as {@link #byAffectedAiResourceId}, with no id restriction. */
+    private static Specification<Finding> byHasAffectedAiResource(Boolean hasAffectedAiResource) {
+        if (hasAffectedAiResource == null) {
+            return null;
+        }
+        return (root, query, cb) -> {
+            var subquery = query.subquery(Long.class);
+            var linkRoot = subquery.from(AiBomResourceVulnerabilityLink.class);
+            subquery.select(cb.literal(1L));
+            subquery.where(cb.equal(linkRoot.get("findingId"), root.get("id")));
+            return hasAffectedAiResource ? cb.exists(subquery) : cb.not(cb.exists(subquery));
+        };
     }
 
     private static Specification<Finding> byStatus(List<String> statuses) {

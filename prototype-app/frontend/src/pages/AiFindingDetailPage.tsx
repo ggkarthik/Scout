@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import React from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
-import { pathForInventoryAiAsset, pathForPolicyDetail } from '../app/routes';
+import { pathForAiFindings, pathForInventoryAiAsset, pathForPolicyDetail } from '../app/routes';
 import { useActor } from '../features/auth/context';
 import { hasRole } from '../features/auth/roles';
 import { severityClassName, formatLabel } from '../features/cve-workbench/formatting';
@@ -60,7 +60,7 @@ export function AiFindingDetailPage({ findingId }: AiFindingDetailPageProps) {
     typeof location.state === 'object' && location.state && 'returnTo' in location.state
       ? String((location.state as { returnTo?: string }).returnTo ?? '').trim()
       : ''
-  ) || '/findings/ai';
+  ) || pathForAiFindings();
 
   const findingQuery = useQuery({
     queryKey: ['ai-security-finding', findingId],

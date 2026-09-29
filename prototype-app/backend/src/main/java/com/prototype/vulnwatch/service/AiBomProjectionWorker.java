@@ -28,6 +28,7 @@ public class AiBomProjectionWorker {
     private final TenantSchemaExecutionService tenantExecution;
     private final AiBomProjectionService projectionService;
     private final AiBomProjectionSchedulingService schedulingService;
+    private final AiBomResourceVulnerabilityCorrelationService vulnerabilityCorrelationService;
     private final boolean enabled;
 
     public AiBomProjectionWorker(
@@ -36,12 +37,14 @@ public class AiBomProjectionWorker {
             TenantSchemaExecutionService tenantExecution,
             AiBomProjectionService projectionService,
             AiBomProjectionSchedulingService schedulingService,
+            AiBomResourceVulnerabilityCorrelationService vulnerabilityCorrelationService,
             @Value("${app.ai-bom.projection.worker-enabled:true}") boolean enabled) {
         this.jobs = jobs;
         this.tenants = tenants;
         this.tenantExecution = tenantExecution;
         this.projectionService = projectionService;
         this.schedulingService = schedulingService;
+        this.vulnerabilityCorrelationService = vulnerabilityCorrelationService;
         this.enabled = enabled;
     }
 
@@ -62,12 +65,19 @@ public class AiBomProjectionWorker {
      * need second-by-second attention. Reuses the same admission decision ingestion itself
      * runs, so "on entitlement enablement, schedule" and "retain overflow for later scheduling"
      * are one code path re-run, not two mechanisms.
+     *
+     * <p>Also re-runs declared-resource-to-finding correlation (Milestone 3, part 5.1) on the
+     * same tick: the software component a declared resource transitively depends on may not
+     * have an open finding yet at upload time, since component-vulnerability correlation is
+     * itself asynchronous. Idempotent, so retrying on every tick until the underlying
+     * correlation catches up costs nothing beyond a handful of reads.
      */
     @Scheduled(fixedDelayString = "${app.ai-bom.projection.reconcile-interval-ms:60000}")
     public void reconcile() {
         if (!enabled) return;
         for (Tenant tenant : tenants.listActiveTenants()) {
             schedulingService.reconcileHeldAndDeferredSources(tenant);
+            vulnerabilityCorrelationService.reconcileAllForTenant(tenant);
         }
     }
 

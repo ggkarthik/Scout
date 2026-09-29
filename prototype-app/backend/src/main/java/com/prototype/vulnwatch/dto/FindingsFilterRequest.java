@@ -38,6 +38,10 @@ public class FindingsFilterRequest {
      * VULNERABILITY explicitly.
      */
     private List<String> findingKind;
+    /** Restricts to findings affecting one of these declared AI-BOM resource ids. */
+    private List<String> affectedAiResourceId;
+    /** {@code true}/{@code false} restricts to findings affecting any/no declared AI resource. */
+    private Boolean hasAffectedAiResource;
 
     public FindingsFilter toFilter() {
         return new FindingsFilter(
@@ -62,7 +66,8 @@ public class FindingsFilterRequest {
                 supportGroup,
                 null,
                 null,
-                assetType, groupField, groupValue, findingKind
+                assetType, groupField, groupValue, findingKind,
+                affectedAiResourceId, hasAffectedAiResource
         );
     }
 
@@ -244,5 +249,21 @@ public class FindingsFilterRequest {
 
     public void setAssetType(List<String> assetType) {
         this.assetType = assetType;
+    }
+
+    public List<String> getAffectedAiResourceId() {
+        return affectedAiResourceId;
+    }
+
+    public void setAffectedAiResourceId(List<String> affectedAiResourceId) {
+        this.affectedAiResourceId = affectedAiResourceId;
+    }
+
+    public Boolean getHasAffectedAiResource() {
+        return hasAffectedAiResource;
+    }
+
+    public void setHasAffectedAiResource(Boolean hasAffectedAiResource) {
+        this.hasAffectedAiResource = hasAffectedAiResource;
     }
 }
