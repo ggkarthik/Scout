@@ -103,7 +103,8 @@ public class FindingQueueResolutionService {
                 coalesceText(adHocFilter.suppressedUntilBand(), queueFilter.suppressedUntilBand()),
                 coalesceList(adHocFilter.assetType(), queueFilter.assetType()),
                 coalesceText(adHocFilter.groupField(), queueFilter.groupField()),
-                coalesceText(adHocFilter.groupValue(), queueFilter.groupValue())
+                coalesceText(adHocFilter.groupValue(), queueFilter.groupValue()),
+                coalesceList(adHocFilter.findingKind(), queueFilter.findingKind())
         );
     }
 

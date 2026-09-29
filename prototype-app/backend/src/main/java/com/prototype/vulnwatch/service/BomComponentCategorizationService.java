@@ -13,21 +13,70 @@ import org.springframework.stereotype.Service;
 @Service
 public class BomComponentCategorizationService {
 
+    /**
+     * Component types that are not software and must stay out of software inventory and
+     * vulnerability correlation. A model has no CPE and no CVEs; correlating one produces
+     * false findings against an artifact that was never a package.
+     */
+    private static final java.util.Set<String> NON_SOFTWARE_TYPES = java.util.Set.of(
+            "machine-learning-model", "ml-model", "ai-model", "model",
+            "data", "dataset",
+            "cryptographic-asset", "crypto", "certificate", "key");
+
+    /**
+     * Whether a component of this type belongs in software inventory and vulnerability
+     * correlation.
+     *
+     * <p>Keyed on the component's own type, deliberately not on the BOM type. An AI-BOM
+     * legitimately lists the software its models depend on, and a dependency CVE reported
+     * against a declared model is precisely what AI-BOM ingestion is for -- so excluding
+     * everything in an AI-BOM would defeat the feature. Only the component types that are
+     * not software are excluded, whichever document they arrive in.
+     *
+     * <p>An unrecognised or absent type is treated as software. Dropping a component we
+     * cannot classify would silently lose real vulnerability coverage, which is the worse
+     * failure of the two.
+     */
+    public boolean entersSoftwareInventory(String rawComponentType) {
+        if (rawComponentType == null || rawComponentType.isBlank()) {
+            return true;
+        }
+        return !NON_SOFTWARE_TYPES.contains(rawComponentType.trim().toLowerCase(Locale.ROOT));
+    }
+
     public BomComponentCategory categorize(String rawComponentType, BomType bomType, String supplier) {
-        if (bomType == BomType.AI_BOM) {
-            return BomComponentCategory.AI_MODEL;
+        String type = rawComponentType == null ? "" : rawComponentType.trim().toLowerCase(Locale.ROOT);
+
+        // A component's own type wins wherever it states one of the definitive kinds. This
+        // used to short-circuit on the document type instead, so every entry in an AI-BOM was
+        // labelled AI_MODEL -- including the software its models depend on, which is the very
+        // thing an AI-BOM exists to disclose. A pypi library in an AI-BOM is a library.
+        switch (type) {
+            case "machine-learning-model", "ml-model", "ai-model", "model", "data", "dataset":
+                return BomComponentCategory.AI_MODEL;
+            case "cryptographic-asset", "crypto", "certificate", "key":
+                return BomComponentCategory.CRYPTOGRAPHIC;
+            default:
+                break;
+        }
+
+        // Only entries that declare no type fall back to what the document implies.
+        if (type.isEmpty()) {
+            if (bomType == BomType.AI_BOM) {
+                return BomComponentCategory.AI_MODEL;
+            }
+            if (bomType == BomType.CBOM) {
+                return BomComponentCategory.CRYPTOGRAPHIC;
+            }
         }
         if (bomType == BomType.CBOM) {
+            // Every component of a CBOM is a cryptographic asset by definition.
             return BomComponentCategory.CRYPTOGRAPHIC;
         }
         if (bomType == BomType.VENDOR) {
             return BomComponentCategory.VENDOR_SUPPLIED;
         }
-        // SBOM — derive from component type
-        String type = rawComponentType == null ? "" : rawComponentType.trim().toLowerCase(Locale.ROOT);
         return switch (type) {
-            case "machine-learning-model", "ml-model", "ai-model", "dataset" -> BomComponentCategory.AI_MODEL;
-            case "cryptographic-asset", "crypto", "certificate", "key" -> BomComponentCategory.CRYPTOGRAPHIC;
             case "container", "operating-system", "platform" -> BomComponentCategory.OS;
             case "firmware" -> BomComponentCategory.THIRD_PARTY;
             case "application" -> BomComponentCategory.APP_COMPONENT;

@@ -84,6 +84,16 @@ public class CbomRiskFinding {
     @Column(name = "resolved_at")
     private Instant resolvedAt;
 
+    // What the reporting CBOM document currently says. Kept separate from status and
+    // resolvedAt: a superseded or deleted document withdraws its evidence, which is not the
+    // same as the risk having been remediated. Subsequent evaluation decides resolution.
+    @Enumerated(EnumType.STRING)
+    @Column(name = "evidence_state", nullable = false, length = 24)
+    private BomEvidenceState evidenceState = BomEvidenceState.SUPPORTED;
+
+    @Column(name = "withdrawn_at")
+    private Instant withdrawnAt;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -119,4 +129,20 @@ public class CbomRiskFinding {
     public Instant getResolvedAt() { return resolvedAt; }
     public void setResolvedAt(Instant resolvedAt) { this.resolvedAt = resolvedAt; }
     public Instant getCreatedAt() { return createdAt; }
+
+    public BomEvidenceState getEvidenceState() {
+        return evidenceState;
+    }
+
+    public void setEvidenceState(BomEvidenceState evidenceState) {
+        this.evidenceState = evidenceState;
+    }
+
+    public Instant getWithdrawnAt() {
+        return withdrawnAt;
+    }
+
+    public void setWithdrawnAt(Instant withdrawnAt) {
+        this.withdrawnAt = withdrawnAt;
+    }
 }

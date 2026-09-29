@@ -32,6 +32,12 @@ public class FindingsFilterRequest {
     private String assetName;
     private String supportGroup;
     private List<String> assetType;
+    /**
+     * Finding kinds to include. Absent means every kind, so the All Findings view stays
+     * inclusive and existing callers are unaffected; the software-vulnerability view passes
+     * VULNERABILITY explicitly.
+     */
+    private List<String> findingKind;
 
     public FindingsFilter toFilter() {
         return new FindingsFilter(
@@ -56,7 +62,7 @@ public class FindingsFilterRequest {
                 supportGroup,
                 null,
                 null,
-                assetType, groupField, groupValue
+                assetType, groupField, groupValue, findingKind
         );
     }
 
@@ -222,6 +228,14 @@ public class FindingsFilterRequest {
 
     public void setSupportGroup(String supportGroup) {
         this.supportGroup = supportGroup;
+    }
+
+    public List<String> getFindingKind() {
+        return findingKind;
+    }
+
+    public void setFindingKind(List<String> findingKind) {
+        this.findingKind = findingKind;
     }
 
     public List<String> getAssetType() {

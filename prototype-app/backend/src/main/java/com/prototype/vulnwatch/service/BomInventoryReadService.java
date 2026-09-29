@@ -7,6 +7,7 @@ import com.prototype.vulnwatch.domain.AssetState;
 import com.prototype.vulnwatch.domain.AssetType;
 import com.prototype.vulnwatch.domain.BomIngestionRecord;
 import com.prototype.vulnwatch.domain.BomStatus;
+import com.prototype.vulnwatch.domain.BomType;
 import com.prototype.vulnwatch.domain.InventoryComponent;
 import com.prototype.vulnwatch.domain.InventoryComponentStatus;
 import com.prototype.vulnwatch.domain.Tenant;
@@ -69,6 +70,8 @@ public class BomInventoryReadService {
     private final ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository;
     private final EolReleaseRepository eolReleaseRepository;
     private final FindingRepository findingRepository;
+    private final BomContributionService bomContributionService;
+    private final com.prototype.vulnwatch.service.cbom.CbomIngestionService cbomIngestionService;
 
     public BomInventoryReadService(
             BomIngestionRecordRepository bomRecordRepository,
@@ -81,7 +84,9 @@ public class BomInventoryReadService {
             InventoryComponentRepository inventoryComponentRepository,
             ComponentVulnerabilityStateRepository componentVulnerabilityStateRepository,
             EolReleaseRepository eolReleaseRepository,
-            FindingRepository findingRepository
+            FindingRepository findingRepository,
+            BomContributionService bomContributionService,
+            com.prototype.vulnwatch.service.cbom.CbomIngestionService cbomIngestionService
     ) {
         this.bomRecordRepository = bomRecordRepository;
         this.bomComponentRepository = bomComponentRepository;
@@ -94,6 +99,8 @@ public class BomInventoryReadService {
         this.componentVulnerabilityStateRepository = componentVulnerabilityStateRepository;
         this.eolReleaseRepository = eolReleaseRepository;
         this.findingRepository = findingRepository;
+        this.bomContributionService = bomContributionService;
+        this.cbomIngestionService = cbomIngestionService;
     }
 
     @Transactional(readOnly = true)
@@ -287,6 +294,16 @@ public class BomInventoryReadService {
                 .filter(r -> r.getTenant().getId().equals(tenant.getId()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOM record not found"));
         bomComponentRepository.softDeleteByBomId(bomId);
+        // Withdraw the evidence this document carried, without inferring that anything is
+        // absent. Finding status deliberately survives: deleting the document that reported a
+        // vulnerable component is not evidence the vulnerability was remediated.
+        bomContributionService.withdrawForDeletedDocument(record);
+        if (record.getBomType() == BomType.CBOM) {
+            // A CBOM's cryptographic assets and findings live in their own tables, so
+            // soft-deleting bom_components does not reach them; deleting a CBOM previously
+            // left its components active and its findings' evidence standing.
+            cbomIngestionService.deactivateBySourceBomId(bomId);
+        }
         record.setStatus(BomStatus.SUPERSEDED);
         bomRecordRepository.save(record);
     }
@@ -396,7 +413,8 @@ public class BomInventoryReadService {
                     toApplicationRiskLevel(score),
                     findingCount,
                     criticalFindingCount,
-                    highFindingCount
+                    highFindingCount,
+                    c.getBomEvidenceState() == null ? null : c.getBomEvidenceState().name()
             ));
         });
 
@@ -447,7 +465,11 @@ public class BomInventoryReadService {
                     vulnerabilityCount > 0 ? "HIGH" : "NONE",
                     workflowCountByComponent.getOrDefault(component.getId(), 0),
                     0,
-                    0
+                    0,
+                    // A BOM component that resolved to no inventory component has no evidence
+                    // state: the state describes a component's presence, and this row is a
+                    // document entry that was never mapped to one.
+                    null
             ));
         });
 

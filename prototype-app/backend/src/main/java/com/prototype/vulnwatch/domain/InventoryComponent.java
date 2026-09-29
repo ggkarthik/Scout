@@ -92,6 +92,16 @@ public class InventoryComponent {
     @Column(nullable = false)
     private InventoryComponentStatus componentStatus = InventoryComponentStatus.ACTIVE;
 
+    // What BOM evidence says about this component's presence, aggregated across sources.
+    // Distinct from componentStatus, which is presence itself. Defaults to LEGACY_UNKNOWN so
+    // a component with no contribution rows is never mistaken for one proven absent.
+    @Enumerated(EnumType.STRING)
+    @Column(name = "bom_evidence_state", nullable = false, length = 24)
+    private BomEvidenceState bomEvidenceState = BomEvidenceState.LEGACY_UNKNOWN;
+
+    @Column(name = "bom_evidence_updated_at")
+    private Instant bomEvidenceUpdatedAt;
+
     @Column(name = "eol_slug", length = 200)
     private String eolSlug;
 
@@ -333,5 +343,21 @@ public class InventoryComponent {
         String normalizedPurlValue = IdentityUtil.normalizePurl(purl);
         this.normalizedPurl = normalizedPurlValue.isBlank() ? null : normalizedPurlValue;
         this.coordKey = IdentityUtil.coordKey(ecosystem, packageName);
+    }
+
+    public BomEvidenceState getBomEvidenceState() {
+        return bomEvidenceState;
+    }
+
+    public void setBomEvidenceState(BomEvidenceState bomEvidenceState) {
+        this.bomEvidenceState = bomEvidenceState;
+    }
+
+    public Instant getBomEvidenceUpdatedAt() {
+        return bomEvidenceUpdatedAt;
+    }
+
+    public void setBomEvidenceUpdatedAt(Instant bomEvidenceUpdatedAt) {
+        this.bomEvidenceUpdatedAt = bomEvidenceUpdatedAt;
     }
 }

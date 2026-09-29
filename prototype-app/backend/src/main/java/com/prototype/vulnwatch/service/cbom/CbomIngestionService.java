@@ -4,6 +4,7 @@ import com.prototype.vulnwatch.domain.Asset;
 import com.prototype.vulnwatch.domain.BomIngestionRecord;
 import com.prototype.vulnwatch.domain.CbomComponent;
 import com.prototype.vulnwatch.domain.CbomFindingStatus;
+import com.prototype.vulnwatch.domain.BomEvidenceState;
 import com.prototype.vulnwatch.domain.CbomRiskFinding;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.repo.CbomComponentRepository;
@@ -65,7 +66,30 @@ public class CbomIngestionService {
         return new CbomIngestionResult(parsedComponents.size(), findingCount);
     }
 
+    /**
+     * Retires a superseded or deleted CBOM document's components and withdraws the evidence
+     * behind its findings.
+     *
+     * <p>Status and resolvedAt are deliberately untouched. A document going away is not the
+     * risk being remediated, and flipping its findings to RESOLVED here would report a
+     * still-weak algorithm as fixed. The next evaluation decides resolution.
+     */
     public int deactivateBySourceBomId(java.util.UUID sourceBomId) {
+        Instant now = Instant.now();
+        List<CbomRiskFinding> reported = findingRepository.findBySourceBomId(sourceBomId);
+        List<CbomRiskFinding> withdrawn = new java.util.ArrayList<>();
+        for (CbomRiskFinding finding : reported) {
+            if (finding.getEvidenceState() == BomEvidenceState.WITHDRAWN) {
+                continue;
+            }
+            finding.setEvidenceState(BomEvidenceState.WITHDRAWN);
+            finding.setWithdrawnAt(now);
+            // lastSeenAt is left alone: withdrawal is not an observation.
+            withdrawn.add(finding);
+        }
+        if (!withdrawn.isEmpty()) {
+            findingRepository.saveAll(withdrawn);
+        }
         return componentRepository.softDeleteBySourceBomId(sourceBomId);
     }
 
@@ -129,6 +153,9 @@ public class CbomIngestionService {
             persisted.setRecommendation(incoming.getRecommendation());
             persisted.setFindingFingerprint(incoming.getFindingFingerprint());
             persisted.setLastSeenAt(now);
+            // Reported again by a live document, so any earlier withdrawal is retracted.
+            persisted.setEvidenceState(BomEvidenceState.SUPPORTED);
+            persisted.setWithdrawnAt(null);
             findingRepository.save(persisted);
         }
 

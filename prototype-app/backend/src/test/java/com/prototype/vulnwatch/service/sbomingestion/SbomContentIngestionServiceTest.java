@@ -2,6 +2,7 @@ package com.prototype.vulnwatch.service.sbomingestion;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -10,6 +11,8 @@ import static org.mockito.Mockito.when;
 import com.prototype.vulnwatch.domain.Asset;
 import com.prototype.vulnwatch.domain.AssetState;
 import com.prototype.vulnwatch.domain.AssetType;
+import com.prototype.vulnwatch.domain.InventoryComponent;
+import com.prototype.vulnwatch.domain.InventoryComponentStatus;
 import com.prototype.vulnwatch.domain.SbomUpload;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.dto.ParsedComponent;
@@ -83,7 +86,8 @@ class SbomContentIngestionServiceTest {
                 softwareInventorySyncService,
                 findingDeltaQueueService,
                 softwareIdentitySummaryProjectionService,
-                sbomUploadSupportService
+                sbomUploadSupportService,
+                new com.prototype.vulnwatch.service.BomComponentCategorizationService()
         );
         ReflectionTestUtils.setField(service, "entityManager", entityManager);
 
@@ -103,5 +107,130 @@ class SbomContentIngestionServiceTest {
         Asset savedAsset = savedAssetCaptor.getValue();
         assertEquals(AssetState.ACTIVE, savedAsset.getState());
         assertNotNull(savedAsset.getLastInventoryAt());
+    }
+
+    // Regression test for a false-remediation data-loss path. SbomContentIngestionService
+    // retires every inventory component for the asset that is absent from the document being
+    // ingested. BomIngestionOrchestrator routes every non-CBOM bom_type -- including AI_BOM --
+    // through here, so uploading a partial AI-BOM against an asset that already had an SBOM
+    // retired all of that asset's SBOM components, and FindingComponentRecomputeService then
+    // auto-closed their still-unremediated findings as AUTO_COMPONENT_REMOVED.
+    @Test
+    void ingestBytes_nonAuthoritativeDocument_doesNotRetireComponentsItOmits() throws Exception {
+        Fixture fixture = new Fixture();
+        InventoryComponent preexisting = fixture.preexistingActiveComponent();
+
+        fixture.service().ingestBytes(
+                fixture.tenant(),
+                AssetType.APPLICATION,
+                "kanra-mobile",
+                "pkg:npm/kanra-mobile@1.0.0",
+                "{}".getBytes(),
+                "kanra-mobile-ai-bom.json",
+                new SbomIngestionSourceMetadata("UPLOAD", "bom-upload", "kanra-mobile-ai-bom.json", null, null, null, 2L, null),
+                null,
+                false
+        );
+
+        assertEquals(InventoryComponentStatus.ACTIVE, preexisting.getComponentStatus(),
+                "a partial document must not retire a component it merely omits");
+        assertNull(preexisting.getRetiredAt());
+    }
+
+    // Complement of the above: an authoritative document (SBOM/VENDOR, and the 8-arg overload
+    // used by the direct upload/endpoint paths) must keep retiring omitted components.
+    @Test
+    void ingestBytes_authoritativeDocument_stillRetiresComponentsItOmits() throws Exception {
+        Fixture fixture = new Fixture();
+        InventoryComponent preexisting = fixture.preexistingActiveComponent();
+
+        fixture.service().ingestBytes(
+                fixture.tenant(),
+                AssetType.APPLICATION,
+                "kanra-mobile",
+                "pkg:npm/kanra-mobile@1.0.0",
+                "{}".getBytes(),
+                "kanra-mobile-sbom.json",
+                new SbomIngestionSourceMetadata("UPLOAD", "bom-upload", "kanra-mobile-sbom.json", null, null, null, 2L, null),
+                null
+        );
+
+        assertEquals(InventoryComponentStatus.RETIRED, preexisting.getComponentStatus());
+        assertNotNull(preexisting.getRetiredAt());
+    }
+
+    /** Mock wiring shared by the two retirement tests. */
+    private static final class Fixture {
+        private final Tenant tenant = new Tenant();
+        private final InventoryComponentRepository inventoryComponentRepository =
+                mock(InventoryComponentRepository.class);
+        private final SbomContentIngestionService service;
+
+        Fixture() throws Exception {
+            tenant.setId(UUID.randomUUID());
+
+            SbomParserService sbomParserService = mock(SbomParserService.class);
+            SbomUploadRepository sbomUploadRepository = mock(SbomUploadRepository.class);
+            IdentityGraphService identityGraphService = mock(IdentityGraphService.class);
+            InventoryComponentCpeMappingService inventoryComponentCpeMappingService =
+                    mock(InventoryComponentCpeMappingService.class);
+            SoftwareInventorySyncService softwareInventorySyncService = mock(SoftwareInventorySyncService.class);
+            FindingDeltaQueueService findingDeltaQueueService = mock(FindingDeltaQueueService.class);
+            SoftwareIdentitySummaryProjectionService softwareIdentitySummaryProjectionService =
+                    mock(SoftwareIdentitySummaryProjectionService.class);
+            SbomUploadSupportService sbomUploadSupportService = mock(SbomUploadSupportService.class);
+            EntityManager entityManager = mock(EntityManager.class);
+
+            Asset asset = new Asset();
+            asset.setTenant(tenant);
+            asset.setIdentifier("pkg:npm/kanra-mobile@1.0.0");
+            asset.setState(AssetState.ACTIVE);
+
+            when(sbomUploadSupportService.resolveAsset(any(Tenant.class), any(AssetType.class), anyString(), anyString()))
+                    .thenReturn(asset);
+            when(sbomUploadSupportService.saveAsset(any(Asset.class)))
+                    .thenAnswer(invocation -> invocation.getArgument(0));
+            when(sbomUploadRepository.save(any(SbomUpload.class)))
+                    .thenAnswer(invocation -> invocation.getArgument(0));
+            when(sbomParserService.detectFormat(any(byte[].class)))
+                    .thenReturn(com.prototype.vulnwatch.domain.SbomFormat.UNKNOWN);
+            // Empty parse: the incoming document declares nothing that matches the
+            // pre-existing component, which is exactly the "omits a component" case.
+            when(sbomParserService.parse(any(byte[].class))).thenReturn(List.<ParsedComponent>of());
+            when(identityGraphService.resolveFromComponents(any())).thenReturn(Map.of());
+
+            service = new SbomContentIngestionService(
+                    sbomParserService,
+                    sbomUploadRepository,
+                    inventoryComponentRepository,
+                    identityGraphService,
+                    inventoryComponentCpeMappingService,
+                    softwareInventorySyncService,
+                    findingDeltaQueueService,
+                    softwareIdentitySummaryProjectionService,
+                    sbomUploadSupportService,
+                    new com.prototype.vulnwatch.service.BomComponentCategorizationService()
+            );
+            ReflectionTestUtils.setField(service, "entityManager", entityManager);
+        }
+
+        Tenant tenant() {
+            return tenant;
+        }
+
+        SbomContentIngestionService service() {
+            return service;
+        }
+
+        InventoryComponent preexistingActiveComponent() {
+            InventoryComponent component = new InventoryComponent();
+            component.setEcosystem("npm");
+            component.setPackageName("lodash");
+            component.setVersion("4.17.20");
+            component.setPurl("pkg:npm/lodash@4.17.20");
+            component.setComponentStatus(InventoryComponentStatus.ACTIVE);
+            when(inventoryComponentRepository.findByAsset(any(Asset.class))).thenReturn(List.of(component));
+            return component;
+        }
     }
 }

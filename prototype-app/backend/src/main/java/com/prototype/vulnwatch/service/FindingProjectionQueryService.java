@@ -185,6 +185,10 @@ public class FindingProjectionQueryService {
         appendInClause(where, params, "decisionState", "decision_state", upperValues(filter.decisionState()));
         appendInClause(where, params, "creationSource", "creation_source", upperValues(filter.creationSource()));
         appendInClause(where, params, "matchMethod", "match_method", lowerValues(filter.matchMethod()));
+        // Must mirror the JPA specification path exactly: the two paths serve the same filter
+        // (cursor paging uses this one, offset paging the other) and disagreeing on kind would
+        // change the result set depending on how the client pages.
+        appendInClause(where, params, "findingKind", "finding_kind", upperValues(filter.findingKind()));
         appendNullableUpperMatch(where, params, "vexStatus", "vex_status", filter.vexStatus());
         appendNullableUpperMatch(where, params, "vexFreshness", "vex_freshness", filter.vexFreshness());
         appendNullableLowerMatch(where, params, "vexProvider", "vex_provider", filter.vexProvider());

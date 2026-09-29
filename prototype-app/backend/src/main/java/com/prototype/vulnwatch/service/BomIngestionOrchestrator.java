@@ -12,6 +12,8 @@ import com.prototype.vulnwatch.domain.BomDocumentFormat;
 import com.prototype.vulnwatch.domain.BomIngestionRecord;
 import com.prototype.vulnwatch.domain.BomSourceType;
 import com.prototype.vulnwatch.domain.BomSpecificationFamily;
+import com.prototype.vulnwatch.domain.BomSource;
+import com.prototype.vulnwatch.domain.BomSourceCompleteness;
 import com.prototype.vulnwatch.domain.BomStatus;
 import com.prototype.vulnwatch.domain.BomType;
 import com.prototype.vulnwatch.domain.BomVulnerabilityRelationType;
@@ -28,6 +30,7 @@ import com.prototype.vulnwatch.dto.GithubSbomIngestionRequest;
 import com.prototype.vulnwatch.dto.BomFetchRequest;
 import com.prototype.vulnwatch.dto.BomInspectionResponse;
 import com.prototype.vulnwatch.dto.BomIngestionResultResponse;
+import com.prototype.vulnwatch.dto.BomSourceSelector;
 import com.prototype.vulnwatch.dto.SbomEndpointIngestionRequest;
 import com.prototype.vulnwatch.dto.SbomIngestionResponse;
 import com.prototype.vulnwatch.repo.BomComponentRepository;
@@ -63,7 +66,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.w3c.dom.Document;
@@ -94,6 +96,9 @@ public class BomIngestionOrchestrator {
     private final CpeDimensionService cpeDimensionService;
     private final CbomIngestionService cbomIngestionService;
     private final ObjectMapper objectMapper;
+    private final BomSourceService bomSourceService;
+    private final BomContributionService bomContributionService;
+    private final BomRelationshipParsingService bomRelationshipParsingService;
 
     public BomIngestionOrchestrator(
             SbomEndpointFetchService sbomEndpointFetchService,
@@ -112,7 +117,10 @@ public class BomIngestionOrchestrator {
             FindingRepository findingRepository,
             CpeDimensionService cpeDimensionService,
             CbomIngestionService cbomIngestionService,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            BomSourceService bomSourceService,
+            BomContributionService bomContributionService,
+            BomRelationshipParsingService bomRelationshipParsingService
     ) {
         this.sbomEndpointFetchService = sbomEndpointFetchService;
         this.sbomContentIngestionService = sbomContentIngestionService;
@@ -131,6 +139,9 @@ public class BomIngestionOrchestrator {
         this.cpeDimensionService = cpeDimensionService;
         this.cbomIngestionService = cbomIngestionService;
         this.objectMapper = objectMapper;
+        this.bomSourceService = bomSourceService;
+        this.bomContributionService = bomContributionService;
+        this.bomRelationshipParsingService = bomRelationshipParsingService;
     }
 
     @Transactional
@@ -154,7 +165,9 @@ public class BomIngestionOrchestrator {
                         fetchResult.content(),
                         legacyRequest,
                         fetchResult.metadata(),
-                        null
+                        null,
+                        BomSourceSelector.keyed(
+                                automatedSourceKey("endpoint", request.bomType(), request.sourceUrl()))
                 )
         );
     }
@@ -168,7 +181,8 @@ public class BomIngestionOrchestrator {
             String assetIdentifier,
             String supplier,
             byte[] content,
-            String originalFilename
+            String originalFilename,
+            BomSourceSelector selector
     ) throws IOException {
         SbomEndpointIngestionRequest legacyRequest = new SbomEndpointIngestionRequest(
                 assetType, assetName, assetIdentifier, null, originalFilename, null
@@ -178,7 +192,7 @@ public class BomIngestionOrchestrator {
                 (long) content.length, null
         );
         return sbomIngestionLockService.withAssetLock(tenant, assetIdentifier, () ->
-                ingestBytes(tenant, bomType, supplier, null, "UPLOAD", content, legacyRequest, metadata, null)
+                ingestBytes(tenant, bomType, supplier, null, "UPLOAD", content, legacyRequest, metadata, null, selector)
         );
     }
 
@@ -195,7 +209,8 @@ public class BomIngestionOrchestrator {
             byte[] content,
             String originalFilename,
             SbomIngestionSourceMetadata metadata,
-            Consumer<Asset> assetCustomizer
+            Consumer<Asset> assetCustomizer,
+            BomSourceSelector selector
     ) throws IOException {
         SbomEndpointIngestionRequest legacyRequest = new SbomEndpointIngestionRequest(
                 assetType,
@@ -206,7 +221,7 @@ public class BomIngestionOrchestrator {
                 null
         );
         return sbomIngestionLockService.withAssetLock(tenant, assetIdentifier, () ->
-                ingestBytes(tenant, bomType, supplier, sourceUrl, sourceMethod, content, legacyRequest, metadata, assetCustomizer)
+                ingestBytes(tenant, bomType, supplier, sourceUrl, sourceMethod, content, legacyRequest, metadata, assetCustomizer, selector)
         );
     }
 
@@ -229,7 +244,9 @@ public class BomIngestionOrchestrator {
                 content,
                 "github-generated-sbom.json",
                 metadata,
-                null
+                null,
+                BomSourceSelector.keyed(
+                        automatedSourceKey("github-repo", BomType.SBOM, request.assetIdentifier()))
         );
     }
 
@@ -254,7 +271,8 @@ public class BomIngestionOrchestrator {
                 content,
                 "github-attested-sbom.json",
                 metadata,
-                assetCustomizer
+                assetCustomizer,
+                BomSourceSelector.keyed(automatedSourceKey("ghcr", BomType.SBOM, assetIdentifier))
         );
     }
 
@@ -280,8 +298,19 @@ public class BomIngestionOrchestrator {
                 content,
                 "github-bom-file.json",
                 metadata,
-                null
+                null,
+                BomSourceSelector.keyed(automatedSourceKey("github-bom", bomType, assetIdentifier))
         );
+    }
+
+    /**
+     * Deterministic source identity for an automated caller. Includes the BOM type so an
+     * SBOM and an AI-BOM from the same repository remain separate sources rather than
+     * replacing one another.
+     */
+    private static String automatedSourceKey(String prefix, BomType bomType, String durableIdentity) {
+        String identity = durableIdentity == null ? "" : durableIdentity.trim().toLowerCase(Locale.ROOT);
+        return prefix + ":" + bomType.name() + ":" + identity;
     }
 
     private BomIngestionResultResponse ingestBytes(
@@ -293,7 +322,8 @@ public class BomIngestionOrchestrator {
             byte[] content,
             SbomEndpointIngestionRequest legacyRequest,
             SbomIngestionSourceMetadata metadata,
-            Consumer<Asset> assetCustomizer
+            Consumer<Asset> assetCustomizer,
+            BomSourceSelector selector
     ) throws IOException {
         if (content.length > MAX_BOM_BYTES) {
             throw new IOException("BOM payload is too large (max 50 MB)");
@@ -331,12 +361,30 @@ public class BomIngestionOrchestrator {
 
         String supplierKey = supplier == null ? null : supplier.trim().toLowerCase(Locale.ROOT);
         String sourceIdentity = normalizeSourceIdentity(metadata);
-        PageRequest latestOne = PageRequest.of(0, 1);
-        Optional<BomIngestionRecord> existingOpt = resolvedAsset.getId() != null
-                ? bomRecordRepository.findActiveForAsset(tenant.getId(), bomType, resolvedAsset.getId(), supplierKey, latestOne).stream().findFirst()
-                : bomRecordRepository.findActiveWithoutAsset(tenant.getId(), bomType, supplierKey, sourceIdentity, latestOne).stream().findFirst();
+        BomSourceSelector resolvedSelector = selector == null ? BomSourceSelector.independent() : selector;
+
+        // Replacement is now explicit. Previously the current record was found by
+        // (tenant, bom_type, asset_id, lower(supplier)), so any document sharing a supplier
+        // with an existing one superseded it, whether or not that was intended.
+        BomSource source = bomSourceService.resolve(
+                tenant,
+                new BomSourceService.SourceRequest(
+                        bomType,
+                        resolvedSelector.sourceId(),
+                        resolvedSelector.sourceKey(),
+                        resolvedAsset.getId(),
+                        supplierKey,
+                        sourceIdentity,
+                        resolvedSelector.completeness()),
+                resolvedSelector.actorRoles());
+
+        Optional<BomIngestionRecord> existingOpt = source.getCurrentBomId() == null
+                ? Optional.empty()
+                : bomRecordRepository.findById(source.getCurrentBomId());
         String contentChecksum = sha256(content);
 
+        // Scoped to this source's own current version: an identical document arriving on a
+        // different source is a legitimate independent observation, not a duplicate.
         if (existingOpt.isPresent()) {
             BomIngestionRecord existing = existingOpt.get();
             if ((serialNumber != null && serialNumber.equals(existing.getSerialNumber()))
@@ -350,6 +398,12 @@ public class BomIngestionOrchestrator {
         SbomIngestionResponse inventoryResult = null;
         if (bomType != BomType.CBOM) {
             // Delegate software inventory + CVE correlation path for software-like BOMs only.
+            // Only a document asserting it covers the asset's whole software inventory may
+            // imply absence. Keying this on completeness rather than BOM type matters now
+            // that a single asset can carry several independent sources: two partial SBOM
+            // sources would otherwise each retire the other's components on every upload.
+            // A PARTIAL document only adds evidence; withdrawing support for what it omits
+            // is reconciliation's job, not an inline retirement sweep.
             inventoryResult = sbomContentIngestionService.ingestBytes(
                     tenant,
                     legacyRequest.assetType(),
@@ -358,7 +412,8 @@ public class BomIngestionOrchestrator {
                     content,
                     originalFilename,
                     metadata,
-                    assetCustomizer
+                    assetCustomizer,
+                    source.getCompleteness() == BomSourceCompleteness.COMPLETE_ASSET_SOFTWARE
             );
         } else {
             resolvedAsset.setName(legacyRequest.assetName());
@@ -403,9 +458,19 @@ public class BomIngestionOrchestrator {
         record.setContentLengthBytes(metadata.contentLengthBytes());
         record.setChecksumSha256(contentChecksum);
         record.setPreviousBomId(previousBomId);
+        record.setSourceId(source.getId());
+        record.setCompleteness(source.getCompleteness());
         record.setStatus(BomStatus.ACTIVE);
         record.setIngestedAt(Instant.now());
         record = bomRecordRepository.save(record);
+
+        // Promote to current and advance the source revision, then audit the completeness
+        // claim this specific version made.
+        bomSourceService.recordCurrentVersion(source, record.getId());
+        if (source.getCompleteness() == BomSourceCompleteness.COMPLETE_ASSET_SOFTWARE) {
+            bomSourceService.recordAssertion(
+                    source, record.getId(), source.getCompleteness(), resolvedSelector.assertedBy());
+        }
 
         // Supersede link after save
         if (existingOpt.isPresent()) {
@@ -438,6 +503,10 @@ public class BomIngestionOrchestrator {
                 throw new IOException("No BOM components could be extracted from the submitted document");
             }
             persistEvidenceAndCorrelations(record, tenant, components);
+            // Structure the document declared between its own components, stored verbatim.
+            // Nothing is inferred from these edges: a dependsOn is not a training or serving
+            // claim, and treating it as one would invent provenance for policy to act on.
+            bomRelationshipParsingService.recordRelationships(record, root, components);
             componentCount = components.size();
             findingsGenerated = inventoryResult.findingsGenerated();
             record.setComponentCount(componentCount);
@@ -760,6 +829,11 @@ public class BomIngestionOrchestrator {
             bomComponentWorkflowRepository.saveAll(workflows);
         }
         bomComponentRepository.saveAll(components);
+
+        // Record what this source now vouches for, and withdraw the claims it has stopped
+        // making. The inventory matches were already resolved above, so this costs no extra
+        // queries against the component set.
+        bomContributionService.syncContributions(record, inventoryMatchesByComponentId);
     }
 
     private List<InventoryComponent> resolveInventoryMatches(BomIngestionRecord record, Tenant tenant, BomComponent component) {

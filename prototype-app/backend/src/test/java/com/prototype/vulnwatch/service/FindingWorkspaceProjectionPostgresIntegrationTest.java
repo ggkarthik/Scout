@@ -174,7 +174,9 @@ class FindingWorkspaceProjectionPostgresIntegrationTest {
                 null, null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null,
                 null, null, null, null, null, null, null,
-                "severity", "CRITICAL"
+                "severity", "CRITICAL",
+                // findingKind: null keeps every kind, matching the inclusive default.
+                null
         );
         var page = findingListProjectionService.queryPage(tenant, criticalGroup, null, 25);
         assertTrue(page.totalItems() >= 90);

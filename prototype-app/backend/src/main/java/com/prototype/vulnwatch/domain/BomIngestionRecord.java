@@ -44,6 +44,17 @@ public class BomIngestionRecord {
     @Column(name = "bom_type", nullable = false, length = 20)
     private BomType bomType;
 
+    // The logical source this document is a version of. Null only for rows predating
+    // source tracking, which the backfill assigns.
+    @Column(name = "source_id")
+    private UUID sourceId;
+
+    // What this version claimed to describe. Not inherited from the previous version: a
+    // replacement must repeat a complete assertion or it reverts to PARTIAL.
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 32)
+    private BomSourceCompleteness completeness = BomSourceCompleteness.PARTIAL;
+
     @Enumerated(EnumType.STRING)
     @Column(length = 20)
     private SbomFormat format;
@@ -200,4 +211,20 @@ public class BomIngestionRecord {
 
     public String getIngestedBy() { return ingestedBy; }
     public void setIngestedBy(String ingestedBy) { this.ingestedBy = ingestedBy; }
+
+    public UUID getSourceId() {
+        return sourceId;
+    }
+
+    public void setSourceId(UUID sourceId) {
+        this.sourceId = sourceId;
+    }
+
+    public BomSourceCompleteness getCompleteness() {
+        return completeness;
+    }
+
+    public void setCompleteness(BomSourceCompleteness completeness) {
+        this.completeness = completeness;
+    }
 }

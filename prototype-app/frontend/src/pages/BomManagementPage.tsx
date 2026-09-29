@@ -1,6 +1,6 @@
 import React from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, type BomFetchPayload, type BomIngestionResult, type BomType, type CbomComponent, type CbomRiskFinding, type IngestionJob } from '../api/client';
+import { api, type BomFetchPayload, type BomIngestionResult, type BomSource, type BomType, type CbomComponent, type CbomRiskFinding, type IngestionJob } from '../api/client';
 import { useGithubSbomSourcesQuery, useSyncRunsQuery } from '../features/connect/queries';
 import type { GithubSbomSource, SyncRun } from '../features/connect/types';
 import { FindingSeverityChips } from '../features/findings/components/FindingSeverityChips';
@@ -194,6 +194,14 @@ export function BomManagementPage({
   const [assetIdentifier, setAssetIdentifier] = React.useState('');
   const [supplier, setSupplier] = React.useState('');
   const [file, setFile] = React.useState<File | null>(null);
+  // Naming a source replaces that source's current version. Leaving it blank creates an
+  // independent source, so nothing is implicitly replaced.
+  const [replaceSourceId, setReplaceSourceId] = React.useState('');
+  // Only an asserted complete inventory can later justify retiring a component, so this is
+  // off by default and CBOM can never assert it.
+  const [assertsCompleteInventory, setAssertsCompleteInventory] = React.useState(false);
+  const [existingSources, setExistingSources] = React.useState<BomSource[]>([]);
+
   const [parseWarning, setParseWarning] = React.useState('');
   const [metaSource, setMetaSource] = React.useState<string | null>(null);
   const [sourceUrl, setSourceUrl] = React.useState('');
@@ -206,6 +214,14 @@ export function BomManagementPage({
   const [queueMessageTone, setQueueMessageTone] = React.useState<'info' | 'success' | 'warning'>('info');
   const [ingestError, setIngestError] = React.useState('');
   const [ingestResult, setIngestResult] = React.useState<BomIngestionResult | null>(null);
+  React.useEffect(() => {
+    let cancelled = false;
+    api.listBomSources()
+      .then(sources => { if (!cancelled) setExistingSources(sources); })
+      // A failure here only costs the replace affordance; uploading a new source still works.
+      .catch(() => { if (!cancelled) setExistingSources([]); });
+    return () => { cancelled = true; };
+  }, [ingestResult]);
   const [selectedCbomAssetId, setSelectedCbomAssetId] = React.useState<string | null>(null);
   const [cbomSeverityFilter, setCbomSeverityFilter] = React.useState('');
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -403,6 +419,12 @@ export function BomManagementPage({
         fd.append('file', file!); fd.append('bomType', bomType); fd.append('assetType', assetType);
         fd.append('assetName', assetName.trim()); fd.append('assetIdentifier', assetIdentifier.trim());
         if (supplier.trim()) fd.append('supplier', supplier.trim());
+        if (replaceSourceId) fd.append('sourceId', replaceSourceId);
+        // A CBOM describes cryptographic assets and can never speak for an asset's whole
+        // software inventory; the server rejects the combination too.
+        if (assertsCompleteInventory && bomType !== 'CBOM') {
+          fd.append('completeness', 'COMPLETE_ASSET_SOFTWARE');
+        }
         setIngestResult(await api.bomUpload(fd));
       }
     } catch (err) {
@@ -612,6 +634,52 @@ export function BomManagementPage({
                 <input type="text" className="form-input" placeholder="Acme Corp" value={supplier} onChange={e => setSupplier(e.target.value)} />
               </label>
             </div>
+            <div className="form-row">
+              <label className="form-label">Replaces existing source <span style={{ fontWeight: 400, color: 'var(--muted)' }}>(optional)</span>
+                <select
+                  className="form-input"
+                  value={replaceSourceId}
+                  onChange={e => setReplaceSourceId(e.target.value)}
+                >
+                  <option value="">Upload as a new, independent source</option>
+                  {existingSources
+                    .filter(source => source.bomType === bomType)
+                    .map(source => (
+                      <option key={source.id} value={source.id}>
+                        {source.bomType}
+                        {source.supplier ? ` · ${source.supplier}` : ''}
+                        {` · rev ${source.revision}`}
+                        {` · ${source.supportedComponentCount} components`}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <div style={{ fontSize: '0.8rem', color: 'var(--muted)', marginTop: 4 }}>
+                Leave this alone to add a source. Documents are not replaced just because they
+                share an asset and supplier — pick the source you mean to supersede.
+              </div>
+            </div>
+            {bomType !== 'CBOM' && (
+              <div className="form-row">
+                <label className="form-label" style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontWeight: 500 }}>
+                  <input
+                    type="checkbox"
+                    checked={assertsCompleteInventory}
+                    onChange={e => setAssertsCompleteInventory(e.target.checked)}
+                    style={{ marginTop: 3 }}
+                  />
+                  <span>
+                    This document lists the asset&rsquo;s complete software inventory
+                    <div style={{ fontWeight: 400, fontSize: '0.8rem', color: 'var(--muted)', marginTop: 2 }}>
+                      Recorded as an audited assertion against your user. Only a complete
+                      document lets a later replacement retire the components it omits; a
+                      partial one just stops vouching for them. Asserting this wrongly can
+                      retire software that is still installed.
+                    </div>
+                  </span>
+                </label>
+              </div>
+            )}
           </div>
 
           {/* Actions */}
