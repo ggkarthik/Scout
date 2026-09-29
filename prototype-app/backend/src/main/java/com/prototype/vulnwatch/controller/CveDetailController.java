@@ -795,6 +795,14 @@ public class CveDetailController {
         return ResponseEntity.ok(investigationAgentService.runAgent(cveId, request));
     }
 
+    @GetMapping("/{cveId}/advisory-equivalences")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','INVENTORY_ADMIN','SECURITY_ANALYST')")
+    public ResponseEntity<com.prototype.vulnwatch.service.vulningestion.AdvisoryDeduplicationService.AdvisoryEquivalenceGroup> getAdvisoryEquivalences(
+            @PathVariable String cveId) {
+        return ResponseEntity.ok(
+                deduplicationService.getEquivalentAdvisories(cveId));
+    }
+
     private void assertEntitled(String entitlementKey, String message) {
         if (!tenantEntitlementService.isEnabled(workspaceService.getWorkspace(), entitlementKey)) {
             throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN, message);

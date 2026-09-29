@@ -114,3 +114,48 @@ export function useAzureDiscoveryTargetsQuery(enabled = true) {
     enabled
   });
 }
+
+export interface OsvCoverageResponse {
+  ecosystemCounts: Record<string, number>;
+  totalAdvisories: number;
+  lastSyncedAt?: string;
+}
+
+export interface AdvisoryEquivalenceGroup {
+  primaryCveId: string;
+  ghsaIds: string[];
+  osvIds: string[];
+}
+
+export const useOsvCoverageQuery = (tenantId?: string) => {
+  const id = tenantId || 'default';
+
+  return useQuery({
+    queryKey: ['osv-coverage', id],
+    queryFn: async () => {
+      const response = await api.get(
+        `/api/tenants/${id}/osv/coverage`
+      );
+      return response.data as OsvCoverageResponse;
+    },
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    retry: 1,
+  });
+};
+
+export const useAdvisoryEquivalencesQuery = (cveId?: string) => {
+  return useQuery({
+    queryKey: ['advisory-equivalences', cveId],
+    queryFn: async () => {
+      if (!cveId) throw new Error('CVE ID required');
+
+      const response = await api.get(
+        `/api/cve-details/${cveId}/advisory-equivalences`
+      );
+      return response.data as AdvisoryEquivalenceGroup;
+    },
+    enabled: !!cveId,
+    staleTime: 1 * 60 * 1000, // 1 minute
+    retry: 1,
+  });
+};
