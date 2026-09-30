@@ -69,6 +69,7 @@ public class CveDetailController {
     private final com.prototype.vulnwatch.service.EolAnalysisService eolAnalysisService;
     private final com.prototype.vulnwatch.service.InvestigationAgentService investigationAgentService;
     private final TenantEntitlementService tenantEntitlementService;
+    private final com.prototype.vulnwatch.service.vulningestion.AdvisoryDeduplicationService deduplicationService;
 
     /**
      * GET /api/cve-detail/{cveId}

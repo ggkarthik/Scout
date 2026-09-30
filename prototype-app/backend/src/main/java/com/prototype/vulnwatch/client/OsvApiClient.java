@@ -12,9 +12,9 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpClientErrorException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.client.HttpClientErrorException;
 
 @Service
 @Slf4j
@@ -181,7 +181,7 @@ public class OsvApiClient {
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-class PackageVersion {
+public static class PackageVersion {
   private String ecosystem;
   private String name;
   private String version;

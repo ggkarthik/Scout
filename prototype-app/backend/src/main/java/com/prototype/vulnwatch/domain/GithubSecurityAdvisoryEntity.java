@@ -86,6 +86,4 @@ public class GithubSecurityAdvisoryEntity {
 
     @Column(nullable = false)
     private Instant createdAt;
-
-    private Instant updatedAt;
 }

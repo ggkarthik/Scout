@@ -1,9 +1,10 @@
 package com.prototype.vulnwatch.service.vulningestion;
 
+import com.prototype.vulnwatch.config.TenantContext;
 import com.prototype.vulnwatch.domain.OsvAdvisoryEntity;
+import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.repo.OsvAdvisoryRepository;
 import com.prototype.vulnwatch.service.FindingService;
-import com.prototype.vulnwatch.service.TenantContext;
 import com.prototype.vulnwatch.service.TenantService;
 import java.util.List;
 import java.util.UUID;
@@ -21,7 +22,6 @@ public class OsvTenantService {
     private final OsvAdvisoryRepository osvAdvisoryRepository;
     private final TenantService tenantService;
     private final FindingService findingService;
-    private final BackgroundTaskExecutionPolicy backgroundTaskExecutionPolicy;
 
     /**
      * Correlate OSV advisories for all enabled tenants
@@ -30,10 +30,6 @@ public class OsvTenantService {
      */
     @Scheduled(cron = "0 50 2 * * *")
     public void correlateOsvForAllEnabledTenants() {
-        if (!backgroundTaskExecutionPolicy.allowsBackgroundTask("vulnerability-ingestion.osv-tenant-correlation")) {
-            return;
-        }
-
         log.info("Starting OSV correlation for all tenants");
 
         try {
@@ -41,11 +37,12 @@ public class OsvTenantService {
 
             for (Tenant tenant : allTenants) {
                 try {
-                    TenantContext.run(tenant.getId(), () -> {
-                        correlateOsvAdvisoriesForTenant(tenant.getId());
-                    });
+                    TenantContext.setCurrentTenantId(tenant.getId());
+                    correlateOsvAdvisoriesForTenant(tenant.getId());
                 } catch (Exception e) {
                     log.warn("Failed to correlate OSV for tenant: {}", tenant.getId(), e);
+                } finally {
+                    TenantContext.clear();
                 }
             }
 
