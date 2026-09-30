@@ -26,6 +26,7 @@ import com.prototype.vulnwatch.domain.SbomUpload;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.domain.Vulnerability;
 import com.prototype.vulnwatch.domain.VulnerabilityTargetType;
+import com.prototype.vulnwatch.dto.BomSourceSelector;
 import com.prototype.vulnwatch.repo.AssetRepository;
 import com.prototype.vulnwatch.repo.BomComponentVulnerabilityLinkRepository;
 import com.prototype.vulnwatch.repo.BomComponentRepository;
@@ -40,8 +41,8 @@ import com.prototype.vulnwatch.repo.SbomUploadRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityRepository;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
-import java.util.List;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -254,7 +255,8 @@ class SbomUploadPostgresIntegrationTest {
                      "cpe":"cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*"}
                   ]
                 }
-                """.getBytes(StandardCharsets.UTF_8), "ai-bom.cdx.json");
+                """.getBytes(StandardCharsets.UTF_8), "ai-bom.cdx.json",
+                BomSourceSelector.independent());
 
         assertEquals(2, result.componentCount());
         // The upload result is an immediate snapshot; finding work is queued.
