@@ -40,7 +40,6 @@ public class GithubSecurityAdvisoryEntity {
     @Column(nullable = false, length = 20)
     private String severity;
 
-    @Column(precision = 3, scale = 1)
     private Double cvssScore;
 
     @Column(length = 100)
@@ -86,6 +85,4 @@ public class GithubSecurityAdvisoryEntity {
 
     @Column(nullable = false)
     private Instant createdAt;
-
-    private Instant updatedAt;
 }

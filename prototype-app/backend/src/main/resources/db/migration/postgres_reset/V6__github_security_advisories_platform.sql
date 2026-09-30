@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS public.github_security_advisories (
 
     github_advisory_url VARCHAR(500),
     published_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT NOW(),
     withdrawn_at TIMESTAMP,
 
     first_synced_at TIMESTAMP DEFAULT NOW(),
@@ -34,8 +34,7 @@ CREATE TABLE IF NOT EXISTS public.github_security_advisories (
     is_applicable BOOLEAN DEFAULT TRUE,
     sync_hash VARCHAR(64),
 
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
+    created_at TIMESTAMP DEFAULT NOW()
 );
 
 CREATE INDEX idx_ghsa_id ON public.github_security_advisories(ghsa_id);

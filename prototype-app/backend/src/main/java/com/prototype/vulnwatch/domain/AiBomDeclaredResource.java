@@ -3,6 +3,8 @@ package com.prototype.vulnwatch.domain;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.Setter;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -29,6 +31,8 @@ import java.util.UUID;
     }
 )
 @Data
+@Getter
+@Setter
 @EqualsAndHashCode(of = "id")
 public class AiBomDeclaredResource {
 
