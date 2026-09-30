@@ -37,7 +37,7 @@ const BOM_ITEM = {
   supported: true,
   componentCount: 12,
   evidenceCount: 18,
-  correlatedComponentCount: 8,
+  correlatedComponentCount: 2,
   vulnerabilityLinkCount: 3,
   status: 'ACTIVE',
   ingestedAt: '2026-01-01T00:00:00Z',

@@ -215,9 +215,10 @@ public class BomInventoryReadService {
                 .filter(r -> r.getTenant().getId().equals(tenant.getId()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOM record not found"));
 
-        Pageable pageable = PageRequest.of(0, 500);
-        List<com.prototype.vulnwatch.domain.BomComponent> bomComponents = bomComponentRepository
-                .findByBomIdAndActiveTrue(bomId, pageable);
+        List<com.prototype.vulnwatch.domain.BomComponent> allBomComponents =
+                bomComponentRepository.findByBomIdAndActiveTrue(bomId);
+        List<com.prototype.vulnwatch.domain.BomComponent> bomComponents =
+                allBomComponents.stream().limit(500).toList();
         List<UUID> componentIds = bomComponents.stream().map(com.prototype.vulnwatch.domain.BomComponent::getId).toList();
         Map<UUID, Integer> evidenceCountByComponent = toCountMap(
                 bomComponentEvidenceRepository.findByBomComponentIdIn(componentIds),
@@ -227,7 +228,9 @@ public class BomInventoryReadService {
                 bomComponentVulnerabilityLinkRepository.findByBomComponentIdIn(componentIds),
                 com.prototype.vulnwatch.domain.BomComponentVulnerabilityLink::getBomComponentId
         );
-        Map<UUID, String> workflowStatusByComponent = bomComponentWorkflowRepository.findByBomComponentIdIn(componentIds)
+        List<UUID> allComponentIds = allBomComponents.stream()
+                .map(com.prototype.vulnwatch.domain.BomComponent::getId).toList();
+        Map<UUID, String> workflowStatusByComponent = bomComponentWorkflowRepository.findByBomComponentIdIn(allComponentIds)
                 .stream()
                 .collect(Collectors.toMap(
                         com.prototype.vulnwatch.domain.BomComponentWorkflow::getBomComponentId,
@@ -237,7 +240,7 @@ public class BomInventoryReadService {
         List<BomComponentResponse> components = bomComponents.stream()
                 .map(component -> toComponentResponse(component, vulnerabilityCountByComponent, evidenceCountByComponent, workflowStatusByComponent))
                 .toList();
-        List<BomWorkflowSummaryResponse> workflowSummary = bomComponents.stream()
+        List<BomWorkflowSummaryResponse> workflowSummary = allBomComponents.stream()
                 .collect(Collectors.groupingBy(
                         component -> workflowStatusByComponent.getOrDefault(component.getId(), component.getWorkflowStatus().name()),
                         Collectors.counting()
@@ -249,9 +252,11 @@ public class BomInventoryReadService {
                 .toList();
         long evidenceCount = bomComponentEvidenceRepository.countByBomId(bomId);
         long vulnerabilityLinkCount = bomComponentVulnerabilityLinkRepository.countByBomId(bomId);
-        long correlatedComponentCount = bomComponents.stream()
-                .filter(component -> vulnerabilityCountByComponent.getOrDefault(component.getId(), 0) > 0)
-                .count();
+        Set<UUID> linkedComponentIds = bomComponentVulnerabilityLinkRepository.findByBomIdIn(List.of(bomId))
+                .stream().map(com.prototype.vulnwatch.domain.BomComponentVulnerabilityLink::getBomComponentId)
+                .collect(Collectors.toSet());
+        long correlatedComponentCount = allBomComponents.stream()
+                .filter(component -> linkedComponentIds.contains(component.getId())).count();
         BomInspectionResponse inspection = sbomParserService.inspectResolved(
                 record.getFormat() != null ? record.getFormat().name() : null,
                 record.getFormatVersion(),
@@ -276,7 +281,7 @@ public class BomInventoryReadService {
                 record.getSourceUrl(),
                 record.getChecksumSha256(),
                 inspection,
-                record.getComponentCount(),
+                allBomComponents.size(),
                 evidenceCount,
                 vulnerabilityLinkCount,
                 correlatedComponentCount,
@@ -327,8 +332,7 @@ public class BomInventoryReadService {
         List<InventoryComponent> inventoryComponents = inventoryComponentRepository
                 .findActiveApplicationComponentsWithAsset(
                         tenant.getId(),
-                        InventoryComponentStatus.ACTIVE,
-                        PageRequest.of(0, 2000)
+                        InventoryComponentStatus.ACTIVE
                 );
         List<UUID> inventoryComponentIds = inventoryComponents.stream().map(InventoryComponent::getId).toList();
         Map<UUID, List<ComponentVulnerabilityState>> statesByComponent = new HashMap<>();
@@ -339,25 +343,10 @@ public class BomInventoryReadService {
                             .computeIfAbsent(s.getComponent().getId(), k -> new ArrayList<>())
                             .add(s));
         }
-        Map<String, Long> findingCountByPackageKey = findingRepository
-                .countOpenByEcosystemPackageForTenant(tenant.getId())
-                .stream()
-                .collect(Collectors.toMap(
-                        row -> ((String) row[0]) + ":" + ((String) row[1]),
-                        row -> (Long) row[2]
-                ));
-        Map<String, Long> criticalFindingCountByPackageKey = new HashMap<>();
-        Map<String, Long> highFindingCountByPackageKey = new HashMap<>();
-        findingRepository.countOpenByEcosystemPackageAndSeverityForTenant(tenant.getId()).forEach(row -> {
-            String key = ((String) row[0]) + ":" + ((String) row[1]);
-            String severity = (String) row[2];
-            long count = (Long) row[3];
-            if ("CRITICAL".equals(severity)) {
-                criticalFindingCountByPackageKey.merge(key, count, Long::sum);
-            } else if ("HIGH".equals(severity)) {
-                highFindingCountByPackageKey.merge(key, count, Long::sum);
-            }
-        });
+        Map<UUID, List<com.prototype.vulnwatch.domain.Finding>> findingsByComponent = inventoryComponentIds.isEmpty()
+                ? Map.of()
+                : findingRepository.findOpenByTenantAndComponentIds(tenant.getId(), inventoryComponentIds).stream()
+                        .collect(Collectors.groupingBy(finding -> finding.getComponent().getId()));
 
         List<BomComponentSummaryResponse> summaries = new ArrayList<>();
         inventoryComponents.forEach(c -> {
@@ -391,10 +380,13 @@ public class BomInventoryReadService {
                             .stream().distinct().sorted().toList();
             double score = computeApplicationRiskScore(critical, high, medium, low);
 
-            String pkgKey = (c.getEcosystem() != null ? c.getEcosystem().toLowerCase() : "") + ":" + c.getPackageName().toLowerCase();
-            int findingCount = findingCountByPackageKey.getOrDefault(pkgKey, 0L).intValue();
-            int criticalFindingCount = criticalFindingCountByPackageKey.getOrDefault(pkgKey, 0L).intValue();
-            int highFindingCount = highFindingCountByPackageKey.getOrDefault(pkgKey, 0L).intValue();
+            List<com.prototype.vulnwatch.domain.Finding> componentFindings =
+                    findingsByComponent.getOrDefault(c.getId(), List.of());
+            int findingCount = componentFindings.size();
+            int criticalFindingCount = (int) componentFindings.stream()
+                    .filter(finding -> "CRITICAL".equals(resolvedFindingSeverity(finding))).count();
+            int highFindingCount = (int) componentFindings.stream()
+                    .filter(finding -> "HIGH".equals(resolvedFindingSeverity(finding))).count();
 
             summaries.add(new BomComponentSummaryResponse(
                     c.getId().toString(),
@@ -819,11 +811,26 @@ public class BomInventoryReadService {
         return "NONE";
     }
 
+    private String resolvedFindingSeverity(com.prototype.vulnwatch.domain.Finding finding) {
+        if (finding.getSeverityOverride() != null && !finding.getSeverityOverride().isBlank()) {
+            return finding.getSeverityOverride().toUpperCase(java.util.Locale.ROOT);
+        }
+        if (finding.getVulnerability() != null && finding.getVulnerability().getSeverity() != null) {
+            return finding.getVulnerability().getSeverity().toUpperCase(java.util.Locale.ROOT);
+        }
+        return finding.getRiskScore() >= 9 ? "CRITICAL" : finding.getRiskScore() >= 7 ? "HIGH" : "OTHER";
+    }
+
     private BomInventoryItemResponse toInventoryItem(BomIngestionRecord r) {
         long evidenceCount = bomComponentEvidenceRepository.countByBomId(r.getId());
         long vulnerabilityLinkCount = bomComponentVulnerabilityLinkRepository.countByBomId(r.getId());
-        long correlatedComponentCount = bomComponentRepository.findByBomIdAndActiveTrue(r.getId()).stream()
-                .filter(component -> component.getWorkflowStatus() != com.prototype.vulnwatch.domain.BomWorkflowStatus.DISCOVERED)
+        Set<UUID> linkedComponentIds = bomComponentVulnerabilityLinkRepository.findByBomIdIn(List.of(r.getId())).stream()
+                .map(com.prototype.vulnwatch.domain.BomComponentVulnerabilityLink::getBomComponentId)
+                .collect(Collectors.toSet());
+        List<com.prototype.vulnwatch.domain.BomComponent> activeComponents =
+                bomComponentRepository.findByBomIdAndActiveTrue(r.getId());
+        long correlatedComponentCount = activeComponents.stream()
+                .filter(component -> linkedComponentIds.contains(component.getId()))
                 .count();
         BomInspectionResponse inspection = sbomParserService.inspectResolved(
                 r.getFormat() != null ? r.getFormat().name() : null,
@@ -847,7 +854,7 @@ public class BomInventoryReadService {
                 r.getSourceUrl(),
                 inspection.supportLevel(),
                 inspection.supported(),
-                r.getComponentCount(),
+                activeComponents.size(),
                 evidenceCount,
                 vulnerabilityLinkCount,
                 correlatedComponentCount,

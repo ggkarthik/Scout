@@ -113,6 +113,33 @@ class BomInventoryReadServicePostgresIntegrationTest {
         assertEquals(1, summary.highFindingCount());
     }
 
+    @Test
+    void bomComponentFindingsBelongToTheExactInventoryComponent() {
+        String suffix = "bom-component-scope-" + TENANT_SEQUENCE.incrementAndGet();
+        Tenant tenant = tenantService.getDefaultTenant();
+        Asset firstAsset = createApplicationAsset(tenant, "first-" + suffix);
+        Asset secondAsset = createApplicationAsset(tenant, "second-" + suffix);
+        InventoryComponent affected = createActiveComponent(tenant, firstAsset,
+                createSbom(tenant, firstAsset, suffix + "-first"), suffix);
+        InventoryComponent unaffected = createActiveComponent(tenant, secondAsset,
+                createSbom(tenant, secondAsset, suffix + "-second"), suffix);
+        unaffected.setVersion("2.0.0");
+        inventoryComponentRepository.save(unaffected);
+        createOpenFinding(tenant, firstAsset, affected,
+                createVulnerability("CVE-2099-" + suffix, "CRITICAL"));
+
+        List<BomComponentSummaryResponse> summaries = bomInventoryReadService.getBomComponentSummaries(tenant, 0, 50);
+        BomComponentSummaryResponse affectedSummary = summaries.stream()
+                .filter(item -> item.componentId().equals(affected.getId().toString())).findFirst().orElseThrow();
+        BomComponentSummaryResponse unaffectedSummary = summaries.stream()
+                .filter(item -> item.componentId().equals(unaffected.getId().toString())).findFirst().orElseThrow();
+
+        assertEquals(1, affectedSummary.findingCount());
+        assertEquals(1, affectedSummary.criticalFindingCount());
+        assertEquals(0, unaffectedSummary.findingCount());
+        assertEquals(0, unaffectedSummary.criticalFindingCount());
+    }
+
     private Asset createApplicationAsset(Tenant tenant, String name) {
         Asset asset = new Asset();
         asset.setTenant(tenant);

@@ -95,6 +95,7 @@ public class BomIngestionOrchestrator {
     private final FindingRepository findingRepository;
     private final CpeDimensionService cpeDimensionService;
     private final CbomIngestionService cbomIngestionService;
+    private final ApplicabilityDecisionService applicabilityDecisionService;
     private final ObjectMapper objectMapper;
     private final BomSourceService bomSourceService;
     private final BomContributionService bomContributionService;
@@ -119,6 +120,7 @@ public class BomIngestionOrchestrator {
             FindingRepository findingRepository,
             CpeDimensionService cpeDimensionService,
             CbomIngestionService cbomIngestionService,
+            ApplicabilityDecisionService applicabilityDecisionService,
             ObjectMapper objectMapper,
             BomSourceService bomSourceService,
             BomContributionService bomContributionService,
@@ -142,6 +144,7 @@ public class BomIngestionOrchestrator {
         this.findingRepository = findingRepository;
         this.cpeDimensionService = cpeDimensionService;
         this.cbomIngestionService = cbomIngestionService;
+        this.applicabilityDecisionService = applicabilityDecisionService;
         this.objectMapper = objectMapper;
         this.bomSourceService = bomSourceService;
         this.bomContributionService = bomContributionService;
@@ -981,8 +984,13 @@ public class BomIngestionOrchestrator {
         if (targets == null || targets.isEmpty()) {
             return;
         }
+        InventoryComponent versionCandidate = new InventoryComponent();
+        versionCandidate.setVersion(component.getVersion());
         for (VulnerabilityTarget target : targets) {
             if (target == null || target.getVulnerability() == null || target.getVulnerability().getExternalId() == null) {
+                continue;
+            }
+            if (!applicabilityDecisionService.evaluateCorrelation(versionCandidate, target).isAffected()) {
                 continue;
             }
             String vulnerabilityKey = target.getVulnerability().getExternalId();

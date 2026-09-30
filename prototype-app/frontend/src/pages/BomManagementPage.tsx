@@ -702,8 +702,14 @@ export function BomManagementPage({
             <div className="ingestion-result ingestion-result--success">
               <div className="ingestion-result-metrics">
                 <div className="result-metric"><span className="result-metric-value">{ingestResult.componentCount}</span><span className="result-metric-label">Components ingested</span></div>
-                <div className="result-metric"><span className="result-metric-value">{ingestResult.findingsGenerated}</span><span className="result-metric-label">Findings generated</span></div>
+                {ingestResult.bomType === 'CBOM' && <div className="result-metric"><span className="result-metric-value">{ingestResult.findingsGenerated}</span><span className="result-metric-label">Findings generated</span></div>}
               </div>
+              {ingestResult.bomType !== 'CBOM' && (
+                <p className="panel-caption" style={{ margin: '8px 0' }}>
+                  Software vulnerability correlation and finding creation run after ingestion. Check BOM Inventory for component links and Findings for confirmed vulnerabilities.
+                  {ingestResult.bomType === 'AI_BOM' && ' AI Grid posture findings require an AI policy assessment; uploading an AI BOM alone does not create them.'}
+                </p>
+              )}
               <div className="result-meta">
                 <span>{ingestResult.action} · {ingestResult.bomType} · {ingestResult.format} {ingestResult.formatVersion}</span>
                 <span>{ingestResult.specFamily} · {ingestResult.documentFormat} · {ingestResult.supportLevel}</span>

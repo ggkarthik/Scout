@@ -9,7 +9,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.domain.Asset;
+import com.prototype.vulnwatch.domain.AssetType;
 import com.prototype.vulnwatch.domain.ApplicabilityState;
+import com.prototype.vulnwatch.domain.BomComponentCategory;
+import com.prototype.vulnwatch.domain.BomType;
 import com.prototype.vulnwatch.domain.ComponentVulnerabilityState;
 import com.prototype.vulnwatch.domain.Finding;
 import com.prototype.vulnwatch.domain.FindingStatus;
@@ -24,6 +27,9 @@ import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.domain.Vulnerability;
 import com.prototype.vulnwatch.domain.VulnerabilityTargetType;
 import com.prototype.vulnwatch.repo.AssetRepository;
+import com.prototype.vulnwatch.repo.BomComponentVulnerabilityLinkRepository;
+import com.prototype.vulnwatch.repo.BomComponentRepository;
+import com.prototype.vulnwatch.repo.BomIngestionRecordRepository;
 import com.prototype.vulnwatch.repo.ComponentVulnerabilityStateRepository;
 import com.prototype.vulnwatch.repo.FindingRepository;
 import com.prototype.vulnwatch.repo.InventoryComponentCpeMapRepository;
@@ -35,6 +41,7 @@ import com.prototype.vulnwatch.repo.VulnerabilityTargetRepository;
 import com.prototype.vulnwatch.repo.VulnerabilityRepository;
 import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
 import java.util.List;
+import java.nio.charset.StandardCharsets;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -109,6 +116,18 @@ class SbomUploadPostgresIntegrationTest {
 
     @Autowired
     private FindingRepository findingRepository;
+
+    @Autowired
+    private BomIngestionRecordRepository bomIngestionRecordRepository;
+
+    @Autowired
+    private BomComponentVulnerabilityLinkRepository bomComponentVulnerabilityLinkRepository;
+
+    @Autowired
+    private BomComponentRepository bomComponentRepository;
+
+    @Autowired
+    private BomIngestionOrchestrator bomIngestionOrchestrator;
 
     @Autowired
     private InventoryComponentCpeMapRepository inventoryComponentCpeMapRepository;
@@ -187,6 +206,11 @@ class SbomUploadPostgresIntegrationTest {
         assertTrue(vulnerabilityTargetRepository.findByVulnerability(vulnerability).stream()
                 .anyMatch(target -> target.getTargetType() == VulnerabilityTargetType.CPE));
         assertFalse(inventoryComponentCpeMapRepository.findByComponent_Id(initialActiveComponents.get(0).getId()).isEmpty());
+        var initialBom = bomIngestionRecordRepository.findByTenant_IdAndStatus(
+                tenant.getId(), com.prototype.vulnwatch.domain.BomStatus.ACTIVE).stream().findFirst().orElseThrow();
+        assertEquals(1, bomComponentVulnerabilityLinkRepository.countByBomId(initialBom.getId()));
+        assertEquals(1, findingRepository.findByComponent(initialActiveComponents.get(0)).stream()
+                .filter(finding -> finding.getStatus() == FindingStatus.OPEN).count());
         JsonNode secondUpload = fetchSbom(
                 "log4j-core-2.17.2.json",
                 sbomPayload(
@@ -208,6 +232,51 @@ class SbomUploadPostgresIntegrationTest {
         List<SbomUpload> uploads = sbomUploadRepository.findByAssetOrderByUploadedAtDesc(asset);
         assertEquals(2, uploads.size());
         assertTrue(uploads.stream().allMatch(upload -> upload.getStatus() == SbomIngestionStatus.SUCCESS));
+    }
+
+    @Test
+    void aiBomLibraryCorrelatesToCveAndCreatesFindingOnRealPostgres() throws Exception {
+        ingestAdvisory();
+        Tenant tenant = tenantService.getDefaultTenant();
+        String assetIdentifier = "app:postgres-ai-bom-correlation";
+        var result = bomIngestionOrchestrator.ingestFromUpload(
+                tenant, BomType.AI_BOM, AssetType.APPLICATION,
+                "postgres-ai-bom-correlation", assetIdentifier, null,
+                """
+                {
+                  "bomFormat": "CycloneDX",
+                  "specVersion": "1.5",
+                  "version": 1,
+                  "components": [
+                    {"type":"machine-learning-model","name":"fraud-model","version":"1.0"},
+                    {"type":"library","name":"log4j","version":"2.14.1",
+                     "purl":"pkg:maven/org.apache.logging.log4j/log4j@2.14.1",
+                     "cpe":"cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*"}
+                  ]
+                }
+                """.getBytes(StandardCharsets.UTF_8), "ai-bom.cdx.json");
+
+        assertEquals(2, result.componentCount());
+        // The upload result is an immediate snapshot; finding work is queued.
+        assertEquals(0, result.findingsGenerated());
+        var bomComponents = bomComponentRepository.findByBomIdAndActiveTrue(result.bomId());
+        assertEquals(2, bomComponents.size());
+        assertEquals(BomComponentCategory.AI_MODEL, bomComponents.stream()
+                .filter(component -> component.getName().equals("fraud-model"))
+                .findFirst().orElseThrow().getCategory());
+        assertEquals(BomComponentCategory.THIRD_PARTY, bomComponents.stream()
+                .filter(component -> component.getName().equals("log4j"))
+                .findFirst().orElseThrow().getCategory());
+        assertEquals(1, bomComponentVulnerabilityLinkRepository.countByBomId(result.bomId()));
+
+        findingDeltaQueueService.processPendingDeltas();
+        Asset asset = assetRepository.findByIdentifier(assetIdentifier).orElseThrow();
+        var library = inventoryComponentRepository
+                .findByAssetAndComponentStatus(asset, InventoryComponentStatus.ACTIVE).stream()
+                .filter(component -> component.getPackageName().equals("log4j"))
+                .findFirst().orElseThrow();
+        assertEquals(1, findingRepository.findByComponent(library).stream()
+                .filter(finding -> finding.getStatus() == FindingStatus.OPEN).count());
     }
 
     private void ingestAdvisory() throws Exception {

@@ -76,12 +76,11 @@ public interface InventoryComponentRepository extends JpaRepository<InventoryCom
             where c.tenant.id = :tenantId
               and c.componentStatus = :status
               and a.type = com.prototype.vulnwatch.domain.AssetType.APPLICATION
-            order by a.name asc, c.packageName asc
+            order by a.name asc, c.packageName asc, c.id asc
             """)
     List<InventoryComponent> findActiveApplicationComponentsWithAsset(
             @Param("tenantId") UUID tenantId,
-            @Param("status") InventoryComponentStatus status,
-            Pageable pageable
+            @Param("status") InventoryComponentStatus status
     );
 
     List<InventoryComponent> findByAsset(Asset asset);

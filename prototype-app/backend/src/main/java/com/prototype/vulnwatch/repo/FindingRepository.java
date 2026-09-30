@@ -62,6 +62,18 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
     List<Finding> findByAsset_IdIn(Collection<UUID> assetIds);
     List<Finding> findByComponent(InventoryComponent component);
     List<Finding> findByComponent_IdIn(Collection<UUID> componentIds);
+    @Query("""
+            select f from Finding f
+            join fetch f.component c
+            left join fetch f.vulnerability
+            where f.tenant.id = :tenantId
+              and f.status = com.prototype.vulnwatch.domain.FindingStatus.OPEN
+              and c.id in :componentIds
+            """)
+    List<Finding> findOpenByTenantAndComponentIds(
+            @Param("tenantId") UUID tenantId,
+            @Param("componentIds") Collection<UUID> componentIds
+    );
     java.util.Optional<Finding> findFirstByComponent_IdAndVulnerability_Id(UUID componentId, UUID vulnerabilityId);
     List<Finding> findByVulnerability_Id(UUID vulnerabilityId);
     List<Finding> findByTenant_IdAndVulnerability_Id(UUID tenantId, UUID vulnerabilityId);

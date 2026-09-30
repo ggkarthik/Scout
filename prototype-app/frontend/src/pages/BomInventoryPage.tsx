@@ -309,9 +309,9 @@ function BomDetailPanel({ bomId, onClose }: { bomId: string; onClose: () => void
 
           <div className="panel bom-components-panel">
             <div className="panel-header">
-              <h4>Components ({detail.components.length})</h4>
+              <h4>Components ({detail.componentCount.toLocaleString()})</h4>
               <span className="panel-caption">
-                {detail.correlatedComponentCount} correlated · {detail.vulnerabilityLinkCount} vulnerability links
+                {detail.correlatedComponentCount} with vulnerability links · {detail.vulnerabilityLinkCount} CVE links · {detail.components.length} shown
               </span>
             </div>
             {detail.components.length === 0 ? (
@@ -546,8 +546,8 @@ export function BomInventoryPage() {
             {[
               ['BOM documents', summary.documentCount],
               ['Components', summary.componentCount],
-              ['Correlated components', summary.correlatedComponentCount],
-              ['Vulnerability links', summary.vulnerabilityLinkCount],
+              ['Components with CVE links', summary.correlatedComponentCount],
+              ['Component–CVE links', summary.vulnerabilityLinkCount],
               ['Source systems', summary.sourceSystemCount],
             ].map(([label, value]) => (
               <div key={label} className="panel" style={{ padding: 16 }}>
@@ -556,6 +556,10 @@ export function BomInventoryPage() {
               </div>
             ))}
           </div>
+          <p className="panel-caption" style={{ margin: 0 }}>
+            Totals cover all active BOM types. The type filter changes the table only. CVE links are matching evidence;
+            findings are created after applicability, source, and policy checks.
+          </p>
         </div>
       )}
 

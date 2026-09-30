@@ -268,7 +268,15 @@ export function BomComponents() {
 
   const { data, isPending, isError } = useQuery({
     queryKey: ['bom-components'],
-    queryFn: () => api.listBomComponents(),
+    queryFn: async () => {
+      const all: BomComponentSummaryItem[] = [];
+      const pageSize = 2000;
+      for (let page = 0; ; page += 1) {
+        const batch = await api.listBomComponents(page, pageSize);
+        all.push(...batch);
+        if (batch.length < pageSize) return all;
+      }
+    },
   });
 
   const items = React.useMemo(() => data ?? [], [data]);
