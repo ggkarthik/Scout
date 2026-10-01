@@ -1,6 +1,6 @@
 package com.prototype.vulnwatch.controller;
 
-import com.prototype.vulnwatch.config.TenantContext;
+import com.prototype.vulnwatch.service.TenantContext;
 import com.prototype.vulnwatch.domain.GithubRepositoryComponentAdvisoryEntity;
 import com.prototype.vulnwatch.domain.GithubSecurityAdvisoryEntity;
 import com.prototype.vulnwatch.dto.GithubAdvisoryIntegrationStatusResponse;

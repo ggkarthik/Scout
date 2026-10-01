@@ -1,6 +1,6 @@
 -- migration-guard: platform-only
 
-CREATE TABLE osv_advisories (
+CREATE TABLE platform.osv_advisories (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     osv_id VARCHAR(50) UNIQUE NOT NULL,
@@ -18,7 +18,7 @@ CREATE TABLE osv_advisories (
     modified_at TIMESTAMP,
     withdrawn_at TIMESTAMP,
 
-    references JSONB,
+    reference_data JSONB,
     osv_data JSONB NOT NULL,
 
     source VARCHAR(50) NOT NULL,
@@ -28,12 +28,12 @@ CREATE TABLE osv_advisories (
     synced_at TIMESTAMP
 );
 
-CREATE INDEX idx_osv_ecosystem_package ON osv_advisories(ecosystem, package_name);
-CREATE INDEX idx_osv_package_name ON osv_advisories(package_name);
-CREATE INDEX idx_osv_modified ON osv_advisories(modified_at DESC);
-CREATE INDEX idx_osv_source ON osv_advisories(source);
+CREATE INDEX idx_osv_ecosystem_package ON platform.osv_advisories(ecosystem, package_name);
+CREATE INDEX idx_osv_package_name ON platform.osv_advisories(package_name);
+CREATE INDEX idx_osv_modified ON platform.osv_advisories(modified_at DESC);
+CREATE INDEX idx_osv_source ON platform.osv_advisories(source);
 
-CREATE TABLE advisory_equivalences (
+CREATE TABLE platform.advisory_equivalences (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     nvd_cve_id VARCHAR(50),
@@ -56,7 +56,7 @@ CREATE TABLE advisory_equivalences (
 );
 
 CREATE UNIQUE INDEX idx_advisory_equivalences_keys
-    ON advisory_equivalences(COALESCE(nvd_cve_id, ''), COALESCE(ghsa_id, ''), COALESCE(osv_id, ''));
-CREATE INDEX idx_advisory_equivalences_cve ON advisory_equivalences(nvd_cve_id);
-CREATE INDEX idx_advisory_equivalences_ghsa ON advisory_equivalences(ghsa_id);
-CREATE INDEX idx_advisory_equivalences_osv ON advisory_equivalences(osv_id);
+    ON platform.advisory_equivalences(COALESCE(nvd_cve_id, ''), COALESCE(ghsa_id, ''), COALESCE(osv_id, ''));
+CREATE INDEX idx_advisory_equivalences_cve ON platform.advisory_equivalences(nvd_cve_id);
+CREATE INDEX idx_advisory_equivalences_ghsa ON platform.advisory_equivalences(ghsa_id);
+CREATE INDEX idx_advisory_equivalences_osv ON platform.advisory_equivalences(osv_id);

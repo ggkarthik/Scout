@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Users, Settings, LogBook, FileText, MoreVertical } from 'lucide-react';
+import { Users, Settings, BookOpen, FileText, MoreVertical } from 'lucide-react';
 
 export const PlatformNavigation: React.FC = () => {
   const location = useLocation();
@@ -66,7 +66,7 @@ export const PlatformNavigation: React.FC = () => {
         <ul className="nav-list">
           <li className={isActive('/platform/audit') ? 'active' : ''}>
             <Link to="/platform/audit" className="nav-item">
-              <LogBook size={18} />
+              <BookOpen size={18} />
               <span>Platform Audit</span>
             </Link>
           </li>

@@ -5,8 +5,9 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.prototype.vulnwatch.client.OsvApiClient.OsvQueryResponse;
-import com.prototype.vulnwatch.client.OsvApiClient.OsvVulnerability;
+import com.prototype.vulnwatch.client.http.OsvApiClient;
+import com.prototype.vulnwatch.client.http.OsvApiClient.OsvQueryResponse;
+import com.prototype.vulnwatch.client.http.OsvApiClient.OsvVulnerability;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;

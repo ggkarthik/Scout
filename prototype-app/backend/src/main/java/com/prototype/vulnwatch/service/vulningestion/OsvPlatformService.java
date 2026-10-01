@@ -1,13 +1,15 @@
 package com.prototype.vulnwatch.service.vulningestion;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.prototype.vulnwatch.client.OsvApiClient;
-import com.prototype.vulnwatch.client.OsvApiClient.OsvQueryResponse;
-import com.prototype.vulnwatch.client.OsvApiClient.OsvVulnerability;
+import com.prototype.vulnwatch.client.http.OsvApiClient;
+import com.prototype.vulnwatch.client.http.OsvApiClient.OsvQueryResponse;
+import com.prototype.vulnwatch.client.http.OsvApiClient.OsvVulnerability;
 import com.prototype.vulnwatch.domain.AdvisoryEquivalenceEntity;
 import com.prototype.vulnwatch.domain.OsvAdvisoryEntity;
+import com.prototype.vulnwatch.domain.SoftwareIdentity;
 import com.prototype.vulnwatch.repo.AdvisoryEquivalenceRepository;
 import com.prototype.vulnwatch.repo.OsvAdvisoryRepository;
+import com.prototype.vulnwatch.repo.SoftwareIdentityRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Collections;
@@ -22,7 +24,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import com.prototype.vulnwatch.repo.SoftwareIdentityRepository;
 
 @Service
 @Slf4j
@@ -39,11 +40,13 @@ public class OsvPlatformService {
   public OsvPlatformService(
       OsvApiClient osvApiClient,
       OsvAdvisoryRepository osvAdvisoryRepository,
-      AdvisoryEquivalenceRepository equivalenceRepository) {
+      AdvisoryEquivalenceRepository equivalenceRepository,
+      SoftwareIdentityRepository softwareIdentityRepository) {
     this.osvApiClient = osvApiClient;
     this.osvAdvisoryRepository = osvAdvisoryRepository;
     this.equivalenceRepository = equivalenceRepository;
-    this.objectMapper = new ObjectMapper();
+    this.softwareIdentityRepository = softwareIdentityRepository;
+    this.objectMapper = new ObjectMapper().findAndRegisterModules();
   }
 
   @Transactional
@@ -113,10 +116,21 @@ public class OsvPlatformService {
     Map<String, Set<String>> result = new HashMap<>();
 
     try {
-      // Query all unique software identities grouped by ecosystem
-      // TODO: Implement this query based on your actual SoftwareIdentity structure
-      // For now, return empty map (will be populated when real packages exist)
-      // In production, this should query softwareIdentityRepository
+      for (SoftwareIdentity identity : softwareIdentityRepository.findAll()) {
+        String purl = identity.getPurl();
+        if (purl == null || !purl.startsWith("pkg:")) {
+          continue;
+        }
+        int slash = purl.indexOf('/');
+        if (slash < 5) {
+          continue;
+        }
+        String ecosystem = purl.substring(4, slash);
+        String packageName = purl.substring(slash + 1).split("[@?\\#]", 2)[0];
+        if (!packageName.isBlank()) {
+          result.computeIfAbsent(ecosystem, ignored -> new HashSet<>()).add(packageName);
+        }
+      }
 
       log.debug("Found {} ecosystems with packages", result.size());
       return result;
@@ -163,7 +177,7 @@ public class OsvPlatformService {
     }
   }
 
-  private void buildEquivalenceMappings() {
+  void buildEquivalenceMappings() {
     log.debug("Building advisory equivalence mappings");
 
     try {

@@ -17,6 +17,15 @@ LINES = (
 )
 VERSION = re.compile(r"^V(\d+)__.+\.sql$")
 RESET_RECORD = "prototype-app/docs/migration-reset.md"
+RETIRED_COLLISIONS = {
+    "prototype-app/backend/src/main/resources/db/migration/postgres_reset/V4__github_security_advisories_platform.sql",
+    "prototype-app/backend/src/main/resources/db/migration/postgres_reset/V4__osv_supplement.sql",
+    "prototype-app/backend/src/main/resources/db/migration/tenant/V4__github_security_advisories_tenant.sql",
+}
+REPAIRED_OSV_RENAME = (
+    "prototype-app/backend/src/main/resources/db/migration/postgres_reset/V4__osv_supplement.sql",
+    "prototype-app/backend/src/main/resources/db/migration/postgres_reset/V7__osv_supplement_platform.sql",
+)
 
 
 def git(*args: str) -> str:
@@ -57,8 +66,14 @@ def main() -> int:
     for entry in changed:
         fields = entry.split("\t")
         status, paths = fields[0], fields[1:]
+        if status.startswith("R") and tuple(paths) == REPAIRED_OSV_RENAME:
+            if 7 in migrations_at(base, LINES[0]):
+                failures.append(f"migration version V7 already exists on the base branch in {LINES[0]}")
+            continue
         for path in paths:
             if not VERSION.match(Path(path).name):
+                continue
+            if status == "D" and path in RETIRED_COLLISIONS:
                 continue
             if status.startswith(("M", "D", "R")) and not reset:
                 failures.append(f"already-existing migration changed: {path}")

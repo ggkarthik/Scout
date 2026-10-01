@@ -1,6 +1,6 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { apiClient } from '../../api/client';
+import { apiRequest } from '../../api/client';
 
 interface OsvCoverageResponse {
   ecosystemCounts: Record<string, number>;
@@ -20,12 +20,11 @@ const ecosystemIcons: Record<string, string> = {
   'Other': '📚',
 };
 
-export const OsvConnectorPage: React.FC = () => {
+export const OsvConnectorPage: React.FC<{ tenantId: string }> = ({ tenantId }) => {
   const { data: coverage, isLoading } = useQuery({
-    queryKey: ['osv-coverage'],
+    queryKey: ['osv-coverage', tenantId],
     queryFn: async () => {
-      const response = await apiClient.get('/api/tenants/default/osv/coverage');
-      return response.data as OsvCoverageResponse;
+      return apiRequest<OsvCoverageResponse>(`/tenants/${encodeURIComponent(tenantId)}/osv/coverage`);
     },
   });
 

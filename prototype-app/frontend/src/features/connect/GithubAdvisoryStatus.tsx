@@ -1,23 +1,25 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { api } from '../../api/client';
-import type { GithubAdvisoryResponse, GithubAdvisorySyncStatusResponse } from '../connect/types';
+import { apiRequest } from '../../api/client';
+type SyncStatus = { status: string; advisoriesSynced?: number; lastFullSyncAt?: string; lastError?: string };
+type ComponentAdvisory = { id: string; advisoryId: string; componentId: string; installedVersion: string; recommendedFixedVersion?: string; upgradeAvailable?: boolean };
 import './github-advisory-status.css';
 
 type Props = {
   sourceId?: string;
+  tenantId: string;
 };
 
-export function GithubAdvisoryStatus({ sourceId }: Props) {
+export function GithubAdvisoryStatus({ sourceId, tenantId }: Props) {
   const syncStatusQuery = useQuery({
     queryKey: ['github-advisory-sync-status'],
-    queryFn: () => api.getGithubAdvisorySyncStatus(),
+    queryFn: () => apiRequest<SyncStatus>('/platform/ghsa/sync-status'),
     refetchInterval: 60000
   });
 
   const advisoriesQuery = useQuery({
-    queryKey: ['github-advisories-for-source', sourceId],
-    queryFn: () => sourceId ? api.getAdvisoriesForSource(sourceId, true) : Promise.resolve([]),
+    queryKey: ['github-advisories-for-source', tenantId, sourceId],
+    queryFn: () => apiRequest<ComponentAdvisory[]>(`/tenants/${encodeURIComponent(tenantId)}/ghsa/component-advisories/${encodeURIComponent(sourceId!)}`),
     enabled: !!sourceId,
     refetchInterval: 300000
   });
@@ -45,15 +47,15 @@ export function GithubAdvisoryStatus({ sourceId }: Props) {
       <div className="advisory-status__stats">
         <div className="stat">
           <span className="stat__label">Cached:</span>
-          <span className="stat__value">{syncStatus.advisoriesCached.toLocaleString()}</span>
+          <span className="stat__value">{(syncStatus.advisoriesSynced ?? 0).toLocaleString()}</span>
         </div>
         <div className="stat">
           <span className="stat__label">Affected Repos:</span>
-          <span className="stat__value">{syncStatus.affectedRepositories}</span>
+          <span className="stat__value">{advisories.length}</span>
         </div>
         <div className="stat">
           <span className="stat__label">Last Sync:</span>
-          <span className="stat__value">{formatTime(syncStatus.lastSyncAt)}</span>
+          <span className="stat__value">{formatTime(syncStatus.lastFullSyncAt)}</span>
         </div>
       </div>
 
@@ -62,17 +64,13 @@ export function GithubAdvisoryStatus({ sourceId }: Props) {
           <h4>{advisories.length} Security Advisories Found</h4>
           <ul className="advisory-list">
             {advisories.map((advisory) => (
-              <li key={advisory.ghsaId} className={`advisory-item advisory-item--${advisory.severity.toLowerCase()}`}>
+              <li key={advisory.advisoryId} className={`advisory-item advisory-item--${'affected'}`}>
                 <div className="advisory-item__header">
-                  <code className="advisory-id">{advisory.ghsaId}</code>
-                  {advisory.cveId && <code className="advisory-cve">{advisory.cveId}</code>}
-                  <span className={`severity-badge severity-badge--${advisory.severity.toLowerCase()}`}>
-                    {advisory.severity}
-                  </span>
+                  <code className="advisory-id">{advisory.advisoryId}</code>
                 </div>
-                <div className="advisory-item__title">{advisory.title}</div>
+                <div className="advisory-item__title">{advisory.componentId}</div>
                 <div className="advisory-item__package">
-                  {advisory.packageName}@{advisory.affectedVersionsStart}
+                  {advisory.installedVersion}
                 </div>
                 {advisory.upgradeAvailable && advisory.recommendedFixedVersion && (
                   <div className="advisory-item__fix">
@@ -100,7 +98,8 @@ export function GithubAdvisoryStatus({ sourceId }: Props) {
   );
 }
 
-function formatTime(instant: string): string {
+function formatTime(instant?: string): string {
+  if (!instant) return 'Never';
   const date = new Date(instant);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();

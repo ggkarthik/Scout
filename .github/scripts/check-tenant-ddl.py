@@ -33,7 +33,8 @@ def violations(sql: str, require_header: bool = True) -> list[str]:
 
     analysis_body = re.sub(r"'(?:''|[^'])*'", "''", body)
 
-    qualified = r'(?:"?platform"?\s*\.\s*)'
+    # Public is also a shared control-plane schema (the existing GHSA cache uses it).
+    qualified = r'(?:(?:"?platform"?|"?public"?)\s*\.\s*)'
     identifier = r'"?[a-z_][a-z0-9_]*"?'
     object_patterns = [
         (r"\b(?:create|alter|drop|truncate)\s+(?:table|sequence|view|policy)\s+"

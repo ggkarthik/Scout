@@ -1,11 +1,9 @@
 package com.prototype.vulnwatch.controller;
 
 import com.prototype.vulnwatch.domain.OsvAdvisoryEntity;
-import com.prototype.vulnwatch.repo.OsvAdvisoryRepository;
-import com.prototype.vulnwatch.service.vulningestion.AdvisoryDeduplicationService;
+import com.prototype.vulnwatch.service.vulningestion.OsvAdvisoryReadService;
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -30,8 +28,7 @@ import org.springframework.web.bind.annotation.RestController;
 @Slf4j
 public class OsvTenantController {
 
-  private final OsvAdvisoryRepository osvAdvisoryRepository;
-  private final AdvisoryDeduplicationService deduplicationService;
+  private final OsvAdvisoryReadService readService;
 
   @GetMapping("/component-advisories")
   @PreAuthorize("hasAnyRole('TENANT_ADMIN', 'INVENTORY_ADMIN', 'SECURITY_ANALYST')")
@@ -44,7 +41,7 @@ public class OsvTenantController {
     log.debug("Fetching OSV advisories for {}:{}", ecosystem, packageName);
 
     List<OsvAdvisoryEntity> advisories =
-        osvAdvisoryRepository.findByEcosystemAndPackageName(ecosystem, packageName);
+        readService.findByPackage(ecosystem, packageName);
 
     return advisories.stream().map(this::toResponse).collect(Collectors.toList());
   }
@@ -52,25 +49,11 @@ public class OsvTenantController {
   @GetMapping("/coverage")
   @PreAuthorize("hasAnyRole('TENANT_ADMIN', 'INVENTORY_ADMIN', 'SECURITY_ANALYST')")
   public OsvCoverageResponse getCoverage(@PathVariable UUID tenantId) {
-    Map<String, Long> ecosystemCounts = new HashMap<>();
-
-    String[] ecosystems = {"npm", "Python", "Go", "Rust", "RubyGems"};
-    for (String ecosystem : ecosystems) {
-      long count = osvAdvisoryRepository.countByEcosystem(ecosystem);
-      if (count > 0) {
-        ecosystemCounts.put(ecosystem, count);
-      }
-    }
-
-    Instant lastSyncTime = osvAdvisoryRepository.findAll().stream()
-        .map(OsvAdvisoryEntity::getSyncedAt)
-        .max(Instant::compareTo)
-        .orElse(null);
-
+    OsvAdvisoryReadService.Coverage coverage = readService.coverage();
     return OsvCoverageResponse.builder()
-        .ecosystemCounts(ecosystemCounts)
-        .totalAdvisories(osvAdvisoryRepository.count())
-        .lastSyncedAt(lastSyncTime)
+        .ecosystemCounts(coverage.ecosystemCounts())
+        .totalAdvisories(coverage.totalAdvisories())
+        .lastSyncedAt(coverage.lastSyncedAt())
         .build();
   }
 

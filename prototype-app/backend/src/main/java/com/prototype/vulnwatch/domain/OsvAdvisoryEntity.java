@@ -21,6 +21,7 @@ import org.hibernate.annotations.UpdateTimestamp;
 @Entity
 @Table(
     name = "osv_advisories",
+    schema = "platform",
     indexes = {
       @Index(name = "idx_osv_ecosystem_package", columnList = "ecosystem,package_name"),
       @Index(name = "idx_osv_package_name", columnList = "package_name"),
@@ -68,7 +69,7 @@ public class OsvAdvisoryEntity {
 
   private Instant withdrawnAt;
 
-  @Column(columnDefinition = "JSONB")
+  @Column(name = "reference_data", columnDefinition = "JSONB")
   private String references;
 
   @Column(columnDefinition = "JSONB", nullable = false)

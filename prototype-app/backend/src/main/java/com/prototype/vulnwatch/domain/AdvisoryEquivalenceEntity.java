@@ -21,6 +21,7 @@ import org.hibernate.annotations.UpdateTimestamp;
 @Entity
 @Table(
     name = "advisory_equivalences",
+    schema = "platform",
     indexes = {
       @Index(name = "idx_advisory_equivalences_cve", columnList = "nvd_cve_id"),
       @Index(name = "idx_advisory_equivalences_ghsa", columnList = "ghsa_id"),

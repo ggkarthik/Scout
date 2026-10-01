@@ -9,13 +9,15 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.prototype.vulnwatch.client.OsvApiClient;
-import com.prototype.vulnwatch.client.OsvApiClient.OsvQueryResponse;
-import com.prototype.vulnwatch.client.OsvApiClient.OsvVulnerability;
+import com.prototype.vulnwatch.client.http.OsvApiClient;
+import com.prototype.vulnwatch.client.http.OsvApiClient.OsvQueryResponse;
+import com.prototype.vulnwatch.client.http.OsvApiClient.OsvVulnerability;
 import com.prototype.vulnwatch.domain.AdvisoryEquivalenceEntity;
 import com.prototype.vulnwatch.domain.OsvAdvisoryEntity;
+import com.prototype.vulnwatch.domain.SoftwareIdentity;
 import com.prototype.vulnwatch.repo.AdvisoryEquivalenceRepository;
 import com.prototype.vulnwatch.repo.OsvAdvisoryRepository;
+import com.prototype.vulnwatch.repo.SoftwareIdentityRepository;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -38,17 +40,24 @@ class OsvPlatformServiceTest {
   @Mock
   private AdvisoryEquivalenceRepository equivalenceRepository;
 
+  @Mock
+  private SoftwareIdentityRepository softwareIdentityRepository;
+
   private OsvPlatformService service;
   private ObjectMapper objectMapper;
 
   @BeforeEach
   void setUp() {
     objectMapper = new ObjectMapper();
-    service = new OsvPlatformService(osvApiClient, osvAdvisoryRepository, equivalenceRepository);
+    service = new OsvPlatformService(osvApiClient, osvAdvisoryRepository,
+        equivalenceRepository, softwareIdentityRepository);
   }
 
   @Test
   void testSyncOsvAdvisories_CreatesRecords() {
+    SoftwareIdentity identity = new SoftwareIdentity();
+    identity.setPurl("pkg:npm/lodash@4.17.20");
+    when(softwareIdentityRepository.findAll()).thenReturn(List.of(identity));
     OsvQueryResponse mockResponse = OsvQueryResponse.builder()
         .vulns(Arrays.asList(
             OsvVulnerability.builder()
@@ -111,10 +120,16 @@ class OsvPlatformServiceTest {
 
   @Test
   void testSaveOsvAdvisory_SkipsDuplicates() {
+    SoftwareIdentity identity = new SoftwareIdentity();
+    identity.setPurl("pkg:npm/lodash@4.17.20");
+    when(softwareIdentityRepository.findAll()).thenReturn(List.of(identity));
     OsvVulnerability vuln = OsvVulnerability.builder()
         .id("GHSA-35jh-r3h4-6jhm")
         .summary("Test")
         .build();
+
+    when(osvApiClient.queryByPackageVersion("npm", "lodash", null))
+        .thenReturn(OsvQueryResponse.builder().vulns(List.of(vuln)).build());
 
     when(osvAdvisoryRepository.findByOsvId("GHSA-35jh-r3h4-6jhm"))
         .thenReturn(java.util.Optional.of(OsvAdvisoryEntity.builder().build()));

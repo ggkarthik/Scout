@@ -1,6 +1,6 @@
 package com.prototype.vulnwatch.service.vulningestion;
 
-import com.prototype.vulnwatch.config.TenantContext;
+import com.prototype.vulnwatch.service.TenantContext;
 import com.prototype.vulnwatch.domain.OsvAdvisoryEntity;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.repo.OsvAdvisoryRepository;

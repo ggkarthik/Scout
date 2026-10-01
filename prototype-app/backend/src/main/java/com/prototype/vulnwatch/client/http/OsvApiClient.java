@@ -1,4 +1,4 @@
-package com.prototype.vulnwatch.client;
+package com.prototype.vulnwatch.client.http;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -102,6 +102,7 @@ public class OsvApiClient {
   }
 
   @Data
+  @Builder
   @NoArgsConstructor
   @AllArgsConstructor
   public static class OsvVulnerability {
@@ -175,14 +176,13 @@ public class OsvApiClient {
     private java.time.Instant github_reviewed_at;
     private java.time.Instant nvd_published_at;
   }
-}
-
-@Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
-public static class PackageVersion {
-  private String ecosystem;
-  private String name;
-  private String version;
+  @Data
+  @Builder
+  @NoArgsConstructor
+  @AllArgsConstructor
+  public static class PackageVersion {
+    private String ecosystem;
+    private String name;
+    private String version;
+  }
 }

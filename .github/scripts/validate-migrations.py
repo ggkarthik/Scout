@@ -15,6 +15,15 @@ LINES = (
     "prototype-app/backend/src/main/resources/db/migration/tenant",
 )
 NAME = re.compile(r"^V([0-9]+)__[A-Za-z0-9][A-Za-z0-9_.-]*\.sql$")
+RETIRED_COLLISIONS = {
+    "prototype-app/backend/src/main/resources/db/migration/postgres_reset/V4__github_security_advisories_platform.sql",
+    "prototype-app/backend/src/main/resources/db/migration/postgres_reset/V4__osv_supplement.sql",
+    "prototype-app/backend/src/main/resources/db/migration/tenant/V4__github_security_advisories_tenant.sql",
+}
+REPAIRED_OSV_RENAME = (
+    "prototype-app/backend/src/main/resources/db/migration/postgres_reset/V4__osv_supplement.sql",
+    "prototype-app/backend/src/main/resources/db/migration/postgres_reset/V7__osv_supplement_platform.sql",
+)
 
 
 def git(*args: str) -> list[str]:
@@ -54,6 +63,12 @@ def main() -> int:
             old = paths[0]
             old_name = Path(old).name
             old_match = NAME.match(old_name)
+            if status.startswith("R") and tuple(paths) == REPAIRED_OSV_RENAME:
+                if 7 in versions(base, LINES[0]):
+                    failures.append(f"{paths[-1]}: version already exists in the PR base branch")
+                continue
+            if status == "D" and old in RETIRED_COLLISIONS:
+                continue
             if status.startswith(("M", "D", "R")) and old_match and not reset_shape:
                 failures.append(f"{old}: applied migration edits/deletions/renames are forbidden")
             if status.startswith("A"):

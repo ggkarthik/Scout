@@ -1,23 +1,35 @@
 package com.prototype.vulnwatch.controller;
 
 import static org.hamcrest.Matchers.hasSize;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.prototype.vulnwatch.domain.OsvAdvisoryEntity;
 import com.prototype.vulnwatch.repo.OsvAdvisoryRepository;
+import com.prototype.vulnwatch.service.TenantService;
 import com.prototype.vulnwatch.support.AuthRequest;
+import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
 import com.prototype.vulnwatch.support.PostgresControllerIntegrationTest;
+import com.prototype.vulnwatch.support.PostgresITSupport;
 import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
 @PostgresControllerIntegrationTest
 class OsvIntegrationE2ETest {
+
+  private static final LocalPostgresTestDatabase.DatabaseConfig DATABASE =
+      LocalPostgresTestDatabase.provision("osv_controller");
+
+  @DynamicPropertySource
+  static void registerDatabaseProperties(DynamicPropertyRegistry registry) {
+    PostgresITSupport.registerDatabaseProperties(registry, DATABASE);
+  }
 
   @Autowired
   private MockMvc mvc;
@@ -25,13 +37,19 @@ class OsvIntegrationE2ETest {
   @Autowired
   private OsvAdvisoryRepository osvRepository;
 
+  @Autowired
+  private TenantService tenantService;
+
   private UUID testTenantId;
-  private AuthRequest authRequest;
 
   @BeforeEach
   void setUp() {
-    testTenantId = UUID.randomUUID();
-    authRequest = AuthRequest.authedGet().asPlatformOwner();
+    testTenantId = tenantService.getDefaultTenant().getId();
+    osvRepository.deleteAll();
+  }
+
+  private org.springframework.test.web.servlet.ResultActions get(String path, Object... variables) throws Exception {
+    return mvc.perform(AuthRequest.asPlatformOwner(AuthRequest.authedGet(path, variables)));
   }
 
   @Test
@@ -53,7 +71,7 @@ class OsvIntegrationE2ETest {
 
     osvRepository.save(advisory);
 
-    authRequest.get(mvc, "/api/tenants/{tenantId}/osv/component-advisories?" +
+    get("/api/tenants/{tenantId}/osv/component-advisories?" +
             "ecosystem=npm&packageName=lodash",
         testTenantId)
         .andExpect(status().isOk())
@@ -93,7 +111,7 @@ class OsvIntegrationE2ETest {
     osvRepository.save(npm);
     osvRepository.save(python);
 
-    authRequest.get(mvc, "/api/tenants/{tenantId}/osv/coverage", testTenantId)
+    get("/api/tenants/{tenantId}/osv/coverage", testTenantId)
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.ecosystemCounts.npm").value(1))
         .andExpect(jsonPath("$.ecosystemCounts.Python").value(1))
@@ -102,7 +120,7 @@ class OsvIntegrationE2ETest {
 
   @Test
   void testGetComponentAdvisories_NoResults() throws Exception {
-    authRequest.get(mvc, "/api/tenants/{tenantId}/osv/component-advisories?" +
+    get("/api/tenants/{tenantId}/osv/component-advisories?" +
             "ecosystem=Rust&packageName=nonexistent",
         testTenantId)
         .andExpect(status().isOk())
@@ -111,7 +129,7 @@ class OsvIntegrationE2ETest {
 
   @Test
   void testGetCoverage_EmptyDatabase() throws Exception {
-    authRequest.get(mvc, "/api/tenants/{tenantId}/osv/coverage", testTenantId)
+    get("/api/tenants/{tenantId}/osv/coverage", testTenantId)
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.ecosystemCounts").isEmpty())
         .andExpect(jsonPath("$.totalAdvisories").value(0));
@@ -135,7 +153,7 @@ class OsvIntegrationE2ETest {
       osvRepository.save(advisory);
     }
 
-    authRequest.get(mvc, "/api/tenants/{tenantId}/osv/component-advisories?" +
+    get("/api/tenants/{tenantId}/osv/component-advisories?" +
             "ecosystem=npm&packageName=lodash",
         testTenantId)
         .andExpect(status().isOk())

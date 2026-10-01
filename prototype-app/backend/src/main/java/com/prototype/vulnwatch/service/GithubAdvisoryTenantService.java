@@ -1,6 +1,5 @@
 package com.prototype.vulnwatch.service;
 
-import com.prototype.vulnwatch.config.TenantContext;
 import com.prototype.vulnwatch.domain.GithubAdvisoryIntegrationEntity;
 import com.prototype.vulnwatch.domain.GithubRepositoryComponentAdvisoryEntity;
 import com.prototype.vulnwatch.domain.GithubSecurityAdvisoryEntity;
@@ -43,7 +42,7 @@ public class GithubAdvisoryTenantService {
     @Transactional
     public GithubAdvisoryIntegrationStatusResponse getTenantIntegrationStatus(UUID tenantId) {
         log.debug("Fetching GHSA integration status for tenant: {}", tenantId);
-        Tenant tenant = tenantService.getTenant(tenantId);
+        Tenant tenant = tenantService.resolveTenantUuid(tenantId);
 
         GithubAdvisoryIntegrationEntity integration = integrationRepository
                 .findByTenant_Id(tenantId)
@@ -61,7 +60,7 @@ public class GithubAdvisoryTenantService {
     @Transactional
     public GithubAdvisoryIntegrationStatusResponse enableIntegration(UUID tenantId, String reason, UUID enabledByUserId) {
         log.info("Enabling GHSA integration for tenant: {}", tenantId);
-        Tenant tenant = tenantService.getTenant(tenantId);
+        Tenant tenant = tenantService.resolveTenantUuid(tenantId);
 
         GithubAdvisoryIntegrationEntity integration = integrationRepository
                 .findByTenant_Id(tenantId)
@@ -81,7 +80,7 @@ public class GithubAdvisoryTenantService {
     @Transactional
     public GithubAdvisoryIntegrationStatusResponse disableIntegration(UUID tenantId, String reason) {
         log.info("Disabling GHSA integration for tenant: {}", tenantId);
-        Tenant tenant = tenantService.getTenant(tenantId);
+        Tenant tenant = tenantService.resolveTenantUuid(tenantId);
 
         GithubAdvisoryIntegrationEntity integration = integrationRepository
                 .findByTenant_Id(tenantId)
@@ -103,7 +102,7 @@ public class GithubAdvisoryTenantService {
             Boolean autoCorrelateComponents,
             Boolean createFindingForLowSeverity) {
         log.debug("Updating GHSA integration settings for tenant: {}", tenantId);
-        Tenant tenant = tenantService.getTenant(tenantId);
+        Tenant tenant = tenantService.resolveTenantUuid(tenantId);
 
         GithubAdvisoryIntegrationEntity integration = integrationRepository
                 .findByTenant_Id(tenantId)
@@ -145,7 +144,7 @@ public class GithubAdvisoryTenantService {
     @Transactional
     public void correlateComponentsWithAdvisories(UUID tenantId, UUID sourceId) {
         log.info("Starting correlation of components with GHSA advisories for tenant: {}, source: {}", tenantId, sourceId);
-        Tenant tenant = tenantService.getTenant(tenantId);
+        Tenant tenant = tenantService.resolveTenantUuid(tenantId);
 
         GithubAdvisoryIntegrationEntity integration = integrationRepository
                 .findByTenant_Id(tenantId)

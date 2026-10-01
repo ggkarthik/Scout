@@ -25,7 +25,7 @@ class PostgresResetMigrationGuardTest {
             "(?i)(?:\\\"tenant_default\\\"|tenant_default)\\s*\\.");
     private static final Pattern DYNAMIC_SQL = Pattern.compile(
             "(?is)\\bexecute\\s+(?:format\\s*\\(|['\\\"])");
-    private static final String QUALIFIED_PLATFORM = "(?:\\\"?platform\\\"?\\s*\\.\\s*)";
+    private static final String QUALIFIED_PLATFORM = "(?:(?:\\\"?platform\\\"?|\\\"?public\\\"?)\\s*\\.\\s*)";
     private static final String IDENTIFIER = "\\\"?[a-z_][a-z0-9_]*\\\"?";
     private static final List<String> OBJECT_PREFIXES = List.of(
             "\\b(?:create|alter|drop|truncate)\\s+(?:table|sequence|view|policy)\\s+(?:if\\s+(?:not\\s+)?exists\\s+)?",
@@ -36,7 +36,7 @@ class PostgresResetMigrationGuardTest {
     private static final Pattern UNQUALIFIED_INDEX_TARGET = Pattern.compile(
             "(?is)\\bcreate\\s+(?:unique\\s+)?index\\s+(?:concurrently\\s+)?"
                     + "(?:if\\s+not\\s+exists\\s+)?\\S+\\s+on\\s+(?:only\\s+)?"
-                    + "(?!\\\"?platform\\\"?\\s*\\.)\\\"?[a-z_][a-z0-9_]*\\\"?");
+                    + "(?!(?:\\\"?platform\\\"?|\\\"?public\\\"?)\\s*\\.)\\\"?[a-z_][a-z0-9_]*\\\"?");
 
     @Test
     void sharedGuardFixturesHaveExpectedResults() throws Exception {

@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { api } from '../../api/client';
+import { api, apiRequest } from '../../api/client';
 import { RUN_QUEUE_REFRESH_INTERVAL_MS } from '../../lib/polling';
 import type { SyncRun, VulnerabilitySourceSystem } from './types';
 
@@ -128,16 +128,14 @@ export interface AdvisoryEquivalenceGroup {
 }
 
 export const useOsvCoverageQuery = (tenantId?: string) => {
-  const id = tenantId || 'default';
+  const id = tenantId;
 
   return useQuery({
     queryKey: ['osv-coverage', id],
     queryFn: async () => {
-      const response = await api.get(
-        `/api/tenants/${id}/osv/coverage`
-      );
-      return response.data as OsvCoverageResponse;
+      return apiRequest<OsvCoverageResponse>(`/tenants/${encodeURIComponent(id!)}/osv/coverage`);
     },
+    enabled: !!id,
     staleTime: 5 * 60 * 1000, // 5 minutes
     retry: 1,
   });
@@ -149,10 +147,7 @@ export const useAdvisoryEquivalencesQuery = (cveId?: string) => {
     queryFn: async () => {
       if (!cveId) throw new Error('CVE ID required');
 
-      const response = await api.get(
-        `/api/cve-details/${cveId}/advisory-equivalences`
-      );
-      return response.data as AdvisoryEquivalenceGroup;
+      return apiRequest<AdvisoryEquivalenceGroup>(`/cve-detail/${encodeURIComponent(cveId)}/advisory-equivalences`);
     },
     enabled: !!cveId,
     staleTime: 1 * 60 * 1000, // 1 minute
