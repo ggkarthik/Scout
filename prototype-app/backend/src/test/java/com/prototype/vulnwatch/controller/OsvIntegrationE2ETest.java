@@ -55,7 +55,6 @@ class OsvIntegrationE2ETest {
   @Test
   void testGetComponentAdvisories_ReturnsOsvData() throws Exception {
     OsvAdvisoryEntity advisory = OsvAdvisoryEntity.builder()
-        .id(UUID.randomUUID())
         .osvId("GHSA-test-1234-5678")
         .ecosystem("npm")
         .packageName("lodash")
@@ -85,7 +84,6 @@ class OsvIntegrationE2ETest {
   @Test
   void testGetCoverage_ReturnsEcosystemCounts() throws Exception {
     OsvAdvisoryEntity npm = OsvAdvisoryEntity.builder()
-        .id(UUID.randomUUID())
         .osvId("OSV-npm-1")
         .ecosystem("npm")
         .packageName("react")
@@ -97,7 +95,6 @@ class OsvIntegrationE2ETest {
         .build();
 
     OsvAdvisoryEntity python = OsvAdvisoryEntity.builder()
-        .id(UUID.randomUUID())
         .osvId("OSV-python-1")
         .ecosystem("Python")
         .packageName("django")
@@ -139,7 +136,6 @@ class OsvIntegrationE2ETest {
   void testGetComponentAdvisories_MultipleResults() throws Exception {
     for (int i = 0; i < 3; i++) {
       OsvAdvisoryEntity advisory = OsvAdvisoryEntity.builder()
-          .id(UUID.randomUUID())
           .osvId("GHSA-multi-" + i)
           .ecosystem("npm")
           .packageName("lodash")
