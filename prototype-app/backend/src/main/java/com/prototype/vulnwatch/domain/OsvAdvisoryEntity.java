@@ -16,7 +16,9 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(
@@ -62,6 +64,7 @@ public class OsvAdvisoryEntity {
   @Column(name = "cvss_v3_vector")
   private String cvssV3Vector;
 
+  @JdbcTypeCode(SqlTypes.JSON)
   @Column(columnDefinition = "JSONB", nullable = false)
   private String affectedRanges;
 
@@ -71,9 +74,11 @@ public class OsvAdvisoryEntity {
 
   private Instant withdrawnAt;
 
+  @JdbcTypeCode(SqlTypes.JSON)
   @Column(name = "reference_data", columnDefinition = "JSONB")
   private String references;
 
+  @JdbcTypeCode(SqlTypes.JSON)
   @Column(columnDefinition = "JSONB", nullable = false)
   private String osvData;
 
