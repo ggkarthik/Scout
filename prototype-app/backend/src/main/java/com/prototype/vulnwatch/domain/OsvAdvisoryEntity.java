@@ -56,8 +56,10 @@ public class OsvAdvisoryEntity {
 
   private String severity;
 
+  @Column(name = "cvss_v3_score")
   private BigDecimal cvssV3Score;
 
+  @Column(name = "cvss_v3_vector")
   private String cvssV3Vector;
 
   @Column(columnDefinition = "JSONB", nullable = false)
