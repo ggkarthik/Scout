@@ -14,6 +14,14 @@ import org.springframework.beans.factory.annotation.Autowired;
 @PostgresIntegrationTest
 class GithubAdvisoryTenantServicePostgresIntegrationTest {
 
+    private static final LocalPostgresTestDatabase.DatabaseConfig DATABASE =
+            LocalPostgresTestDatabase.provision("github_advisory_tenant_service");
+
+    @org.springframework.test.context.DynamicPropertySource
+    static void registerDatabaseProperties(org.springframework.test.context.DynamicPropertyRegistry registry) {
+        PostgresITSupport.registerDatabaseProperties(registry, DATABASE);
+    }
+
     @Autowired
     private GithubAdvisoryTenantService tenantService;
 

@@ -16,7 +16,9 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(
@@ -44,6 +46,7 @@ public class AdvisoryEquivalenceEntity {
 
   private String osvId;
 
+  @JdbcTypeCode(SqlTypes.JSON)
   @Column(columnDefinition = "JSONB")
   private String cweIds;
 

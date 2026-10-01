@@ -6,15 +6,27 @@ import com.prototype.vulnwatch.domain.AdvisoryEquivalenceEntity;
 import com.prototype.vulnwatch.domain.OsvAdvisoryEntity;
 import com.prototype.vulnwatch.repo.AdvisoryEquivalenceRepository;
 import com.prototype.vulnwatch.repo.OsvAdvisoryRepository;
+import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
 import com.prototype.vulnwatch.support.PostgresIntegrationTest;
+import com.prototype.vulnwatch.support.PostgresITSupport;
 import java.time.Instant;
 import java.util.List;
-import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
 @PostgresIntegrationTest
 class OsvPlatformServicePostgresIntegrationTest {
+
+  private static final LocalPostgresTestDatabase.DatabaseConfig DATABASE =
+      LocalPostgresTestDatabase.provision("osv_platform_service");
+
+  @DynamicPropertySource
+  static void registerDatabaseProperties(DynamicPropertyRegistry registry) {
+    PostgresITSupport.registerDatabaseProperties(registry, DATABASE);
+  }
 
   @Autowired
   private OsvPlatformService service;
@@ -24,6 +36,12 @@ class OsvPlatformServicePostgresIntegrationTest {
 
   @Autowired
   private AdvisoryEquivalenceRepository equivalenceRepository;
+
+  @BeforeEach
+  void setUp() {
+    equivalenceRepository.deleteAll();
+    osvRepository.deleteAll();
+  }
 
   @Test
   void testMigration_TablesCreated() {
@@ -38,7 +56,6 @@ class OsvPlatformServicePostgresIntegrationTest {
   @Test
   void testSaveOsvAdvisory_PersistsToDatabase() {
     OsvAdvisoryEntity entity = OsvAdvisoryEntity.builder()
-        .id(UUID.randomUUID())
         .osvId("OSV-2021-1234")
         .ecosystem("npm")
         .packageName("lodash")
@@ -61,7 +78,6 @@ class OsvPlatformServicePostgresIntegrationTest {
   @Test
   void testBuildEquivalenceMappings_CreatesRecords() {
     OsvAdvisoryEntity advisory = OsvAdvisoryEntity.builder()
-        .id(UUID.randomUUID())
         .osvId("OSV-2021-5678")
         .ecosystem("Python")
         .packageName("django")
@@ -75,7 +91,6 @@ class OsvPlatformServicePostgresIntegrationTest {
     osvRepository.save(advisory);
 
     AdvisoryEquivalenceEntity eq = AdvisoryEquivalenceEntity.builder()
-        .id(UUID.randomUUID())
         .nvdCveId("CVE-2021-12345")
         .ghsaId("GHSA-xxxx-yyyy-zzzz")
         .osvId("OSV-2021-5678")
@@ -94,7 +109,6 @@ class OsvPlatformServicePostgresIntegrationTest {
   @Test
   void testUniqueConstraint_OsvIdUnique() {
     OsvAdvisoryEntity entity1 = OsvAdvisoryEntity.builder()
-        .id(UUID.randomUUID())
         .osvId("OSV-UNIQUE-1")
         .ecosystem("npm")
         .packageName("test1")
@@ -105,7 +119,6 @@ class OsvPlatformServicePostgresIntegrationTest {
         .build();
 
     OsvAdvisoryEntity entity2 = OsvAdvisoryEntity.builder()
-        .id(UUID.randomUUID())
         .osvId("OSV-UNIQUE-1")  // Same OSV ID
         .ecosystem("npm")
         .packageName("test2")
@@ -126,7 +139,6 @@ class OsvPlatformServicePostgresIntegrationTest {
   void testEquivalenceIndexes_QueryPerformance() {
     for (int i = 0; i < 10; i++) {
       AdvisoryEquivalenceEntity eq = AdvisoryEquivalenceEntity.builder()
-          .id(UUID.randomUUID())
           .nvdCveId("CVE-2021-" + i)
           .ghsaId("GHSA-" + i)
           .osvId("OSV-" + i)

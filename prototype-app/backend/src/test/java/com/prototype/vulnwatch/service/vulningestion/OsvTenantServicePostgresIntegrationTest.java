@@ -4,15 +4,27 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import com.prototype.vulnwatch.domain.OsvAdvisoryEntity;
 import com.prototype.vulnwatch.repo.OsvAdvisoryRepository;
+import com.prototype.vulnwatch.support.LocalPostgresTestDatabase;
 import com.prototype.vulnwatch.support.PostgresIntegrationTest;
+import com.prototype.vulnwatch.support.PostgresITSupport;
 import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
 @PostgresIntegrationTest
 class OsvTenantServicePostgresIntegrationTest {
+
+  private static final LocalPostgresTestDatabase.DatabaseConfig DATABASE =
+      LocalPostgresTestDatabase.provision("osv_tenant_service");
+
+  @DynamicPropertySource
+  static void registerDatabaseProperties(DynamicPropertyRegistry registry) {
+    PostgresITSupport.registerDatabaseProperties(registry, DATABASE);
+  }
 
   @Autowired
   private OsvTenantService tenantService;
@@ -25,6 +37,7 @@ class OsvTenantServicePostgresIntegrationTest {
   @BeforeEach
   void setUp() {
     testTenantId = UUID.randomUUID();
+    osvRepository.deleteAll();
   }
 
   @Test
@@ -37,7 +50,6 @@ class OsvTenantServicePostgresIntegrationTest {
   void testMultiTenantContext_PlatformDataShared() {
     // Platform-level OSV data (shared)
     OsvAdvisoryEntity advisory = OsvAdvisoryEntity.builder()
-        .id(UUID.randomUUID())
         .osvId("OSV-SHARED-1")
         .ecosystem("npm")
         .packageName("lodash")
@@ -67,13 +79,12 @@ class OsvTenantServicePostgresIntegrationTest {
   void testCorrelateOsvAdvisories_GracefulErrorHandling() {
     // If OSV repository has corrupt data, should handle gracefully
     OsvAdvisoryEntity entity = OsvAdvisoryEntity.builder()
-        .id(UUID.randomUUID())
         .osvId("OSV-BAD-DATA")
         .ecosystem("npm")
         .packageName("test")
         .summary("Bad data")
-        .affectedRanges("invalid json")  // Invalid JSON
-        .osvData("not-json")  // Invalid JSON
+        .affectedRanges("{}")  // Valid JSON with an unexpected shape
+        .osvData("{}")
         .source("nvd")
         .build();
 
@@ -90,7 +101,6 @@ class OsvTenantServicePostgresIntegrationTest {
     // Populate platform-level data
     for (int i = 0; i < 5; i++) {
       OsvAdvisoryEntity advisory = OsvAdvisoryEntity.builder()
-          .id(UUID.randomUUID())
           .osvId("OSV-BATCH-" + i)
           .ecosystem("npm")
           .packageName("package-" + i)
