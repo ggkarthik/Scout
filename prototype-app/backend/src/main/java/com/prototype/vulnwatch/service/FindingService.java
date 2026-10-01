@@ -11,32 +11,39 @@ import com.prototype.vulnwatch.dto.FindingsFilter;
 import com.prototype.vulnwatch.dto.FindingFilterValuesResponse;
 import com.prototype.vulnwatch.dto.FindingPageResponse;
 import com.prototype.vulnwatch.dto.FindingResponse;
+import com.prototype.vulnwatch.service.vulningestion.AdvisoryDeduplicationService;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
+@Slf4j
 public class FindingService {
 
     private final FindingQueryService findingQueryService;
     private final FindingWorkflowFacade findingWorkflowFacade;
     private final FindingAssetRecomputeService findingAssetRecomputeService;
     private final FindingRecomputeService findingRecomputeService;
+    private final AdvisoryDeduplicationService deduplicationService;
 
     public FindingService(
             FindingQueryService findingQueryService,
             FindingWorkflowFacade findingWorkflowFacade,
             FindingAssetRecomputeService findingAssetRecomputeService,
-            FindingRecomputeService findingRecomputeService
+            FindingRecomputeService findingRecomputeService,
+            AdvisoryDeduplicationService deduplicationService
     ) {
         this.findingQueryService = findingQueryService;
         this.findingWorkflowFacade = findingWorkflowFacade;
         this.findingAssetRecomputeService = findingAssetRecomputeService;
         this.findingRecomputeService = findingRecomputeService;
+        this.deduplicationService = deduplicationService;
     }
 
     @Transactional
@@ -135,5 +142,17 @@ public class FindingService {
 
     public FindingResponse toResponse(Finding finding) {
         return findingQueryService.toResponse(finding);
+    }
+
+    @Transactional(readOnly = true)
+    public Set<String> getEquivalentAdvisoryIds(String cveId) {
+        log.debug("Getting equivalent advisory IDs for CVE: {}", cveId);
+        return deduplicationService.getEquivalentGhsaIds(cveId);
+    }
+
+    @Transactional(readOnly = true)
+    public AdvisoryDeduplicationService.AdvisoryEquivalenceGroup getAdvisoryEquivalences(String cveId) {
+        log.debug("Getting advisory equivalences for CVE: {}", cveId);
+        return deduplicationService.getEquivalentAdvisories(cveId);
     }
 }

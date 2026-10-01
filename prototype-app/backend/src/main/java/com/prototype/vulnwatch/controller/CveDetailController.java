@@ -69,6 +69,7 @@ public class CveDetailController {
     private final com.prototype.vulnwatch.service.EolAnalysisService eolAnalysisService;
     private final com.prototype.vulnwatch.service.InvestigationAgentService investigationAgentService;
     private final TenantEntitlementService tenantEntitlementService;
+    private final com.prototype.vulnwatch.service.vulningestion.AdvisoryDeduplicationService deduplicationService;
 
     /**
      * GET /api/cve-detail/{cveId}
@@ -793,6 +794,14 @@ public class CveDetailController {
         assertEntitled(TenantEntitlementService.AI_INVESTIGATION_AGENT,
                 "AI investigation agent workflows are available in this workspace.");
         return ResponseEntity.ok(investigationAgentService.runAgent(cveId, request));
+    }
+
+    @GetMapping("/{cveId}/advisory-equivalences")
+    @PreAuthorize("hasAnyRole('TENANT_ADMIN','INVENTORY_ADMIN','SECURITY_ANALYST')")
+    public ResponseEntity<com.prototype.vulnwatch.service.vulningestion.AdvisoryDeduplicationService.AdvisoryEquivalenceGroup> getAdvisoryEquivalences(
+            @PathVariable String cveId) {
+        return ResponseEntity.ok(
+                deduplicationService.getEquivalentAdvisories(cveId));
     }
 
     private void assertEntitled(String entitlementKey, String message) {
