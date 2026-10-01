@@ -3,7 +3,7 @@
 -- GHSA Integration Status per Tenant
 CREATE TABLE IF NOT EXISTS tenant_ghsa_integrations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL UNIQUE REFERENCES tenant_id(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL UNIQUE REFERENCES platform.tenants(id) ON DELETE CASCADE,
 
     is_enabled BOOLEAN DEFAULT FALSE,
 
@@ -26,7 +26,7 @@ CREATE INDEX idx_ghsa_integration_enabled ON tenant_ghsa_integrations(is_enabled
 -- Repository Component to Advisory Correlation (Tenant-Scoped)
 CREATE TABLE IF NOT EXISTS tenant_github_repository_component_advisories (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL REFERENCES tenant_id(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES platform.tenants(id) ON DELETE CASCADE,
 
     github_source_id UUID NOT NULL REFERENCES github_sbom_sources(id) ON DELETE CASCADE,
     component_id VARCHAR(500) NOT NULL,
@@ -58,7 +58,7 @@ CREATE INDEX idx_repo_comp_advisory_finding ON tenant_github_repository_componen
 -- GHSA Subscriptions per Tenant
 CREATE TABLE IF NOT EXISTS tenant_ghsa_subscriptions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL REFERENCES tenant_id(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES platform.tenants(id) ON DELETE CASCADE,
 
     advisory_id UUID NOT NULL,
 
