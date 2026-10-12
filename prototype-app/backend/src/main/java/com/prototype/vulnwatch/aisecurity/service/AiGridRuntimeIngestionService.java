@@ -54,6 +54,7 @@ public class AiGridRuntimeIngestionService {
     }
 
     public AdmissionResult accept(Tenant tenant, String producerId, byte[] body) {
+        com.prototype.vulnwatch.aisecurity.service.AiRuntimeScope.requireInScope();
         if (body == null || body.length == 0) throw new IllegalArgumentException("Runtime batch body is required");
         if (body.length > MAX_BODY_BYTES) throw new IllegalArgumentException("Runtime batch exceeds the 2 MiB limit");
         JsonNode tree = parse(body);
@@ -66,6 +67,7 @@ public class AiGridRuntimeIngestionService {
     }
 
     public Receipt receipt(Tenant tenant, UUID receiptId) {
+        com.prototype.vulnwatch.aisecurity.service.AiRuntimeScope.requireInScope();
         return tenantExecution.run(tenant, () -> jdbc.query("""
                 select id,producer_id,status,accepted_count,duplicate_count,quarantined_count,reason_code,
                        ingestion_job_id,request_byte_count,request_event_count,created_at,completed_at

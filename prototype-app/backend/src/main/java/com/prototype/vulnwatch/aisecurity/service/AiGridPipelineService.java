@@ -49,7 +49,7 @@ public class AiGridPipelineService {
         snapshots.commitScope(tenant, envelope);
         ownership.resolveRun(tenant, envelope.runId());
         assessments.evaluateRun(tenant, envelope.runId());
-        runtimeAssessments.evaluateRun(tenant, envelope.runId());
+        // Runtime execution assessment is outside this release. Static assessment continues.
         List<AiGridCoverageService.CoverageItem> runCandidates =
                 coverage.expectedCandidates(envelope.runId());
         reconciliation.reconcile(tenant, envelope.runId(), runCandidates);

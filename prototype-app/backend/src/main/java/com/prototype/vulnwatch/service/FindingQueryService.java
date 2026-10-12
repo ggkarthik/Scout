@@ -136,11 +136,13 @@ public class FindingQueryService {
             return List.of();
         }
         return tenantSchemaExecutionService.run(tenant, () -> findingRepository.findAllById(findingIds)).stream()
+                .filter(finding -> !"AI_RUNTIME".equals(finding.getFindingKind()))
                 .toList();
     }
 
     public List<FindingResponse> listByTenant(Tenant tenant) {
         return tenantSchemaExecutionService.run(tenant, () -> findingRepository.findAllByOrderByUpdatedAtDesc()).stream()
+                .filter(finding -> !"AI_RUNTIME".equals(finding.getFindingKind()))
                 .map(this::toResponse)
                 .toList();
     }

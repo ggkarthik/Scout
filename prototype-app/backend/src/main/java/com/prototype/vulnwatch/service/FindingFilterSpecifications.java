@@ -51,6 +51,8 @@ public final class FindingFilterSpecifications {
                 .and(byPatchAvailable(filter.patchAvailable()))
                 .and(bySuppressedUntilBand(filter.suppressedUntilBand()))
                 .and(byAssetType(filter.assetType()))
+                .and((root, query, builder) -> builder.or(builder.isNull(root.get("findingKind")),
+                        builder.notEqual(root.get("findingKind"), "AI_RUNTIME")))
                 .and(byFindingKind(filter.findingKind()))
                 .and(byAffectedAiResourceId(filter.affectedAiResourceId()))
                 .and(byHasAffectedAiResource(filter.hasAffectedAiResource()))
@@ -161,8 +163,8 @@ public final class FindingFilterSpecifications {
     }
 
     /**
-     * Restricts to the given finding kinds. Empty means every kind, which keeps All Findings
-     * inclusive by default and leaves existing callers unchanged.
+     * Restricts to the given finding kinds. Empty means every in-scope kind, which keeps All Findings
+     * inclusive by default; AI_RUNTIME is excluded independently at the release boundary.
      *
      * <p>finding_kind is a plain string column on the entity, so this matches on the raw
      * value rather than an enum -- the set is widened by tenant migrations (AI_RUNTIME

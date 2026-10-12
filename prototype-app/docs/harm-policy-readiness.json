@@ -1,0 +1,969 @@
+{
+  "reassessmentDate": "2026-10-12",
+  "evidenceScope": "Static source packages; no live tenant evidence or policy selection changes",
+  "policies": [
+    {
+      "policyId": "AGCF-AWS-001",
+      "version": "1.0.0",
+      "provider": "AWS",
+      "nativeKinds": [
+        "AWS_BEDROCK_AGENT"
+      ],
+      "requiredCapabilities": [
+        "BEDROCK_GUARDRAILS"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "bedrock.agent.guardrail_attached_configured",
+          "valueType": "BOOLEAN",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "ENABLED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-AWS-002",
+      "version": "1.0.0",
+      "provider": "AWS",
+      "nativeKinds": [
+        "AWS_BEDROCK_GUARDRAIL"
+      ],
+      "requiredCapabilities": [
+        "BEDROCK_GUARDRAILS"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "bedrock.guardrail.minimum_strength_configured",
+          "valueType": "STRING",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "REQUIRED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-AWS-005",
+      "version": "1.0.0",
+      "provider": "AWS",
+      "nativeKinds": [
+        "AWS_IAM_ROLE",
+        "AWS_BEDROCK_AGENT"
+      ],
+      "requiredCapabilities": [
+        "BEDROCK_AGENTS",
+        "IAM_ROLE_POLICIES"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "identity.wildcard_permission_observed",
+          "valueType": "BOOLEAN",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "REQUIRED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-AWS-006",
+      "version": "1.0.0",
+      "provider": "AWS",
+      "nativeKinds": [
+        "AWS_LAMBDA_FUNCTION"
+      ],
+      "requiredCapabilities": [
+        "LAMBDA_URLS"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "compute.lambda_url_auth_type_configured",
+          "valueType": "STRING",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "REQUIRED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-AWS-008",
+      "version": "1.0.0",
+      "provider": "AWS",
+      "nativeKinds": [
+        "AWS_LAMBDA_FUNCTION"
+      ],
+      "requiredCapabilities": [
+        "LAMBDA_URLS"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "compute.lambda_target_arn_configured",
+          "valueType": "STRING",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "DISABLED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-AWS-012",
+      "version": "1.0.0",
+      "provider": "AWS",
+      "nativeKinds": [
+        "AWS_BEDROCK_GUARDRAIL"
+      ],
+      "requiredCapabilities": [
+        "BEDROCK_GUARDRAILS"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "guardrail.content_filter_count_configured",
+          "valueType": "NUMBER",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "ENABLED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-AWS-013",
+      "version": "1.0.0",
+      "provider": "AWS",
+      "nativeKinds": [
+        "AWS_BEDROCK_GUARDRAIL"
+      ],
+      "requiredCapabilities": [
+        "BEDROCK_GUARDRAILS"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "guardrail.pii_entity_count_configured",
+          "valueType": "NUMBER",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "ENABLED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-AWS-014",
+      "version": "1.0.0",
+      "provider": "AWS",
+      "nativeKinds": [
+        "AWS_BEDROCK_GUARDRAIL"
+      ],
+      "requiredCapabilities": [
+        "BEDROCK_AGENTS"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "guardrail.contextual_grounding_filter_count_configured",
+          "valueType": "NUMBER",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "DISABLED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-AWS-015",
+      "version": "1.0.0",
+      "provider": "AWS",
+      "nativeKinds": [
+        "AWS_BEDROCK_GUARDRAIL"
+      ],
+      "requiredCapabilities": [
+        "BEDROCK_AGENTS"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "guardrail.denied_topic_count_configured",
+          "valueType": "NUMBER",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "DISABLED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-AWS-021",
+      "version": "1.0.0",
+      "provider": "AWS",
+      "nativeKinds": [
+        "AWS_BEDROCK_DATA_SOURCE"
+      ],
+      "requiredCapabilities": [
+        "BEDROCK_AGENTS"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "data.source_type",
+          "valueType": "STRING",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "DISABLED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-AWS-031",
+      "version": "1.0.0",
+      "provider": "AWS",
+      "nativeKinds": [
+        "AWS_AGENTCORE_GATEWAY"
+      ],
+      "requiredCapabilities": [
+        "AGENTCORE_GATEWAYS_TARGETS"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "mcp.inbound_auth_type",
+          "valueType": "STRING",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "REQUIRED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-AWS-032",
+      "version": "1.0.0",
+      "provider": "AWS",
+      "nativeKinds": [
+        "AWS_AGENTCORE_GATEWAY_TARGET"
+      ],
+      "requiredCapabilities": [
+        "AGENTCORE_GATEWAYS_TARGETS"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "mcp.outbound_auth_type",
+          "valueType": "STRING",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "REQUIRED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-AWS-034",
+      "version": "1.0.0",
+      "provider": "AWS",
+      "nativeKinds": [
+        "AWS_AGENTCORE_GATEWAY_TARGET",
+        "AWS_AGENTCORE_MCP_SERVER"
+      ],
+      "requiredCapabilities": [
+        "AGENTCORE_GATEWAYS_TARGETS"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "mcp.target_subtype_configured",
+          "valueType": "STRING",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        },
+        {
+          "factKey": "mcp.server_hostname_configured",
+          "valueType": "STRING",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "DISABLED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-AWS-071",
+      "version": "1.0.1",
+      "provider": "AWS",
+      "nativeKinds": [
+        "AWS_AI_LINKED_RESOURCE"
+      ],
+      "requiredCapabilities": [
+        "AWS_LINKED_DATA_STORES"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "mcp.inbound_auth_authoritative",
+          "valueType": "BOOLEAN",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "VALIDATED",
+      "releaseStatus": "PAUSED",
+      "defaultSelection": "DISABLED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-AWS-072",
+      "version": "1.0.1",
+      "provider": "AWS",
+      "nativeKinds": [
+        "AWS_AI_LINKED_RESOURCE"
+      ],
+      "requiredCapabilities": [
+        "AWS_LINKED_DATA_STORES"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "mcp.outbound_auth_authoritative",
+          "valueType": "BOOLEAN",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "VALIDATED",
+      "releaseStatus": "PAUSED",
+      "defaultSelection": "DISABLED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-AZR-010",
+      "version": "1.0.0",
+      "provider": "AZURE",
+      "nativeKinds": [
+        "AZURE_RAI_POLICIES"
+      ],
+      "requiredCapabilities": [
+        "FOUNDRY_DEPLOYMENTS_RAI"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "guardrail.rai_non_blocking_filter_observed",
+          "valueType": "BOOLEAN",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "REQUIRED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-AZR-011",
+      "version": "1.0.0",
+      "provider": "AZURE",
+      "nativeKinds": [
+        "AZURE_RAI_POLICIES"
+      ],
+      "requiredCapabilities": [
+        "FOUNDRY_DEPLOYMENTS_RAI"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "guardrail.rai_filter_count_configured",
+          "valueType": "NUMBER",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "ENABLED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-AZR-012",
+      "version": "1.0.0",
+      "provider": "AZURE",
+      "nativeKinds": [
+        "AZURE_FOUNDRY_DEPLOYMENTS"
+      ],
+      "requiredCapabilities": [
+        "FOUNDRY_DEPLOYMENTS_RAI"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "guardrail.rai_policy_reference_configured",
+          "valueType": "STRING",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "REQUIRED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-AZR-013",
+      "version": "1.0.0",
+      "provider": "AZURE",
+      "nativeKinds": [
+        "AZURE_RAI_POLICIES"
+      ],
+      "requiredCapabilities": [
+        "FOUNDRY_DEPLOYMENTS_RAI"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "guardrail.rai_mode_configured",
+          "valueType": "STRING",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        },
+        {
+          "factKey": "guardrail.rai_base_policy_configured",
+          "valueType": "STRING",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "DISABLED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-AZR-014",
+      "version": "1.0.0",
+      "provider": "AZURE",
+      "nativeKinds": [
+        "AZURE_RAI_POLICIES"
+      ],
+      "requiredCapabilities": [
+        "AI_ACCOUNTS"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "guardrail.rai_custom_blocklist_count_configured",
+          "valueType": "NUMBER",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "DISABLED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-AZR-019",
+      "version": "1.0.0",
+      "provider": "AZURE",
+      "nativeKinds": [
+        "AZURE_FOUNDRY_MCP_SERVER"
+      ],
+      "requiredCapabilities": [
+        "FOUNDRY_AGENTS_TOOLS"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "mcp.configured_auth_type",
+          "valueType": "STRING",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "REQUIRED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-AZR-020",
+      "version": "1.0.0",
+      "provider": "AZURE",
+      "nativeKinds": [
+        "AZURE_FOUNDRY_MCP_SERVER"
+      ],
+      "requiredCapabilities": [
+        "FOUNDRY_AGENTS_TOOLS"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "mcp.server_hostname_configured",
+          "valueType": "STRING",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "DISABLED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-AZR-021",
+      "version": "1.0.0",
+      "provider": "AZURE",
+      "nativeKinds": [
+        "AZURE_FOUNDRY_AGENT_TOOLS"
+      ],
+      "requiredCapabilities": [
+        "FOUNDRY_AGENTS_TOOLS"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "agent.tool_type_configured",
+          "valueType": "STRING",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "DISABLED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-AZR-072",
+      "version": "1.0.0",
+      "provider": "AZURE",
+      "nativeKinds": [
+        "AZURE_AI_LINKED_RESOURCE"
+      ],
+      "requiredCapabilities": [
+        "AZURE_SEARCH_MCP_SECURITY"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "mcp.foundry_auth_authoritative",
+          "valueType": "BOOLEAN",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "VALIDATED",
+      "releaseStatus": "PAUSED",
+      "defaultSelection": "DISABLED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-XSP-001",
+      "version": "1.0.0",
+      "provider": "MULTI_CLOUD",
+      "nativeKinds": [],
+      "requiredCapabilities": [
+        "MULTI_CLOUD_GRAPH"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "REQUIRED",
+      "workflowClass": "VALIDATED_EXPOSURE",
+      "evaluationMode": "CORRELATION_PATH",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-XSP-002",
+      "version": "1.0.0",
+      "provider": "MULTI_CLOUD",
+      "nativeKinds": [],
+      "requiredCapabilities": [
+        "MULTI_CLOUD_GRAPH"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "REQUIRED",
+      "workflowClass": "VALIDATED_EXPOSURE",
+      "evaluationMode": "CORRELATION_PATH",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-XSP-003",
+      "version": "1.0.0",
+      "provider": "MULTI_CLOUD",
+      "nativeKinds": [],
+      "requiredCapabilities": [
+        "MULTI_CLOUD_GRAPH"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "REQUIRED",
+      "workflowClass": "VALIDATED_EXPOSURE",
+      "evaluationMode": "CORRELATION_PATH",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-XSP-004",
+      "version": "1.0.0",
+      "provider": "MULTI_CLOUD",
+      "nativeKinds": [],
+      "requiredCapabilities": [
+        "MULTI_CLOUD_GRAPH"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "REQUIRED",
+      "workflowClass": "VALIDATED_EXPOSURE",
+      "evaluationMode": "CORRELATION_PATH",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-XSP-005",
+      "version": "1.0.0",
+      "provider": "MULTI_CLOUD",
+      "nativeKinds": [],
+      "requiredCapabilities": [
+        "MULTI_CLOUD_GRAPH"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "REQUIRED",
+      "workflowClass": "VALIDATED_EXPOSURE",
+      "evaluationMode": "CORRELATION_PATH",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-XSP-006",
+      "version": "1.0.0",
+      "provider": "MULTI_CLOUD",
+      "nativeKinds": [],
+      "requiredCapabilities": [
+        "MULTI_CLOUD_GRAPH"
+      ],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [],
+      "lifecycle": "PUBLISHED",
+      "releaseStatus": "GENERAL_AVAILABILITY",
+      "defaultSelection": "REQUIRED",
+      "workflowClass": "VALIDATED_EXPOSURE",
+      "evaluationMode": "CORRELATION_PATH",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-XSP-007",
+      "version": "1.0.0",
+      "provider": "MULTI_CLOUD",
+      "nativeKinds": [
+        "MULTI_CLOUD_GRAPH"
+      ],
+      "requiredCapabilities": [
+        "MULTI_CLOUD_GRAPH"
+      ],
+      "requiredRelationships": [
+        "DIRECT_PROVIDER_RELATIONSHIP"
+      ],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [],
+      "lifecycle": "VALIDATED",
+      "releaseStatus": "PAUSED",
+      "defaultSelection": "REQUIRED",
+      "workflowClass": "VALIDATED_EXPOSURE",
+      "evaluationMode": "CORRELATION_PATH",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-XSP-008",
+      "version": "1.0.0",
+      "provider": "MULTI_CLOUD",
+      "nativeKinds": [
+        "MULTI_CLOUD_GRAPH"
+      ],
+      "requiredCapabilities": [
+        "MULTI_CLOUD_GRAPH"
+      ],
+      "requiredRelationships": [
+        "DIRECT_PROVIDER_RELATIONSHIP"
+      ],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [],
+      "lifecycle": "VALIDATED",
+      "releaseStatus": "PAUSED",
+      "defaultSelection": "REQUIRED",
+      "workflowClass": "VALIDATED_EXPOSURE",
+      "evaluationMode": "CORRELATION_PATH",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-XSP-009",
+      "version": "1.0.0",
+      "provider": "MULTI_CLOUD",
+      "nativeKinds": [
+        "MULTI_CLOUD_GRAPH"
+      ],
+      "requiredCapabilities": [
+        "MULTI_CLOUD_GRAPH"
+      ],
+      "requiredRelationships": [
+        "DIRECT_PROVIDER_RELATIONSHIP"
+      ],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [],
+      "lifecycle": "VALIDATED",
+      "releaseStatus": "PAUSED",
+      "defaultSelection": "REQUIRED",
+      "workflowClass": "VALIDATED_EXPOSURE",
+      "evaluationMode": "CORRELATION_PATH",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-XSP-010",
+      "version": "1.0.0",
+      "provider": "MULTI_CLOUD",
+      "nativeKinds": [
+        "MULTI_CLOUD_GRAPH"
+      ],
+      "requiredCapabilities": [
+        "MULTI_CLOUD_GRAPH"
+      ],
+      "requiredRelationships": [
+        "DIRECT_PROVIDER_RELATIONSHIP"
+      ],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [],
+      "lifecycle": "VALIDATED",
+      "releaseStatus": "PAUSED",
+      "defaultSelection": "REQUIRED",
+      "workflowClass": "VALIDATED_EXPOSURE",
+      "evaluationMode": "CORRELATION_PATH",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AGCF-XSP-011",
+      "version": "1.0.0",
+      "provider": "MULTI_CLOUD",
+      "nativeKinds": [
+        "MULTI_CLOUD_GRAPH"
+      ],
+      "requiredCapabilities": [
+        "MULTI_CLOUD_GRAPH"
+      ],
+      "requiredRelationships": [
+        "DIRECT_PROVIDER_RELATIONSHIP"
+      ],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [],
+      "lifecycle": "VALIDATED",
+      "releaseStatus": "PAUSED",
+      "defaultSelection": "REQUIRED",
+      "workflowClass": "VALIDATED_EXPOSURE",
+      "evaluationMode": "CORRELATION_PATH",
+      "tenantReadiness": "UNVERIFIED: requires fresh tenant evidence, certified distribution/canary visibility and tenant selection"
+    },
+    {
+      "policyId": "AI_GUARDRAIL_CONFIGURATION_CHANGED_AFTER_APPROVAL",
+      "version": "1.0.0",
+      "provider": "MULTI_CLOUD",
+      "nativeKinds": [
+        "AWS_BEDROCK_AGENT",
+        "AWS_BEDROCK_GUARDRAIL",
+        "AZURE_FOUNDRY_DEPLOYMENTS",
+        "AZURE_RAI_POLICIES"
+      ],
+      "requiredCapabilities": [],
+      "requiredRelationships": [],
+      "requiredResourceFamilies": [],
+      "requiredFacts": [
+        {
+          "factKey": "guardrail.baseline_comparison_outcome",
+          "valueType": "STRING",
+          "evidenceClasses": [
+            "CONFIGURATION"
+          ],
+          "maxAgeSeconds": 86400
+        }
+      ],
+      "lifecycle": "DRAFT",
+      "releaseStatus": "PAUSED",
+      "defaultSelection": "DISABLED",
+      "workflowClass": "POSTURE_FINDING",
+      "evaluationMode": "ARTIFACT_FACTS",
+      "tenantReadiness": "UNVERIFIED: draft policy; certification and approved canary distribution required; default DISABLED"
+    }
+  ]
+}

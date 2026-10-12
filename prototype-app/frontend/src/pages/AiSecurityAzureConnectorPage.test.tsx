@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../api/client';
 import type { AiSecurityAzureFoundryConfig } from '../features/ai-security/types';
 import { renderWithProviders } from '../test/test-utils';
@@ -22,7 +22,20 @@ function buildConfig(overrides: Partial<AiSecurityAzureFoundryConfig> = {}): AiS
 }
 
 describe('AiSecurityAzureConnectorPage', () => {
+  beforeEach(() => vi.spyOn(api, 'listAiSecurityConnectorFeatureFlags').mockResolvedValue([]));
   afterEach(() => vi.restoreAllMocks());
+
+  it('explains disabled agent discovery and enables Foundry through the governed settings API', async () => {
+    vi.spyOn(api, 'getAiSecurityAzureFoundryConfig').mockResolvedValue(buildConfig());
+    vi.spyOn(api, 'listAiSecurityRuns').mockResolvedValue([]);
+    const update = vi.spyOn(api, 'updateAiSecurityConnectorFeatureFlag').mockResolvedValue({
+      featureKey: 'AZURE_NEW_FOUNDRY', enabled: true, killSwitch: false, updatedBy: 'admin', updatedAt: null,
+    });
+    renderWithProviders(<AiSecurityAzureConnectorPage />);
+    expect(await screen.findByText(/Agent discovery is disabled/)).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Foundry agents', { exact: true }));
+    await waitFor(() => expect(update).toHaveBeenCalledWith('AZURE_NEW_FOUNDRY', { enabled: true, killSwitch: false }));
+  });
 
   it('saves the single configuration form in one call, with no separate target step', async () => {
     // Regression test: the old page required a separate Azure Cloud Discovery connector to be

@@ -43,6 +43,7 @@ public class AiGridRuntimeIngestionWorker {
 
     @Scheduled(fixedDelayString = "${app.ai-security.runtime.adapter.poll-interval-ms:2000}")
     public void poll() {
+        if (AiRuntimeScope.excluded()) return;
         if (!enabled) return;
         for (Tenant tenant : tenants.listActiveTenants()) {
             List<IngestionJobService.ClaimedJobRef> claimed = jobs.claimPendingJobsByType(

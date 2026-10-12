@@ -78,6 +78,8 @@ class CopilotStudioDiscoveryServiceTest {
         ArgumentCaptor<ObservationEnvelopeV1> envelope = ArgumentCaptor.forClass(ObservationEnvelopeV1.class);
         verify(observations).ingest(eq(tenant), envelope.capture());
         assertEquals("MICROSOFT_COPILOT", envelope.getValue().provider());
+        assertEquals(AiSecurityObservationService.CONTRACT_VERSION, envelope.getValue().contractVersion());
+        assertEquals(0, envelope.getValue().chunkSequence());
         assertEquals(ScopeStatus.COMPLETE, envelope.getValue().completionStatus());
         assertEquals(3, envelope.getValue().artifacts().size());
         assertTrue(envelope.getValue().relationships().stream()

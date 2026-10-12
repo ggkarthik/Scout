@@ -1,9 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import React from 'react';
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { PageFreshnessStatus } from '../components/PageFreshnessStatus';
-import { AI_ARTIFACT_CATEGORIES, combinedNativeKindFilterValue, stripProviderPrefix } from '../features/ai-security/categories';
+import { AI_ARTIFACT_CATEGORIES, AI_AGENT_VERSION_KINDS, legacyAgentRosterRedirect, combinedNativeKindFilterValue, stripProviderPrefix } from '../features/ai-security/categories';
 import { ProviderLogo } from '../features/ai-security/ProviderLogo';
 import { FindingSeverityChips } from '../features/findings/components/FindingSeverityChips';
 import { InventoryShell } from '../features/inventory/InventoryShell';
@@ -13,7 +13,7 @@ import type { AiProvider } from '../features/ai-security/types';
 
 const ALL_KIND = 'ALL';
 const CATEGORIZED_NATIVE_KINDS = new Set(AI_ARTIFACT_CATEGORIES.flatMap((category) => category.nativeKinds));
-const DEDICATED_NATIVE_KINDS = combinedNativeKindFilterValue([...CATEGORIZED_NATIVE_KINDS]);
+const DEDICATED_NATIVE_KINDS = combinedNativeKindFilterValue([...CATEGORIZED_NATIVE_KINDS, ...AI_AGENT_VERSION_KINDS]);
 const DEDICATED_ARTIFACT_TYPES = 'DATA_STORE,MCP_SERVER';
 
 function shouldPollAiRuns(runs: Array<{ status: string }> | undefined): boolean {
@@ -36,6 +36,10 @@ export function AiInventoryAssetsPage() {
   );
   const [page, setPage] = React.useState(0);
   const pageSize = 50;
+  const isAgentsView = location.pathname === '/inventory/ai/agents';
+  const [search, setSearch] = React.useState('');
+  const subscription = searchParams.get('subscription') ?? undefined;
+  const redirect = legacyAgentRosterRedirect(location.search);
   const isOthersView = searchParams.get('view') === 'others';
 
   React.useEffect(() => {
@@ -56,8 +60,11 @@ export function AiInventoryAssetsPage() {
   });
   const shouldPoll = shouldPollAiRuns(runsQuery.data);
   const artifactsQuery = useQuery({
-    queryKey: ['ai-artifact-summaries', isOthersView, nativeKind, provider, severity, page],
-    queryFn: () => isOthersView
+    queryKey: ['ai-artifact-summaries', isAgentsView, isOthersView, nativeKind, provider, subscription, severity, search, page],
+    queryFn: () => isAgentsView
+      ? api.listAiArtifactSummaries(undefined, page, pageSize, provider || undefined, subscription, undefined,
+        undefined, undefined, undefined, 'AGENTS', search || undefined)
+      : isOthersView
       ? api.listAiArtifactSummaries(
         undefined,
         page,
@@ -68,6 +75,7 @@ export function AiInventoryAssetsPage() {
         severity,
         DEDICATED_NATIVE_KINDS,
         DEDICATED_ARTIFACT_TYPES,
+        'OTHERS',
       )
       : api.listAiArtifactSummaries(
         undefined,
@@ -97,15 +105,17 @@ export function AiInventoryAssetsPage() {
     count: category.nativeKinds.reduce((total, kind) => total + (nativeKindCounts[kind] ?? 0), 0),
   }));
   const remainingKindOptions = Object.entries(nativeKindCounts)
-    .filter(([kind]) => !CATEGORIZED_NATIVE_KINDS.has(kind))
+    .filter(([kind]) => !CATEGORIZED_NATIVE_KINDS.has(kind) && !AI_AGENT_VERSION_KINDS.includes(kind))
     .sort(([, a], [, b]) => b - a)
     .map(([kind, count]) => ({ key: kind, label: stripProviderPrefix(kind), count }));
+
+  if (redirect) return <Navigate to={redirect} replace />;
 
   return (
     <InventoryShell
       eyebrow="AWS and Azure AI estate"
-      title={isOthersView ? 'Other AI Artifacts' : 'AI Asset Inventory'}
-      description={isOthersView
+      title={isAgentsView ? 'Agents' : isOthersView ? 'Other AI Artifacts' : 'AI Asset Inventory'}
+      description={isAgentsView ? 'All discovered logical agents, regardless of deployment status.' : isOthersView
         ? 'Discovered AI resources whose native type does not have a dedicated AI Inventory sidebar view.'
         : 'Every discovered AI artifact across AWS and Azure, filterable by kind, provider, and severity.'}
       legacyClassName="ai-security-page"
@@ -113,7 +123,8 @@ export function AiInventoryAssetsPage() {
       <PageFreshnessStatus updatedAt={summary?.lastCompleteSnapshotAt} />
 
       <div className="inventory-fpl-toolbar">
-        {!isOthersView && (
+        {isAgentsView && <label className="findings-filter-chip">Search <input aria-label="Search agents" value={search} onChange={event => { setSearch(event.target.value); setPage(0); }} /></label>}
+        {!isOthersView && !isAgentsView && (
           <label className="findings-filter-chip">
             <span className="panel-caption">Artifact kind</span>
             <select value={nativeKind} onChange={(event) => { setNativeKind(event.target.value); setPage(0); }} aria-label="Artifact kind">
@@ -176,7 +187,7 @@ export function AiInventoryAssetsPage() {
           </div>
           <table className="data-table">
             <thead>
-              <tr><th>Name</th><th>Native type</th><th>Provider</th><th>Account / Region</th><th>Findings</th><th>Policies (Failed/Total)</th></tr>
+              <tr><th>Name</th>{isAgentsView && <th>Deployment</th>}<th>Native type</th><th>Provider</th><th>Account / Region</th><th>Findings</th><th>Policies (Failed/Total)</th></tr>
             </thead>
             <tbody>
               {items.map((artifact) => {
@@ -187,6 +198,7 @@ export function AiInventoryAssetsPage() {
                     onClick={() => navigate(pathForInventoryAiAsset(artifact.id, `${location.pathname}${location.search}`))}
                   >
                     <td><strong>{artifact.name}</strong></td>
+                    {isAgentsView && <td title={artifact.deployment?.reasonCode ?? 'NO_EVIDENCE'}>{artifact.deployment?.status === 'SERVED' ? 'Served' : artifact.deployment?.status === 'NOT_CURRENTLY_SERVED' ? 'Not currently served' : 'Deployment unverified'}</td>}
                     <td>{stripProviderPrefix(artifact.nativeKind)}</td>
                     <td><ProviderLogo provider={artifact.provider} /></td>
                     <td>{artifact.accountId}<small>{artifact.region}</small></td>

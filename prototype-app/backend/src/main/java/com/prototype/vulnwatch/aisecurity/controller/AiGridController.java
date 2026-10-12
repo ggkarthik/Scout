@@ -184,6 +184,7 @@ public class AiGridController {
     }
     @GetMapping("/ai-runtime-telemetry-readiness")
     public AiGridRuntimeTelemetryReadinessService.TelemetryReadiness runtimeTelemetryReadiness() {
+        com.prototype.vulnwatch.aisecurity.service.AiRuntimeScope.requireInScope();
         return runtimeTelemetryReadiness.getObject().readiness(tenant());
     }
     @GetMapping("/ai-policy-readiness")

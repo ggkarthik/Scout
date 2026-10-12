@@ -165,6 +165,10 @@ public class AiGridPolicyCatalogService {
     }
 
     public Distribution updateDistribution(String policyId, DistributionCommand command, String actor) {
+        if (command != null && AiRuntimeScope.runtimePolicy(policyId, null)
+                && (command.available() || !"PAUSED".equals(command.rolloutStage()) || command.pinnedVersion() != null)) {
+            AiRuntimeScope.requireInScope();
+        }
         return TenantContext.runAsPlatform(() -> {
             if (command == null) bad("Distribution command is required");
             if (command.available() || blank(command.pinnedVersion()) != null) {

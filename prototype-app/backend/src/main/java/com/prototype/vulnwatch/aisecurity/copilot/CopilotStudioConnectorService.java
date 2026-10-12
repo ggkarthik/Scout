@@ -54,6 +54,7 @@ public class CopilotStudioConnectorService {
 
     public Response save(Tenant tenant, Request request) {
         if (request == null || request.credentialProfileId() == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Credential profile is required");
+        if (request.executionEnabled()) com.prototype.vulnwatch.aisecurity.service.AiRuntimeScope.requireInScope();
         URI organization = validateOrganizationUrl(request.organizationUrl());
         List<String> allowedHosts = validateHostPolicy(request.allowedDataverseHosts(), organization.getHost());
         String organizationUrl = organization.toString();

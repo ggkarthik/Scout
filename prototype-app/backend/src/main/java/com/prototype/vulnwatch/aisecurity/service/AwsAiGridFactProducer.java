@@ -32,6 +32,18 @@ public class AwsAiGridFactProducer implements AiGridFactProducer {
         AiGridFactProducerSupport.copy(input, "foundationModel", "model.foundation_identifier_configured", facts);
         AiGridFactProducerSupport.copy(input, "lambdaArn", "compute.lambda_target_arn_configured", facts);
         AiGridFactProducerSupport.copy(input, "iamWildcardActions", "identity.wildcard_permission_observed", facts);
+        String[][] iamPatterns = {
+                {"iamWildcardResources", "identity.wildcard_resource_pattern_observed"},
+                {"iamPassRole", "identity.pass_role_pattern_observed"},
+                {"iamNotAction", "identity.not_action_pattern_observed"},
+                {"iamNotResource", "identity.not_resource_pattern_observed"},
+                {"permissionBoundaryAttached", "identity.permission_boundary_attached_configured"},
+                {"crossAccountTrust", "identity.cross_account_trust_pattern_observed"},
+                {"trustConditionsPresent", "identity.trust_condition_present_configured"}
+        };
+        // These are policy-document patterns, never effective authorization decisions.
+        for (String[] mapping : iamPatterns) AiGridFactProducerSupport.copy(input, mapping[0], mapping[1], facts);
+
         AiGridFactProducerSupport.copy(input, "invocationLoggingEnabled", "logging.model_invocation_enabled_configured", facts);
         AiGridFactProducerSupport.copy(input, "customerManagedKey", "data.customer_managed_key_configured", facts);
         AiGridFactProducerSupport.copy(input, "privateEndpointCount", "network.private_endpoint_count_configured", facts);

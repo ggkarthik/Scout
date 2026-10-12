@@ -16,16 +16,16 @@ import org.springframework.test.util.ReflectionTestUtils;
 class ProductionSafetyValidatorTest {
 
     @Test
-    void validateRequiresDedicatedRuntimeIdentityKeyWhenRuntimeCollectionIsEnabled() {
+    void validateRejectsRuntimeEvenWithADedicatedIdentityKey() {
         ProductionSafetyValidator validator = validator(
                 "", false, "https://issuer.example.com", "",
                 "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=", false, true,
                 "https://app.example.com", disabledBootstrap());
         ReflectionTestUtils.setField(validator, "aiRuntimeEnabled", true);
         ReflectionTestUtils.setField(validator, "aiIdentityHmacKey", testHmacKey());
-        ReflectionTestUtils.setField(validator, "aiRuntimeIdentityHmacKey", "");
 
-        assertThrows(IllegalStateException.class, validator::validate);
+        var error = assertThrows(IllegalStateException.class, validator::validate);
+        assertTrue(error.getMessage().contains("RUNTIME_OUT_OF_SCOPE"));
     }
 
     @Test

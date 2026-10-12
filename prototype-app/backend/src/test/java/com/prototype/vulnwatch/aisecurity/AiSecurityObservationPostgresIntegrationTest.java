@@ -82,11 +82,127 @@ class AiSecurityObservationPostgresIntegrationTest {
     @Autowired private FindingWorkflowService findingWorkflowService;
     @Autowired private AiSecuritySyncRunFacade syncRunFacade;
     @Autowired private NamedParameterJdbcTemplate jdbc;
+    @Autowired private com.prototype.vulnwatch.aisecurity.service.AiAgentDeploymentService deploymentService;
 
     @SpyBean private AiGridReconciliationService reconciliationService;
 
     @MockBean private IngestionJobWorkerService ingestionJobWorkerService;
     @MockBean private FindingDeltaQueueService findingDeltaQueueService;
+
+    @Test
+    void verifiedRoutesAndDefinitionVersionsStaySeparateAcrossExpiryAndEmptyEnumeration() {
+        Tenant tenant = provision("Served agents Co", "served-agents-co");
+        UUID connector = connectorService.save(tenant,new AiSecurityAwsConnectorService.ConnectorConfigRequest(
+                "123456789012",null,null,List.of("us-east-1"),true)).id();
+        String root = "arn:aws:bedrock:us-east-1:123456789012:agent/served";
+        UUID run = syncRunFacade.start(tenant).getId();
+        observationService.ingest(tenant,new ObservationEnvelopeV1(AiSecurityObservationService.CONTRACT_VERSION,
+                run,connector,tenant.getId(),"AWS","123456789012","us-east-1","BEDROCK_AGENT_ROUTES",
+                "AWS:123456789012:us-east-1:BEDROCK_AGENT_ROUTES",0,1,run + ":routes",run.toString(),Instant.now(),ScopeStatus.COMPLETE,
+                List.of(new ArtifactObservation(root,"AI_AGENT","AWS_BEDROCK_AGENT","Served agent",Map.of()),
+                        new ArtifactObservation(root + "/alias/prod","AI_COMPONENT","AWS_BEDROCK_AGENT_ALIAS","Production",Map.of("status","PREPARED","invocationState","ACCEPT_INVOCATIONS")),
+                        new ArtifactObservation(root + "/version/1","AI_AGENT_VERSION","AWS_BEDROCK_AGENT_VERSION","Served v1",Map.of("version","1")),
+                        new ArtifactObservation(root + "/version/2","AI_AGENT_VERSION","AWS_BEDROCK_AGENT_VERSION","Definition v2",Map.of("version","2"))),
+                List.of(new RelationshipObservation(root,root + "/alias/prod","HAS_COMPONENT",Map.of()),
+                        new RelationshipObservation(root + "/alias/prod",root + "/version/1","SERVES_VERSION",Map.of()),
+                        new RelationshipObservation(root + "/version/1",root,"VERSION_OF",Map.of()),
+                        new RelationshipObservation(root + "/version/2",root,"VERSION_OF",Map.of()),
+                        new RelationshipObservation(root,root + "/version/2","ACTIVE_VERSION",Map.of())),List.of()));
+        var roster = aiSecurityApiService.artifactSummaries(tenant,null,null,null,null,null,null,null,"AGENTS",null,0,50);
+        assertEquals(1,roster.total());
+        var agent = roster.items().get(0);
+        assertEquals("SERVED",agent.deployment().status().name());
+        var versions = aiSecurityApiService.agentVersions(tenant,agent.id(),0,50);
+        assertEquals(2,versions.total());
+        assertTrue(versions.items().stream().filter(v -> v.name().equals("Served v1")).allMatch(v -> v.servedVersion() && !v.definitionVersion()));
+        assertTrue(versions.items().stream().filter(v -> v.name().equals("Definition v2")).allMatch(v -> !v.servedVersion() && v.definitionVersion()));
+        var others = aiSecurityApiService.artifactSummaries(tenant,null,null,null,null,null,null,null,"OTHERS",null,0,50);
+        assertTrue(others.items().stream().noneMatch(v -> v.nativeKind().contains("VERSION")));
+        assertEquals(1,aiSecurityApiService.summary(tenant).logicalAgentCount());
+        var expired = tenantExecution.run(tenant, () -> deploymentService.resolve(List.of(
+                new com.prototype.vulnwatch.aisecurity.service.AiAgentDeploymentService.Agent(agent.id(),agent.nativeKind())),
+                agent.deployment().expiresAt()).get(agent.id()));
+        assertEquals("STALE_EVIDENCE",expired.reasonCode().name());
+        assertEquals("SERVED",expired.lastVerifiedObservation().status().name());
+        aiSecurityApiService.updateDeploymentSettings(tenant,new com.prototype.vulnwatch.aisecurity.service.AiSecurityApiService.DeploymentSettings(1));
+        var fresh = aiSecurityApiService.artifact(tenant,agent.id()).deployment();
+        assertEquals(java.time.Duration.ofHours(1),java.time.Duration.between(fresh.observedAt(),fresh.expiresAt()));
+        tenantExecution.run(tenant, () -> jdbc.update("update ai_security_snapshot_scopes set started_at=started_at-interval '2 hours' where run_id=:run",Map.of("run",run)));
+        assertEquals("STALE_EVIDENCE",aiSecurityApiService.artifact(tenant,agent.id()).deployment().reasonCode().name(),
+                "Finalizing old provider observations must not refresh their evidence time");
+        UUID emptyRun = syncRunFacade.start(tenant).getId();
+        observationService.ingest(tenant,new ObservationEnvelopeV1(AiSecurityObservationService.CONTRACT_VERSION,
+                emptyRun,connector,tenant.getId(),"AWS","123456789012","us-east-1","BEDROCK_AGENT_ROUTES",
+                "AWS:123456789012:us-east-1:BEDROCK_AGENT_ROUTES",0,1,emptyRun + ":routes",emptyRun.toString(),Instant.now(),ScopeStatus.COMPLETE,
+                List.of(new ArtifactObservation(root,"AI_AGENT","AWS_BEDROCK_AGENT","Served agent",Map.of())),List.of(),List.of()));
+        assertEquals("NOT_CURRENTLY_SERVED",aiSecurityApiService.artifact(tenant,agent.id()).deployment().status().name());
+        assertEquals(1,aiSecurityApiService.summary(tenant).logicalAgentCount());
+        assertEquals(2,aiSecurityApiService.agentVersions(tenant,agent.id(),0,50).total());
+        assertTrue(aiSecurityApiService.agentVersions(tenant,agent.id(),0,50).items().stream().noneMatch(v -> v.servedVersion()));
+        assertTrue(aiSecurityApiService.artifact(tenant,versions.items().get(0).id()) != null);
+    }
+
+    @Test
+    void logicalAgentRosterKeepsIdentityTotalsAndHistoryAcrossRoutingFailures() {
+        Tenant tenant = provision("Logical agents Co", "logical-agents-co");
+        UUID connectorId = connectorService.save(tenant,
+                new AiSecurityAwsConnectorService.ConnectorConfigRequest("123456789012", null, null, List.of("us-east-1"), true)).id();
+        String root = "arn:aws:bedrock:us-east-1:123456789012:agent/roster";
+        List<ArtifactObservation> agents = List.of(
+                new ArtifactObservation(root, "AI_AGENT", "AWS_BEDROCK_AGENT", "Same name", Map.of()),
+                new ArtifactObservation(root + "-distinct", "AI_AGENT", "AWS_BEDROCK_AGENT", "Same name", Map.of()));
+        UUID enumeration = syncRunFacade.start(tenant).getId();
+        observationService.ingest(tenant, envelope(tenant, connectorId, enumeration, "roster-1", ScopeStatus.COMPLETE, agents));
+        UUID duplicate = syncRunFacade.start(tenant).getId();
+        observationService.ingest(tenant, envelope(tenant, connectorId, duplicate, "roster-2", ScopeStatus.COMPLETE, agents));
+        var roster = aiSecurityApiService.artifactSummaries(tenant, null, null, "AWS", null, null, null, null, "AGENTS", "Same", 0, 1);
+        assertEquals(2, roster.total());
+        assertEquals(1, roster.items().size());
+        assertEquals(2, aiSecurityApiService.summary(tenant).logicalAgentCount());
+        UUID agentId = tenantExecution.run(tenant, () -> jdbc.queryForObject(
+                "select id from ai_security_artifacts where provider_resource_id=:id", Map.of("id", root), UUID.class));
+        for (ScopeStatus state : List.of(ScopeStatus.COMPLETE, ScopeStatus.ERROR)) {
+            UUID run = syncRunFacade.start(tenant).getId();
+            observationService.ingest(tenant, new ObservationEnvelopeV1(AiSecurityObservationService.CONTRACT_VERSION,
+                    run, connectorId, tenant.getId(), "AWS", "123456789012", "us-east-1", "BEDROCK_AGENT_ROUTES",
+                    "AWS:123456789012:us-east-1:BEDROCK_AGENT_ROUTES", 0, 1, run + ":routes", run.toString(), Instant.now(), state,
+                    state == ScopeStatus.COMPLETE ? agents : List.of(), List.of(), List.of()));
+            assertEquals(2, aiSecurityApiService.artifactSummaries(tenant, null, null, null, null, null, null, null, "AGENTS", null, 0, 50).total());
+            var deployment = aiSecurityApiService.artifact(tenant, agentId).deployment();
+            assertEquals(state == ScopeStatus.COMPLETE ? "NOT_CURRENTLY_SERVED" : "UNVERIFIED", deployment.status().name());
+            assertEquals(state == ScopeStatus.COMPLETE ? "NO_ALIAS_ROUTE" : "PROVIDER_ERROR", deployment.reasonCode().name());
+            assertTrue(deployment.lastVerifiedObservation() != null);
+        }
+        UUID missing = syncRunFacade.start(tenant).getId();
+        observationService.ingest(tenant, envelope(tenant, connectorId, missing, "roster-empty", ScopeStatus.COMPLETE, List.of()));
+        assertEquals(0, aiSecurityApiService.summary(tenant).logicalAgentCount());
+        assertFalse(aiSecurityApiService.artifact(tenant, agentId).active());
+        assertEquals(2, tenantExecution.run(tenant, () -> jdbc.queryForObject("select count(*) from ai_security_artifacts", Map.of(), Integer.class)));
+        tenantExecution.run(tenant, () -> {
+            jdbc.update("""
+                    insert into ai_security_artifacts (id,tenant_id,provider,provider_resource_id,artifact_type,native_kind,
+                        name,account_id,region,active,attributes_json,first_observed_at,last_observed_at)
+                    select gen_random_uuid(),:tenant,'AWS','representative-agent-' || n,'AI_AGENT','AWS_BEDROCK_AGENT',
+                        'Representative ' || n,'123456789012','us-east-1',true,'{}'::jsonb,now(),now()
+                    from generate_series(1,1000) n
+                    """, Map.of("tenant",tenant.getId()));
+            jdbc.getJdbcTemplate().execute("analyze ai_security_artifacts");
+            return null;
+        });
+        var representative = aiSecurityApiService.artifactSummaries(tenant,null,null,null,null,null,null,null,"AGENTS",null,0,50);
+        assertEquals(1000,representative.total());
+        assertEquals(50,representative.items().size());
+        tenantExecution.run(tenant, () -> {
+            String query = (String) org.springframework.test.util.ReflectionTestUtils.getField(
+                    com.prototype.vulnwatch.aisecurity.service.AiAgentDeploymentService.class,"SCOPE_QUERY");
+            String plan = jdbc.queryForObject("explain (analyze,buffers,format json) " + query,
+                    Map.of("ids", representative.items().stream().map(item -> item.id()).toList()),String.class);
+            assertTrue(plan.contains("Execution Time"));
+            try { java.nio.file.Files.writeString(java.nio.file.Path.of("/tmp/agent-deployment-query-plan.json"),plan); }
+            catch (java.io.IOException ex) { throw new IllegalStateException(ex); }
+            return null;
+        });
+    }
 
     @Test
     void capabilityManifestsFinalizeMissingScopesExactlyOnce() {
@@ -508,9 +624,12 @@ class AiSecurityObservationPostgresIntegrationTest {
                     "select count(*) from ai_grid_snapshot_bodies",
                     Map.of(), Integer.class),
                     "the same guardrail evidence in two manifests must reuse one content-addressed body");
-            assertEquals(3, jdbc.queryForObject(
+            assertEquals(4, jdbc.queryForObject(
                     "select count(*) from ai_grid_facts where run_id = :runId",
                     Map.of("runId", runId), Integer.class));
+            assertEquals("UNKNOWN", jdbc.queryForObject(
+                    "select state from ai_grid_facts where run_id=:runId and fact_key='guardrail.baseline_comparison_outcome'",
+                    Map.of("runId", runId), String.class), "missing approval is coverage uncertainty, never a passing control");
             assertEquals("FAIL", jdbc.queryForObject("""
                     select decision from ai_grid_assessments
                      where run_id = :runId and policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL'

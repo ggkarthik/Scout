@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.CaseCommand;
 import com.prototype.vulnwatch.aisecurity.service.AiGridValidationGovernanceService.EnvironmentCommand;
@@ -35,6 +37,7 @@ import java.util.concurrent.Executors;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -56,6 +59,7 @@ class AiGridValidationGovernancePostgresIntegrationTest {
     @Autowired private TenantService tenantService;
     @Autowired private TenantSchemaMigrationService tenantSchemaMigrationService;
     @Autowired private TenantSchemaExecutionService tenantExecution;
+    @Autowired private ObjectMapper objectMapper;
 
     @BeforeEach
     void seedCandidatePolicy() {
@@ -138,7 +142,80 @@ class AiGridValidationGovernancePostgresIntegrationTest {
     }
 
     @Test
-    void blocksPublicationUntilFreshAnswerKeyAndDualReviewedPrecisionPass() {
+    void rejectsMissingSelectedTenantCohortsWithoutCreatingReleaseBinding() {
+        String policyId = "GOVERNANCE_TEST_POLICY";
+        Integer before = TenantContext.runAsPlatform(() -> jdbc.queryForObject("""
+                select count(*) from platform.ai_grid_policy_release_bindings where policy_id = :policyId
+                """, Map.of("policyId", policyId), Integer.class));
+
+        for (PublishCommand command : List.of(new PublishCommand(List.of()), new PublishCommand(null))) {
+            ResponseStatusException error = assertThrows(ResponseStatusException.class,
+                    () -> governance.publishApprovedPolicy(policyId, command, "release-owner"));
+            assertEquals(HttpStatus.BAD_REQUEST, error.getStatusCode());
+        }
+        ResponseStatusException missingBody = assertThrows(ResponseStatusException.class,
+                () -> governance.publishApprovedPolicy(policyId, null, "release-owner"));
+        assertEquals(HttpStatus.BAD_REQUEST, missingBody.getStatusCode());
+        assertEquals(before, TenantContext.runAsPlatform(() -> jdbc.queryForObject("""
+                select count(*) from platform.ai_grid_policy_release_bindings where policy_id = :policyId
+                """, Map.of("policyId", policyId), Integer.class)));
+    }
+
+    @Test
+    void publishAllKeepsTargetsAndLeavesCanaryListEmpty() throws Exception {
+        String policyId = "GOVERNANCE_PUBLISH_ALL_POLICY";
+        TenantContext.runAsPlatform(() -> jdbc.update("""
+                insert into platform.ai_grid_policy_versions (
+                    policy_id, version, name, description, severity, lifecycle, workflow_class,
+                    default_selection, artifact_types_json, required_capabilities_json,
+                    required_relationships_json, required_resource_families_json, required_facts_json,
+                    predicate_json, reason_code, remediation, framework_mappings_json,
+                    native_kinds_json, scope_resolution, package_digest)
+                select :policyId, version, 'Publish-all governance test policy', description,
+                       severity, 'VALIDATED', workflow_class, default_selection, artifact_types_json,
+                       required_capabilities_json, required_relationships_json, required_resource_families_json,
+                       required_facts_json, predicate_json, 'GOVERNANCE_PUBLISH_ALL_REASON', remediation,
+                       framework_mappings_json, native_kinds_json, scope_resolution,
+                       'governance-publish-all-package-digest'
+                  from platform.ai_grid_policy_versions
+                 where policy_id = 'GOVERNANCE_TEST_POLICY' and version = '1.0.0'
+                on conflict do nothing
+                """, Map.of("policyId", policyId)));
+        List<UUID> activeTenantIds = tenantService.listTenants().stream()
+                .filter(tenant -> "ACTIVE".equals(tenant.getStatus())).map(Tenant::getId).toList();
+        assertFalse(activeTenantIds.isEmpty());
+        governance.deployToDevTenants(policyId, activeTenantIds, "Publish-all rollout test", "release-owner");
+        TenantContext.runAsPlatform(() -> jdbc.update("""
+                insert into platform.ai_grid_policy_release_decisions
+                    (id, policy_id, policy_version, package_digest, decision, reason, decided_by,
+                     approved_package_digest)
+                select :id, policy_id, version, package_digest, 'APPROVED',
+                       'Publish-all test approval', 'release-owner', package_digest
+                  from platform.ai_grid_policy_versions
+                 where policy_id = :policyId and version = '1.0.0'
+                """, Map.of("id", UUID.randomUUID(), "policyId", policyId)));
+        TenantContext.runAsPlatform(() -> jdbc.update("""
+                update platform.ai_grid_policy_versions set lifecycle = 'APPROVED'
+                 where policy_id = :policyId and version = '1.0.0'
+                """, Map.of("policyId", policyId)));
+
+        var released = governance.publishApprovedPolicy(policyId, new PublishCommand(List.of(), true), "release-owner");
+        assertEquals(activeTenantIds, released.targetTenantIds());
+        String snapshotJson = TenantContext.runAsPlatform(() -> jdbc.queryForObject("""
+                select distribution_snapshot_json::text from platform.ai_grid_policy_release_bindings where id = :id
+                """, Map.of("id", released.releaseBindingId()), String.class));
+        JsonNode snapshot = objectMapper.readTree(snapshotJson);
+        assertEquals("GENERAL_AVAILABILITY", snapshot.path("rolloutStage").asText());
+        assertEquals(0, snapshot.path("canaryTenantIds").size());
+        assertEquals(activeTenantIds.size(), snapshot.path("targetTenantIds").size());
+        String targetsJson = TenantContext.runAsPlatform(() -> jdbc.queryForObject("""
+                select target_tenant_ids_json::text from platform.ai_grid_policy_release_bindings where id = :id
+                """, Map.of("id", released.releaseBindingId()), String.class));
+        assertEquals(snapshot.path("targetTenantIds"), objectMapper.readTree(targetsJson));
+    }
+
+    @Test
+    void blocksPublicationUntilFreshAnswerKeyAndDualReviewedPrecisionPass() throws Exception {
         String policyId = "GOVERNANCE_TEST_POLICY";
         String version = "1.0.0";
         String digest = governance.policyDigest(policyId, version);
@@ -228,6 +305,19 @@ class AiGridValidationGovernancePostgresIntegrationTest {
                 new PublishCommand(List.of(provenance.tenantId())), "release-owner");
         assertEquals(approval.approvalId(), released.approvalId());
         assertEquals(List.of(provenance.tenantId()), released.targetTenantIds());
+        String bindingJson = TenantContext.runAsPlatform(() -> jdbc.queryForObject("""
+                select distribution_snapshot_json::text from platform.ai_grid_policy_release_bindings where id = :id
+                """, Map.of("id", released.releaseBindingId()), String.class));
+        JsonNode binding = objectMapper.readTree(bindingJson);
+        assertTrue(binding.path("available").asBoolean());
+        assertEquals("CANARY", binding.path("rolloutStage").asText());
+        assertEquals(version, binding.path("pinnedVersion").asText());
+        assertEquals(provenance.tenantId().toString(), binding.path("canaryTenantIds").get(0).asText());
+        assertEquals(binding.path("canaryTenantIds"), binding.path("targetTenantIds"));
+        String targetsJson = TenantContext.runAsPlatform(() -> jdbc.queryForObject("""
+                select target_tenant_ids_json::text from platform.ai_grid_policy_release_bindings where id = :id
+                """, Map.of("id", released.releaseBindingId()), String.class));
+        assertEquals(binding.path("targetTenantIds"), objectMapper.readTree(targetsJson));
         assertEquals("PUBLISHED", TenantContext.runAsPlatform(() -> jdbc.queryForObject("""
                 select lifecycle from platform.ai_grid_policy_versions
                  where policy_id = :policyId and version = :version

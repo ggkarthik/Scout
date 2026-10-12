@@ -61,6 +61,10 @@ public class AiGridRuntimeEvaluationService {
 
     /** Evaluates every enabled runtime policy for the tenant, anchored to the triggering run. */
     public int evaluateRun(Tenant tenant, UUID runId) {
+        if (AiRuntimeScope.excluded()) {
+            LOG.debug(AiRuntimeScope.REASON);
+            return 0;
+        }
         List<RuntimePolicy> policies = loadRuntimePolicies(tenant);
         if (policies.isEmpty()) return 0;
         Map<String, String> selections = loadSelections();

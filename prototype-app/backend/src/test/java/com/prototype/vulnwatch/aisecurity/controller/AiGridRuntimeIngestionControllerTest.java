@@ -32,16 +32,11 @@ class AiGridRuntimeIngestionControllerTest {
     }
 
     @Test
-    void returnsRetryAfterWhenTenantQuotaIsExhausted() {
-        Tenant tenant = mock(Tenant.class);
-        when(workspaces.getWorkspace()).thenReturn(tenant);
-        when(ingestion.accept(eq(tenant), eq("runtime-producer"), any(byte[].class)))
-                .thenReturn(new AiGridRuntimeIngestionService.AdmissionResult(UUID.randomUUID(), "REJECTED",
-                        0, 0, 0, "TENANT_QUOTA_EXHAUSTED", 47));
-
-        var response = controller.ingest("runtime-producer", new byte[] {1}, () -> "runtime-producer");
-
-        assertEquals(HttpStatus.TOO_MANY_REQUESTS, response.getStatusCode());
-        assertEquals("47", response.getHeaders().getFirst("Retry-After"));
+    void rejectsAuthorizedProducerWithoutAdmittingAnyWork() {
+        var error = assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                () -> controller.ingest("runtime-producer", new byte[] {1}, () -> "runtime-producer"));
+        assertEquals(HttpStatus.GONE, error.getStatusCode());
+        assertEquals("RUNTIME_OUT_OF_SCOPE", error.getReason());
+        org.mockito.Mockito.verifyNoInteractions(ingestion, workspaces, access);
     }
 }

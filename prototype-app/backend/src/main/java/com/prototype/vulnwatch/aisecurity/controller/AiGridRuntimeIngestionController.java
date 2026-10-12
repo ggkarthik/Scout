@@ -37,6 +37,7 @@ public class AiGridRuntimeIngestionController {
         if (principal == null || !producerId.equals(principal.getName())) {
             throw new AccessDeniedException("Authenticated service account is not authorized for this producer");
         }
+        com.prototype.vulnwatch.aisecurity.service.AiRuntimeScope.requireInScope();
         Tenant tenant = workspaces.getWorkspace();
         access.assertEntitled(tenant);
         AiGridRuntimeIngestionService.AdmissionResult result = ingestion.accept(tenant, producerId, request);

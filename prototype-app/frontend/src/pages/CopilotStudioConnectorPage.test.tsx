@@ -31,7 +31,7 @@ describe('CopilotStudioConnectorPage', () => {
     }), expect.anything()));
   });
 
-  it('renders discovery and runtime permission results independently', async () => {
+  it('renders definition permission results without runtime controls', async () => {
     vi.spyOn(api, 'listAiSecurityConnectorFeatureFlags').mockResolvedValue([]);
     vi.spyOn(api, 'listCopilotStudioConnectors').mockResolvedValue([{
       id: 'connector-1', organizationUrl: 'https://org.crm.dynamics.com', credentialProfileId: 'profile-1',
@@ -46,7 +46,9 @@ describe('CopilotStudioConnectorPage', () => {
     renderWithProviders(<CopilotStudioConnectorPage />);
     fireEvent.click(await screen.findByRole('button', { name: 'Test permissions' }));
     expect(await screen.findByText(/Discovery — bots: READY; components: READY/)).toBeInTheDocument();
-    expect(screen.getByText(/Runtime — executions: DENIED/)).toBeInTheDocument();
+    expect(screen.queryByText(/Runtime — executions/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Run runtime' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Enable runtime metadata')).not.toBeInTheDocument();
   });
 
   it('queues discovery for durable worker processing', async () => {

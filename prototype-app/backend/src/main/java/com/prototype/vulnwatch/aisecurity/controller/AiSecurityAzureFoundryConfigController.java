@@ -70,7 +70,8 @@ public class AiSecurityAzureFoundryConfigController {
 
     @PostMapping("/runtime-run")
     @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
-    public AzureFoundryRuntimeCollectionService.Result runtimeRun() { return runtime.run(tenant()); }
+    public AzureFoundryRuntimeCollectionService.Result runtimeRun() {
+        com.prototype.vulnwatch.aisecurity.service.AiRuntimeScope.requireInScope(); return runtime.run(tenant()); }
 
     private Tenant tenant() {
         Tenant tenant = workspace.getWorkspace();

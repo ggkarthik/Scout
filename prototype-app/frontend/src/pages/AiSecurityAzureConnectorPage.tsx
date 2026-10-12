@@ -9,6 +9,15 @@ export function AiSecurityAzureConnectorPage() {
     queryKey: ['ai-security-azure-foundry-config'],
     queryFn: api.getAiSecurityAzureFoundryConfig,
   });
+  const flagsQuery = useQuery({
+    queryKey: ['ai-security-feature-flags'],
+    queryFn: api.listAiSecurityConnectorFeatureFlags,
+  });
+  const updateFlag = useMutation({
+    mutationFn: ({ featureKey, enabled }: { featureKey: string; enabled: boolean }) =>
+      api.updateAiSecurityConnectorFeatureFlag(featureKey, { enabled, killSwitch: false }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['ai-security-feature-flags'] }),
+  });
   const runsQuery = useQuery({
     queryKey: ['ai-security-runs', 'AZURE'],
     queryFn: () => api.listAiSecurityRuns('AZURE'),
@@ -95,6 +104,26 @@ export function AiSecurityAzureConnectorPage() {
               <span className="panel-caption">One form configures Azure Cloud Discovery and AI Security together.</span>
             </div>
           </div>
+          <fieldset disabled={flagsQuery.isLoading || updateFlag.isPending}>
+            <legend>Agent discovery</legend>
+            <p>Enable the agent types to include in discovery, then execute the connector.</p>
+            {[
+              ['AZURE_NEW_FOUNDRY', 'Foundry agents'],
+              ['AZURE_CLASSIC_FOUNDRY', 'Classic Foundry agents'],
+            ].map(([featureKey, label]) => {
+              const flag = flagsQuery.data?.find(item => item.featureKey === featureKey);
+              return <label key={featureKey}>
+                <input type="checkbox" checked={flag?.enabled === true && !flag.killSwitch}
+                  disabled={flag?.killSwitch === true}
+                  onChange={event => updateFlag.mutate({ featureKey, enabled: event.target.checked })} />
+                {label}{flag?.killSwitch && ' (paused by emergency stop)'}
+              </label>;
+            })}
+            {flagsQuery.data && !flagsQuery.data.some(flag =>
+              ['AZURE_NEW_FOUNDRY', 'AZURE_CLASSIC_FOUNDRY'].includes(flag.featureKey) && flag.enabled && !flag.killSwitch)
+              && <div className="notice">Agent discovery is disabled. Runs will collect supporting Azure resources but no agents.</div>}
+            {(flagsQuery.error || updateFlag.error) && <div className="notice error">Unable to update agent discovery settings.</div>}
+          </fieldset>
           <label>
             Foundry endpoint URL
             <input

@@ -1,0 +1,6 @@
+order_id,sku,quantity,unit_price_usd,status
+DEMO-ORD-001,DEMO-100,2,49,delivered
+DEMO-ORD-002,DEMO-200,3,19,shipped
+DEMO-ORD-003,DEMO-300,1,39,processing
+DEMO-ORD-004,DEMO-100,1,49,delivered
+DEMO-ORD-005,DEMO-200,2,19,delivered

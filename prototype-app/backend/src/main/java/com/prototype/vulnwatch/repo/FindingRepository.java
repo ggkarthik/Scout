@@ -98,19 +98,22 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
     );
     long countByVulnerabilityAndStatus(Vulnerability vulnerability, FindingStatus status);
     void deleteByAsset(Asset asset);
-    long countByStatus(FindingStatus status);
-    long countByStatusAndConfidenceScoreGreaterThanEqual(FindingStatus status, double minConfidence);
+    @Query("select count(f) from Finding f where f.status=:status and (f.findingKind is null or f.findingKind <> 'AI_RUNTIME')")
+    long countByStatus(@Param("status") FindingStatus status);
+    @Query("select count(f) from Finding f where f.status=:status and f.confidenceScore>=:minConfidence and (f.findingKind is null or f.findingKind <> 'AI_RUNTIME')")
+    long countByStatusAndConfidenceScoreGreaterThanEqual(@Param("status") FindingStatus status, @Param("minConfidence") double minConfidence);
     long countBySuppressedByRuleId(UUID suppressedByRuleId);
     long countByOwnerGroup(String ownerGroup);
 
     List<Finding> findBySuppressedByRuleId(UUID suppressedByRuleId);
-    long countByStatusAndRiskScoreGreaterThanEqual(FindingStatus status, double minRiskScore);
+    @Query("select count(f) from Finding f where f.status=:status and f.riskScore>=:minRiskScore and (f.findingKind is null or f.findingKind <> 'AI_RUNTIME')")
+    long countByStatusAndRiskScoreGreaterThanEqual(@Param("status") FindingStatus status, @Param("minRiskScore") double minRiskScore);
 
     @Query("""
             select count(f)
             from Finding f
             join f.vulnerability v
-            where f.status = :status and upper(v.severity) = upper(:severity)
+            where f.status = :status and (f.findingKind is null or f.findingKind <> 'AI_RUNTIME') and upper(v.severity) = upper(:severity)
             """)
     long countByStatusAndSeverity(
             @Param("status") FindingStatus status,
@@ -121,14 +124,14 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
             select count(f)
             from Finding f
             join f.vulnerability v
-            where upper(coalesce(f.severityOverride, v.severity)) = upper(:severity)
+            where (f.findingKind is null or f.findingKind <> 'AI_RUNTIME') and upper(coalesce(f.severityOverride, v.severity)) = upper(:severity)
             """)
     long countBySeverity(@Param("severity") String severity);
 
     @Query("""
             select coalesce(avg(f.riskScore), 0)
             from Finding f
-            where f.tenant = :tenant and f.status = :status
+            where f.tenant = :tenant and f.status = :status and (f.findingKind is null or f.findingKind <> 'AI_RUNTIME')
             """)
     double averageRiskScoreByTenantAndStatus(
             @Param("tenant") Tenant tenant,
@@ -138,7 +141,7 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
     @Query("""
             select coalesce(avg(f.confidenceScore), 0)
             from Finding f
-            where f.tenant = :tenant and f.status = :status
+            where f.tenant = :tenant and f.status = :status and (f.findingKind is null or f.findingKind <> 'AI_RUNTIME')
             """)
     double averageConfidenceScoreByTenantAndStatus(
             @Param("tenant") Tenant tenant,
@@ -149,7 +152,7 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
             select new com.prototype.vulnwatch.dto.TopFindingMetricResponse(v.externalId, count(f))
             from Finding f
             join f.vulnerability v
-            where f.tenant = :tenant and f.status = :status
+            where f.tenant = :tenant and f.status = :status and (f.findingKind is null or f.findingKind <> 'AI_RUNTIME')
             group by v.externalId
             order by count(f) desc
             """)
@@ -166,7 +169,7 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
             )
             from Finding f
             join f.component c
-            where f.tenant = :tenant and f.status = :status
+            where f.tenant = :tenant and f.status = :status and (f.findingKind is null or f.findingKind <> 'AI_RUNTIME')
             group by c.ecosystem, c.packageName
             order by count(f) desc
             """)
@@ -183,7 +186,7 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
             )
             from Finding f
             join f.asset a
-            where f.tenant = :tenant and f.status = :status
+            where f.tenant = :tenant and f.status = :status and (f.findingKind is null or f.findingKind <> 'AI_RUNTIME')
             group by a.name, a.identifier
             order by count(f) desc
             """)
@@ -201,7 +204,7 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
             from Finding f
             join f.vulnerability v
             join f.component c
-            where f.tenant = :tenant and f.status = :status
+            where f.tenant = :tenant and f.status = :status and (f.findingKind is null or f.findingKind <> 'AI_RUNTIME')
             group by v.externalId, c.ecosystem, c.packageName
             order by count(f) desc
             """)
@@ -259,7 +262,7 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
             select distinct upper(v.severity)
             from Finding f
             join f.vulnerability v
-            where f.tenant = :tenant
+            where f.tenant = :tenant and (f.findingKind is null or f.findingKind <> 'AI_RUNTIME')
               and v.severity is not null
               and trim(v.severity) <> ''
             """)
@@ -268,21 +271,21 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
     @Query("""
             select distinct f.status
             from Finding f
-            where f.tenant = :tenant
+            where f.tenant = :tenant and (f.findingKind is null or f.findingKind <> 'AI_RUNTIME')
             """)
     List<FindingStatus> findDistinctStatusesByTenant(@Param("tenant") Tenant tenant);
 
     @Query("""
             select distinct f.decisionState
             from Finding f
-            where f.tenant = :tenant
+            where f.tenant = :tenant and (f.findingKind is null or f.findingKind <> 'AI_RUNTIME')
             """)
     List<FindingDecisionState> findDistinctDecisionStatesByTenant(@Param("tenant") Tenant tenant);
 
     @Query("""
             select distinct lower(f.matchedBy)
             from Finding f
-            where f.tenant = :tenant
+            where f.tenant = :tenant and (f.findingKind is null or f.findingKind <> 'AI_RUNTIME')
               and f.matchedBy is not null
               and trim(f.matchedBy) <> ''
             """)
@@ -291,7 +294,7 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
     @Query("""
             select distinct f.vexStatus
             from Finding f
-            where f.tenant = :tenant
+            where f.tenant = :tenant and (f.findingKind is null or f.findingKind <> 'AI_RUNTIME')
               and f.vexStatus is not null
               and trim(f.vexStatus) <> ''
             """)
@@ -300,7 +303,7 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
     @Query("""
             select distinct f.vexFreshness
             from Finding f
-            where f.tenant = :tenant
+            where f.tenant = :tenant and (f.findingKind is null or f.findingKind <> 'AI_RUNTIME')
               and f.vexFreshness is not null
               and trim(f.vexFreshness) <> ''
             """)
@@ -309,7 +312,7 @@ public interface FindingRepository extends JpaRepository<Finding, UUID>, JpaSpec
     @Query("""
             select distinct f.vexProvider
             from Finding f
-            where f.tenant = :tenant
+            where f.tenant = :tenant and (f.findingKind is null or f.findingKind <> 'AI_RUNTIME')
               and f.vexProvider is not null
               and trim(f.vexProvider) <> ''
             """)

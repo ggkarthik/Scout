@@ -70,7 +70,11 @@ public class AiGridAssessmentService {
         // Runtime policies have an EXECUTION subject and read the runtime metadata tables, not
         // snapshot facts. Evaluating them in the artifact loop would bind them to the wrong
         // subject and run their predicate through the leaf fact engine.
-        policies = policies.stream().filter(policy -> !isRuntimeMode(policy.evaluationMode())).toList();
+        policies = policies.stream().filter(policy -> !isRuntimeMode(policy.evaluationMode()))
+                // Baseline approvals can change after immutable snapshot facts were committed.
+                // Their current-state evaluator owns reconciliation and stable finding identity.
+                .filter(policy -> !"AI_GUARDRAIL_CONFIGURATION_CHANGED_AFTER_APPROVAL".equals(policy.id())
+                        && !"AI_ARTIFACT_DIGEST_CHANGED_AFTER_APPROVAL".equals(policy.id())).toList();
         Map<String, ScopeConfig> scopes = loadScopes();
         Map<String, Map<String, String>> overrides = loadOverrides();
         Map<String, Map<String, Object>> parameters = loadParameters();

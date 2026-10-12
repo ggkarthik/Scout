@@ -1622,6 +1622,9 @@ export const api = {
     if (severity) params.set('severity', severity);
     return request<AiSecurityPage<AiSecurityArtifact>>(`/ai-security/artifacts?${params.toString()}`);
   },
+  listAiAgentVersions: (agentId: string, page = 0, size = 50) =>
+    request<AiSecurityPage<{ id: string; name: string; nativeKind: string; definitionVersion: boolean; servedVersion: boolean; lastObservedAt: string }>>(
+      `/ai-security/artifacts/${encodeURIComponent(agentId)}/versions?page=${page}&size=${size}`),
   listAiArtifactSummaries: (
     artifactType?: string,
     page = 0,
@@ -1632,6 +1635,8 @@ export const api = {
     severity?: string,
     excludeNativeKinds?: string,
     excludeArtifactTypes?: string,
+    inventoryView?: 'AGENTS' | 'OTHERS',
+    search?: string,
   ) => {
     const params = new URLSearchParams({ page: String(page), size: String(size) });
     if (artifactType) params.set('artifactType', artifactType);
@@ -1641,6 +1646,8 @@ export const api = {
     if (severity) params.set('severity', severity);
     if (excludeNativeKinds) params.set('excludeNativeKinds', excludeNativeKinds);
     if (excludeArtifactTypes) params.set('excludeArtifactTypes', excludeArtifactTypes);
+    if (inventoryView) params.set('inventoryView', inventoryView);
+    if (search) params.set('search', search);
     return request<AiSecurityPage<AiArtifactSummary>>(`/ai-security/artifact-summaries?${params.toString()}`);
   },
   listAiKnowledgeDataInventory: (
@@ -1669,6 +1676,18 @@ export const api = {
     if (active !== undefined) params.set('active', String(active));
     return request<AiSecurityPage<AiSecurityArtifact>>(`/ai-security/inventory/mcp?${params.toString()}`);
   },
+  getAiBaselines: (artifactId: string) =>
+    request<AiBaseline[]>(`/ai-security/artifacts/${encodeURIComponent(artifactId)}/digest-baselines`),
+  getAiBaselineObservations: (artifactId: string) =>
+    request<AiBaselineObservation[]>(`/ai-security/artifacts/${encodeURIComponent(artifactId)}/digest-baselines/observations`),
+  getAiBaselineHistory: (artifactId: string) =>
+    request<AiBaselineHistory[]>(`/ai-security/artifacts/${encodeURIComponent(artifactId)}/digest-baselines/history`),
+  approveAiBaselineObservation: (artifactId: string, observation: AiBaselineObservation, reapproval: boolean) =>
+    request<AiBaseline>(`/ai-security/artifacts/${encodeURIComponent(artifactId)}/digest-baselines/approve-observation?reapproval=${reapproval}`, {
+      method: 'POST', body: JSON.stringify({ digestKind: observation.digestKind, sourceRunId: observation.sourceRunId, observedAt: observation.observedAt }),
+    }),
+  revokeAiBaseline: (artifactId: string, digestKind: string) =>
+    request<AiBaseline>(`/ai-security/artifacts/${encodeURIComponent(artifactId)}/digest-baselines/revoke?digestKind=${encodeURIComponent(digestKind)}`, { method: 'POST' }),
   getAiSecurityArtifact: (artifactId: string) =>
     request<AiSecurityArtifact>(`/ai-security/artifacts/${encodeURIComponent(artifactId)}`),
   getAiActivityEvidence: (artifactId: string) =>
@@ -2271,4 +2290,15 @@ export const api = {
   },
   acceptCbomFinding: (findingId: string) =>
     request<CbomRiskFinding>(`/bom/cbom/findings/${encodeURIComponent(findingId)}/accept`, { method: 'POST' }),
+};
+
+export type AiBaseline = {
+  artifactId: string; digestKind: string; approvalStatus: string;
+  approvedBy: string | null; approvedAt: string | null; sourceRunId: string | null;
+};
+export type AiBaselineObservation = {
+  digestKind: string; comparisonOutcome: string; sourceRunId: string; observedAt: string; stale: boolean; changedFields?: string[]; observationVersion?: string | null;
+};
+export type AiBaselineHistory = {
+  id: string; digestKind: string; action: string; actor: string | null; sourceRunId: string | null; recordedAt: string;
 };

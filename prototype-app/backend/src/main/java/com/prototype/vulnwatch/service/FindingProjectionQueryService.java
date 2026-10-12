@@ -179,7 +179,7 @@ public class FindingProjectionQueryService {
 
     private SqlFilter buildSqlFilter(FindingsFilter filter) {
         MapSqlParameterSource params = new MapSqlParameterSource();
-        StringBuilder where = new StringBuilder();
+        StringBuilder where = new StringBuilder(" AND (finding_kind IS NULL OR finding_kind <> 'AI_RUNTIME') ");
         appendInClause(where, params, "severity", "severity", upperValues(filter.severity()));
         appendInClause(where, params, "status", "status", upperValues(filter.status()));
         appendInClause(where, params, "decisionState", "decision_state", upperValues(filter.decisionState()));

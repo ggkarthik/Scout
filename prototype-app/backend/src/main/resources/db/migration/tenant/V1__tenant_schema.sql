@@ -1,11 +1,12 @@
 -- migration-guard: tenant-only
--- Generated from a disposable fully migrated tenant schema; no runtime data.
+-- Development V1 baseline: complete current schema and migration-owned seeds; no customer data.
+--
 -- PostgreSQL database dump
 --
 
 
--- Dumped from database version 17.9 (Homebrew)
--- Dumped by pg_dump version 17.9 (Homebrew)
+-- Dumped from database version 16.14 (Homebrew)
+-- Dumped by pg_dump version 16.14 (Homebrew)
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -24,9 +25,319 @@ SET row_security = off;
 
 
 
+
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
+
+--
+-- Name: ai_agent_deployment_settings; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.ai_agent_deployment_settings (
+    tenant_id uuid NOT NULL,
+    freshness_hours integer DEFAULT 24 NOT NULL,
+    CONSTRAINT ai_agent_deployment_settings_freshness_hours_check CHECK (((freshness_hours >= 1) AND (freshness_hours <= 8760)))
+);
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_deployment_settings FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: ai_agent_execution_cursors; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.ai_agent_execution_cursors (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    connector_id uuid NOT NULL,
+    source character varying(64) NOT NULL,
+    scope_key character varying(512) NOT NULL,
+    provider_timestamp timestamp with time zone,
+    provider_stable_digest character varying(512),
+    lookback_days integer DEFAULT 30 NOT NULL,
+    overlap_days integer DEFAULT 3 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_execution_cursors FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: ai_agent_execution_events; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.ai_agent_execution_events (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    execution_id uuid NOT NULL,
+    sequence bigint NOT NULL,
+    event_time timestamp with time zone NOT NULL,
+    event_type character varying(64) NOT NULL,
+    status character varying(32),
+    classification character varying(64),
+    evidence_time timestamp with time zone NOT NULL,
+    producer_id character varying(128),
+    provider_event_digest character varying(256),
+    digest_key_version character varying(64),
+    ingested_at timestamp with time zone DEFAULT now() NOT NULL,
+    action_category character varying(32),
+    target_class character varying(32),
+    tool_digest character varying(256),
+    tool_version_digest character varying(256),
+    target_digest character varying(256),
+    action_correlation_digest character varying(256),
+    data_sensitivity character varying(64),
+    data_operation character varying(64),
+    approval_state character varying(64),
+    policy_state character varying(64),
+    decision_reason character varying(512),
+    enforcement_point character varying(128),
+    action_outcome character varying(64),
+    evidence_class character varying(64),
+    CONSTRAINT ai_agent_execution_events_action_category_check CHECK (((action_category IS NULL) OR ((action_category)::text = ANY ((ARRAY['READ'::character varying, 'WRITE'::character varying, 'DELETE'::character varying, 'SEND'::character varying, 'EXECUTE'::character varying, 'ADMIN'::character varying, 'PAYMENT'::character varying, 'PUBLISH'::character varying, 'OTHER'::character varying])::text[])))),
+    CONSTRAINT ai_agent_execution_events_action_outcome_check CHECK (((action_outcome IS NULL) OR ((action_outcome)::text = ANY ((ARRAY['SUCCEEDED'::character varying, 'FAILED'::character varying, 'DENIED'::character varying, 'BLOCKED'::character varying, 'CANCELLED'::character varying, 'UNKNOWN'::character varying])::text[])))),
+    CONSTRAINT ai_agent_execution_events_approval_state_check CHECK (((approval_state IS NULL) OR ((approval_state)::text = ANY ((ARRAY['APPROVED'::character varying, 'DENIED'::character varying, 'REQUIRED'::character varying, 'NOT_REQUIRED'::character varying, 'BYPASSED'::character varying, 'UNKNOWN'::character varying])::text[])))),
+    CONSTRAINT ai_agent_execution_events_data_operation_check CHECK (((data_operation IS NULL) OR ((data_operation)::text = ANY ((ARRAY['READ'::character varying, 'WRITE'::character varying, 'DELETE'::character varying, 'TRANSFORM'::character varying, 'TRANSMIT'::character varying, 'NONE'::character varying, 'UNKNOWN'::character varying])::text[])))),
+    CONSTRAINT ai_agent_execution_events_data_sensitivity_check CHECK (((data_sensitivity IS NULL) OR ((data_sensitivity)::text = ANY ((ARRAY['PUBLIC'::character varying, 'INTERNAL'::character varying, 'CONFIDENTIAL'::character varying, 'RESTRICTED'::character varying, 'UNKNOWN'::character varying])::text[])))),
+    CONSTRAINT ai_agent_execution_events_policy_state_check CHECK (((policy_state IS NULL) OR ((policy_state)::text = ANY ((ARRAY['ALLOWED'::character varying, 'DENIED'::character varying, 'BLOCKED'::character varying, 'NOT_EVALUATED'::character varying, 'UNKNOWN'::character varying])::text[])))),
+    CONSTRAINT ai_agent_execution_events_target_class_check CHECK (((target_class IS NULL) OR ((target_class)::text = ANY ((ARRAY['INTERNAL'::character varying, 'EXTERNAL'::character varying, 'PUBLIC'::character varying, 'SENSITIVE_STORE'::character varying, 'CODE_RUNTIME'::character varying, 'IDENTITY_SYSTEM'::character varying, 'FINANCIAL_SYSTEM'::character varying, 'UNKNOWN'::character varying])::text[]))))
+);
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_execution_events FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: ai_agent_execution_participants; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.ai_agent_execution_participants (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    execution_id uuid NOT NULL,
+    artifact_id uuid NOT NULL,
+    participant_role character varying(32) NOT NULL,
+    evidence_time timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ai_agent_execution_participant_role_check CHECK (((participant_role)::text = ANY ((ARRAY['MODEL'::character varying, 'TOOL'::character varying, 'PROMPT'::character varying, 'COMPONENT'::character varying])::text[])))
+);
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_execution_participants FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: ai_agent_execution_receipts; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.ai_agent_execution_receipts (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    connector_id uuid,
+    source character varying(64) NOT NULL,
+    scope_key character varying(512) NOT NULL,
+    idempotency_key character varying(512) NOT NULL,
+    content_hash character varying(128) NOT NULL,
+    accepted_at timestamp with time zone DEFAULT now() NOT NULL,
+    execution_id uuid
+);
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_execution_receipts FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: ai_agent_executions; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.ai_agent_executions (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    provider character varying(64) NOT NULL,
+    provider_execution_digest character varying(512) NOT NULL,
+    agent_artifact_id uuid,
+    source character varying(64) NOT NULL,
+    started_at timestamp with time zone,
+    completed_at timestamp with time zone,
+    status character varying(32) NOT NULL,
+    outcome_category character varying(64),
+    approval_state character varying(64),
+    policy_state character varying(64),
+    classification character varying(64),
+    api_version character varying(64),
+    token_count bigint,
+    latency_ms bigint,
+    retry_count integer,
+    spend_micros bigint,
+    evidence_time timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    digest_key_version character varying(64) DEFAULT 'v1'::character varying NOT NULL,
+    agent_version_artifact_id uuid,
+    provider_agent_digest character varying(256),
+    provider_agent_version_digest character varying(256),
+    correlation_status character varying(32) DEFAULT 'UNRESOLVED'::character varying NOT NULL,
+    correlation_diagnostic character varying(128),
+    environment_digest character varying(256),
+    deployment_digest character varying(256),
+    acting_identity_digest character varying(256),
+    delegated_identity_digest character varying(256),
+    identity_digest_key_version character varying(64),
+    termination_reason character varying(128),
+    evidence_source character varying(128),
+    evidence_class character varying(64),
+    evidence_confidence numeric(5,4),
+    step_count bigint,
+    spend_currency character varying(16),
+    spend_unit character varying(32),
+    collected_at timestamp with time zone,
+    provider_event_time timestamp with time zone,
+    delivery_latency_ms bigint,
+    CONSTRAINT ai_agent_execution_correlation_status_check CHECK (((correlation_status)::text = ANY ((ARRAY['RESOLVED'::character varying, 'UNRESOLVED'::character varying, 'NOT_APPLICABLE'::character varying])::text[]))),
+    CONSTRAINT ai_agent_executions_delivery_latency_check CHECK (((delivery_latency_ms IS NULL) OR (delivery_latency_ms >= 0))),
+    CONSTRAINT ai_agent_executions_evidence_confidence_check CHECK (((evidence_confidence IS NULL) OR ((evidence_confidence >= (0)::numeric) AND (evidence_confidence <= (1)::numeric)))),
+    CONSTRAINT ai_agent_executions_step_count_check CHECK (((step_count IS NULL) OR (step_count >= 0)))
+);
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_executions FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: ai_bom_declared_resources; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.ai_bom_declared_resources (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    source_id uuid NOT NULL,
+    bom_id uuid NOT NULL,
+    bom_component_id uuid,
+    resource_kind character varying(16) NOT NULL,
+    name character varying(512) NOT NULL,
+    version character varying(255),
+    identity_kind character varying(32) NOT NULL,
+    identity_value character varying(1024) NOT NULL,
+    deployment_state character varying(24) DEFAULT 'UNVERIFIED'::character varying NOT NULL,
+    linked_artifact_id uuid,
+    link_method character varying(32),
+    link_reviewed_by character varying(255),
+    link_reviewed_at timestamp with time zone,
+    first_declared_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_declared_at timestamp with time zone DEFAULT now() NOT NULL,
+    attributes_json jsonb DEFAULT '{}'::jsonb NOT NULL,
+    proposed_artifact_id uuid,
+    proposed_by character varying(255),
+    proposed_at timestamp with time zone,
+    CONSTRAINT ai_bom_declared_resource_attributes_check CHECK ((jsonb_typeof(attributes_json) = 'object'::text)),
+    CONSTRAINT ai_bom_declared_resource_deployment_state_check CHECK (((deployment_state)::text = ANY ((ARRAY['UNVERIFIED'::character varying, 'LINKED'::character varying, 'AMBIGUOUS'::character varying])::text[]))),
+    CONSTRAINT ai_bom_declared_resource_identity_kind_check CHECK (((identity_kind)::text = ANY ((ARRAY['DIGEST'::character varying, 'VERSIONED_IDENTIFIER'::character varying, 'SOURCE_SCOPED_REF'::character varying])::text[]))),
+    CONSTRAINT ai_bom_declared_resource_kind_check CHECK (((resource_kind)::text = ANY ((ARRAY['MODEL'::character varying, 'DATASET'::character varying])::text[]))),
+    CONSTRAINT ai_bom_declared_resource_link_consistency_check CHECK (((((deployment_state)::text = 'LINKED'::text) AND (linked_artifact_id IS NOT NULL) AND (link_method IS NOT NULL)) OR (((deployment_state)::text <> 'LINKED'::text) AND (linked_artifact_id IS NULL) AND (link_method IS NULL)))),
+    CONSTRAINT ai_bom_declared_resource_link_method_check CHECK (((link_method IS NULL) OR ((link_method)::text = ANY ((ARRAY['DIGEST_MATCH'::character varying, 'VERSIONED_IDENTIFIER_MATCH'::character varying, 'REVIEWED'::character varying])::text[])))),
+    CONSTRAINT ai_bom_declared_resource_proposal_consistency_check CHECK ((((proposed_artifact_id IS NOT NULL) AND (proposed_by IS NOT NULL) AND (proposed_at IS NOT NULL)) OR ((proposed_artifact_id IS NULL) AND (proposed_by IS NULL) AND (proposed_at IS NULL)))),
+    CONSTRAINT ai_bom_declared_resource_reviewer_check CHECK (((((link_method)::text = 'REVIEWED'::text) AND (link_reviewed_by IS NOT NULL)) OR (((link_method)::text IS DISTINCT FROM 'REVIEWED'::text) AND (link_reviewed_by IS NULL))))
+);
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_declared_resources FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: ai_bom_projection_admissions; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.ai_bom_projection_admissions (
+    tenant_id uuid NOT NULL,
+    admission_date date NOT NULL,
+    admitted_count integer DEFAULT 0 NOT NULL,
+    throttled_count integer DEFAULT 0 NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ai_bom_projection_admissions_admitted_count_check CHECK ((admitted_count >= 0)),
+    CONSTRAINT ai_bom_projection_admissions_throttled_count_check CHECK ((throttled_count >= 0))
+);
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_projection_admissions FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: ai_bom_projection_receipts; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.ai_bom_projection_receipts (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    source_id uuid NOT NULL,
+    source_revision bigint NOT NULL,
+    operation character varying(64) NOT NULL,
+    projection_version integer DEFAULT 1 NOT NULL,
+    completed_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_projection_receipts FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: ai_bom_provenance_facts; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.ai_bom_provenance_facts (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    asset_id uuid NOT NULL,
+    source_id uuid NOT NULL,
+    bom_id uuid NOT NULL,
+    fact_key character varying(255) DEFAULT 'provenance.ai_bom_present'::character varying NOT NULL,
+    value_boolean boolean DEFAULT true NOT NULL,
+    evidence_class character varying(32) DEFAULT 'BOM_DOCUMENT'::character varying NOT NULL,
+    bom_format character varying(32),
+    spec_version character varying(32),
+    document_ingested_at timestamp with time zone NOT NULL,
+    projected_at timestamp with time zone DEFAULT now() NOT NULL,
+    projection_version integer DEFAULT 1 NOT NULL,
+    CONSTRAINT ai_bom_provenance_facts_evidence_class_check CHECK (((evidence_class)::text = 'BOM_DOCUMENT'::text))
+);
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_provenance_facts FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: ai_bom_resource_vulnerability_links; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.ai_bom_resource_vulnerability_links (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    declared_resource_id uuid NOT NULL,
+    finding_id uuid NOT NULL,
+    via_component_id uuid,
+    correlation_method character varying(32) DEFAULT 'TRANSITIVE_DEPENDENCY'::character varying NOT NULL,
+    detected_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ai_bom_resource_vulnerability_link_method_check CHECK (((correlation_method)::text = 'TRANSITIVE_DEPENDENCY'::text))
+);
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_resource_vulnerability_links FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: ai_grid_approved_agent_manifests; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.ai_grid_approved_agent_manifests (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    agent_artifact_id uuid NOT NULL,
+    version_artifact_id uuid NOT NULL,
+    manifest_digest character varying(256) NOT NULL,
+    components_json jsonb NOT NULL,
+    approval_status character varying(32) NOT NULL,
+    approved_by character varying(255),
+    approved_at timestamp with time zone,
+    revoked_by character varying(255),
+    revoked_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ai_grid_approved_manifest_components_check CHECK ((jsonb_typeof(components_json) = 'array'::text)),
+    CONSTRAINT ai_grid_approved_manifest_status_check CHECK (((approval_status)::text = ANY ((ARRAY['APPROVED'::character varying, 'REVOKED'::character varying])::text[])))
+);
+
+ALTER TABLE ONLY ${tenantSchema}.ai_grid_approved_agent_manifests FORCE ROW LEVEL SECURITY;
+
 
 --
 -- Name: ai_grid_artifact_classifications; Type: TABLE; Schema: ${tenantSchema}; Owner: -
@@ -34,7 +345,7 @@ SET default_table_access_method = heap;
 
 CREATE TABLE ${tenantSchema}.ai_grid_artifact_classifications (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     artifact_id uuid NOT NULL,
     technology_id character varying(128) NOT NULL,
     capability character varying(128),
@@ -54,7 +365,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_artifact_classifications FORCE ROW LEVE
 
 CREATE TABLE ${tenantSchema}.ai_grid_assessments (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     run_id uuid NOT NULL,
     policy_id character varying(128) NOT NULL,
     policy_version character varying(32) NOT NULL,
@@ -83,7 +394,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_assessments FORCE ROW LEVEL SECURITY;
 
 CREATE TABLE ${tenantSchema}.ai_grid_budget_admissions (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     run_id uuid NOT NULL,
     provider character varying(32) NOT NULL,
     resource_families_json jsonb DEFAULT '[]'::jsonb NOT NULL,
@@ -93,7 +404,7 @@ CREATE TABLE ${tenantSchema}.ai_grid_budget_admissions (
     admitted_at timestamp with time zone DEFAULT now() NOT NULL,
     environment character varying(64) DEFAULT '*'::character varying NOT NULL,
     criticality character varying(32) DEFAULT '*'::character varying NOT NULL,
-    CONSTRAINT ai_grid_budget_admissions_decision_check CHECK (((decision)::text = ANY ((ARRAY['ADMITTED'::character varying, 'THROTTLED'::character varying])::text[])))
+    CONSTRAINT ai_grid_budget_admissions_decision_check CHECK (((decision)::text = ANY (ARRAY[('ADMITTED'::character varying)::text, ('THROTTLED'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ai_grid_budget_admissions FORCE ROW LEVEL SECURITY;
@@ -105,7 +416,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_budget_admissions FORCE ROW LEVEL SECUR
 
 CREATE TABLE ${tenantSchema}.ai_grid_budget_alerts (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     run_id uuid,
     metric character varying(64) NOT NULL,
     level character varying(32) NOT NULL,
@@ -116,8 +427,8 @@ CREATE TABLE ${tenantSchema}.ai_grid_budget_alerts (
     last_observed_at timestamp with time zone DEFAULT now() NOT NULL,
     acknowledged_by character varying(255),
     acknowledged_at timestamp with time zone,
-    CONSTRAINT ai_grid_budget_alerts_level_check CHECK (((level)::text = ANY ((ARRAY['WARNING'::character varying, 'EXCEEDED'::character varying])::text[]))),
-    CONSTRAINT ai_grid_budget_alerts_status_check CHECK (((status)::text = ANY ((ARRAY['OPEN'::character varying, 'ACKNOWLEDGED'::character varying, 'RESOLVED'::character varying])::text[])))
+    CONSTRAINT ai_grid_budget_alerts_level_check CHECK (((level)::text = ANY (ARRAY[('WARNING'::character varying)::text, ('EXCEEDED'::character varying)::text]))),
+    CONSTRAINT ai_grid_budget_alerts_status_check CHECK (((status)::text = ANY (ARRAY[('OPEN'::character varying)::text, ('ACKNOWLEDGED'::character varying)::text, ('RESOLVED'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ai_grid_budget_alerts FORCE ROW LEVEL SECURITY;
@@ -128,7 +439,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_budget_alerts FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE ${tenantSchema}.ai_grid_budget_config (
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     enforcement_mode character varying(32) DEFAULT 'OBSERVE'::character varying NOT NULL,
     daily_scan_limit bigint,
     daily_provider_api_call_limit bigint,
@@ -139,16 +450,45 @@ CREATE TABLE ${tenantSchema}.ai_grid_budget_config (
     updated_by character varying(255) NOT NULL,
     reason text NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    runtime_quota_window_seconds bigint DEFAULT 86400 NOT NULL,
+    rolling_runtime_event_limit bigint,
+    rolling_runtime_byte_limit bigint,
     CONSTRAINT ai_grid_budget_config_daily_new_snapshot_bytes_limit_check CHECK (((daily_new_snapshot_bytes_limit IS NULL) OR (daily_new_snapshot_bytes_limit > 0))),
     CONSTRAINT ai_grid_budget_config_daily_processing_ms_limit_check CHECK (((daily_processing_ms_limit IS NULL) OR (daily_processing_ms_limit > 0))),
     CONSTRAINT ai_grid_budget_config_daily_provider_api_call_limit_check CHECK (((daily_provider_api_call_limit IS NULL) OR (daily_provider_api_call_limit > 0))),
     CONSTRAINT ai_grid_budget_config_daily_scan_limit_check CHECK (((daily_scan_limit IS NULL) OR (daily_scan_limit > 0))),
-    CONSTRAINT ai_grid_budget_config_enforcement_mode_check CHECK (((enforcement_mode)::text = ANY ((ARRAY['OBSERVE'::character varying, 'THROTTLE'::character varying])::text[]))),
+    CONSTRAINT ai_grid_budget_config_enforcement_mode_check CHECK (((enforcement_mode)::text = ANY (ARRAY[('OBSERVE'::character varying)::text, ('THROTTLE'::character varying)::text]))),
     CONSTRAINT ai_grid_budget_config_retained_snapshot_bytes_limit_check CHECK (((retained_snapshot_bytes_limit IS NULL) OR (retained_snapshot_bytes_limit > 0))),
-    CONSTRAINT ai_grid_budget_config_warning_ratio_check CHECK (((warning_ratio > (0)::double precision) AND (warning_ratio < (1)::double precision)))
+    CONSTRAINT ai_grid_budget_config_warning_ratio_check CHECK (((warning_ratio > (0)::double precision) AND (warning_ratio < (1)::double precision))),
+    CONSTRAINT ai_grid_budget_runtime_byte_limit_check CHECK (((rolling_runtime_byte_limit IS NULL) OR (rolling_runtime_byte_limit > 0))),
+    CONSTRAINT ai_grid_budget_runtime_event_limit_check CHECK (((rolling_runtime_event_limit IS NULL) OR (rolling_runtime_event_limit > 0))),
+    CONSTRAINT ai_grid_budget_runtime_window_check CHECK ((runtime_quota_window_seconds > 0))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ai_grid_budget_config FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: ai_grid_capability_manifests; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.ai_grid_capability_manifests (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    run_id uuid NOT NULL,
+    provider character varying(32) NOT NULL,
+    connector_id uuid NOT NULL,
+    account_id character varying(255) NOT NULL,
+    region character varying(128) NOT NULL,
+    capability_id character varying(128) NOT NULL,
+    required_scope_keys_json jsonb NOT NULL,
+    status character varying(32) DEFAULT 'REGISTERED'::character varying NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    finalized_at timestamp with time zone,
+    CONSTRAINT ai_grid_capability_manifests_status_check CHECK (((status)::text = ANY ((ARRAY['REGISTERED'::character varying, 'FINALIZED'::character varying])::text[])))
+);
+
+ALTER TABLE ONLY ${tenantSchema}.ai_grid_capability_manifests FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -157,7 +497,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_budget_config FORCE ROW LEVEL SECURITY;
 
 CREATE TABLE ${tenantSchema}.ai_grid_capability_observations (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     run_id uuid NOT NULL,
     provider character varying(32) NOT NULL,
     capability_id character varying(128) NOT NULL,
@@ -170,10 +510,49 @@ CREATE TABLE ${tenantSchema}.ai_grid_capability_observations (
     expires_at timestamp with time zone,
     status character varying(32) NOT NULL,
     detail text,
-    CONSTRAINT ai_grid_capability_observations_status_check CHECK (((status)::text = ANY ((ARRAY['COMPLETE'::character varying, 'DISABLED'::character varying, 'UNAUTHORIZED'::character varying, 'UNSUPPORTED_API'::character varying, 'PARTIAL'::character varying, 'ERROR'::character varying, 'STALE'::character varying])::text[])))
+    reason_code character varying(64),
+    evidence_scopes_json jsonb DEFAULT '[]'::jsonb NOT NULL,
+    CONSTRAINT ai_grid_capability_observations_status_check CHECK (((status)::text = ANY (ARRAY[('COMPLETE'::character varying)::text, ('DISABLED'::character varying)::text, ('UNAUTHORIZED'::character varying)::text, ('UNSUPPORTED_API'::character varying)::text, ('PARTIAL'::character varying)::text, ('ERROR'::character varying)::text, ('STALE'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ai_grid_capability_observations FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: COLUMN ai_grid_capability_observations.reason_code; Type: COMMENT; Schema: ${tenantSchema}; Owner: -
+--
+
+COMMENT ON COLUMN ${tenantSchema}.ai_grid_capability_observations.reason_code IS 'Stable connector outcome reason; not an inferred provider capability.';
+
+
+--
+-- Name: COLUMN ai_grid_capability_observations.evidence_scopes_json; Type: COMMENT; Schema: ${tenantSchema}; Owner: -
+--
+
+COMMENT ON COLUMN ${tenantSchema}.ai_grid_capability_observations.evidence_scopes_json IS 'Scope keys that directly produced this capability observation.';
+
+
+--
+-- Name: ai_grid_component_allowlists; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.ai_grid_component_allowlists (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    provider character varying(64) NOT NULL,
+    component_kind character varying(64) NOT NULL,
+    component_digest character varying(256) NOT NULL,
+    status character varying(32) DEFAULT 'APPROVED'::character varying NOT NULL,
+    approved_by character varying(255) NOT NULL,
+    approved_at timestamp with time zone DEFAULT now() NOT NULL,
+    revoked_by character varying(255),
+    revoked_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ai_grid_component_allowlist_status_check CHECK (((status)::text = ANY ((ARRAY['APPROVED'::character varying, 'REVOKED'::character varying])::text[])))
+);
+
+ALTER TABLE ONLY ${tenantSchema}.ai_grid_component_allowlists FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -182,7 +561,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_capability_observations FORCE ROW LEVEL
 
 CREATE TABLE ${tenantSchema}.ai_grid_coverage_gaps (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     fingerprint character varying(64) NOT NULL,
     run_id uuid NOT NULL,
     artifact_id uuid,
@@ -205,7 +584,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_coverage_gaps FORCE ROW LEVEL SECURITY;
 --
 
 CREATE TABLE ${tenantSchema}.ai_grid_current_coverage_artifacts (
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     epoch_id uuid NOT NULL,
     artifact_id uuid NOT NULL,
     source_run_id uuid NOT NULL,
@@ -230,7 +609,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_current_coverage_artifacts FORCE ROW LE
 --
 
 CREATE TABLE ${tenantSchema}.ai_grid_current_coverage_state (
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     epoch_id uuid NOT NULL,
     trigger_run_id uuid NOT NULL,
     scope_head_count bigint DEFAULT 0 NOT NULL,
@@ -247,7 +626,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_current_coverage_state FORCE ROW LEVEL 
 --
 
 CREATE TABLE ${tenantSchema}.ai_grid_current_expected_candidates (
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     epoch_id uuid NOT NULL,
     trigger_run_id uuid NOT NULL,
     artifact_id uuid NOT NULL,
@@ -283,7 +662,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_current_expected_candidates FORCE ROW L
 
 CREATE TABLE ${tenantSchema}.ai_grid_evidence_holds (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     snapshot_body_id uuid NOT NULL,
     hold_type character varying(32) NOT NULL,
     reference_id character varying(255) NOT NULL,
@@ -293,7 +672,7 @@ CREATE TABLE ${tenantSchema}.ai_grid_evidence_holds (
     released_by character varying(255),
     created_by character varying(255) NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT ai_grid_evidence_holds_hold_type_check CHECK (((hold_type)::text = ANY ((ARRAY['ACTIVE_FINDING'::character varying, 'EXCEPTION'::character varying, 'LEGAL_HOLD'::character varying, 'REPLAY_COMMITMENT'::character varying])::text[])))
+    CONSTRAINT ai_grid_evidence_holds_hold_type_check CHECK (((hold_type)::text = ANY (ARRAY[('ACTIVE_FINDING'::character varying)::text, ('EXCEPTION'::character varying)::text, ('LEGAL_HOLD'::character varying)::text, ('REPLAY_COMMITMENT'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ai_grid_evidence_holds FORCE ROW LEVEL SECURITY;
@@ -305,13 +684,13 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_evidence_holds FORCE ROW LEVEL SECURITY
 
 CREATE TABLE ${tenantSchema}.ai_grid_exposure_associations (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     exposure_path_id uuid NOT NULL,
     system_id uuid,
     system_revision_id uuid,
     artifact_id uuid,
     association_role character varying(32) NOT NULL,
-    CONSTRAINT ai_grid_exposure_associations_association_role_check CHECK (((association_role)::text = ANY ((ARRAY['AFFECTED_SYSTEM'::character varying, 'ENTRY_POINT'::character varying, 'IMPACT'::character varying, 'ROOT_CAUSE'::character varying])::text[])))
+    CONSTRAINT ai_grid_exposure_associations_association_role_check CHECK (((association_role)::text = ANY (ARRAY[('AFFECTED_SYSTEM'::character varying)::text, ('ENTRY_POINT'::character varying)::text, ('IMPACT'::character varying)::text, ('ROOT_CAUSE'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ai_grid_exposure_associations FORCE ROW LEVEL SECURITY;
@@ -323,13 +702,13 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_exposure_associations FORCE ROW LEVEL S
 
 CREATE TABLE ${tenantSchema}.ai_grid_exposure_dispositions (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     exposure_path_id uuid NOT NULL,
     disposition character varying(32) NOT NULL,
     reason text NOT NULL,
     actor character varying(255) NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT ai_grid_exposure_dispositions_disposition_check CHECK (((disposition)::text = ANY ((ARRAY['ACCEPTED'::character varying, 'REJECTED'::character varying, 'RISK_ACCEPTED'::character varying, 'NEEDS_EVIDENCE'::character varying])::text[])))
+    CONSTRAINT ai_grid_exposure_dispositions_disposition_check CHECK (((disposition)::text = ANY (ARRAY[('ACCEPTED'::character varying)::text, ('REJECTED'::character varying)::text, ('RISK_ACCEPTED'::character varying)::text, ('NEEDS_EVIDENCE'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ai_grid_exposure_dispositions FORCE ROW LEVEL SECURITY;
@@ -341,7 +720,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_exposure_dispositions FORCE ROW LEVEL S
 
 CREATE TABLE ${tenantSchema}.ai_grid_exposure_executions (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     coverage_epoch_id uuid NOT NULL,
     trigger_run_id uuid NOT NULL,
     evaluation_as_of timestamp with time zone NOT NULL,
@@ -363,7 +742,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_exposure_executions FORCE ROW LEVEL SEC
 
 CREATE TABLE ${tenantSchema}.ai_grid_exposure_observations (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     exposure_path_id uuid NOT NULL,
     run_id uuid NOT NULL,
     state character varying(32) NOT NULL,
@@ -379,7 +758,7 @@ CREATE TABLE ${tenantSchema}.ai_grid_exposure_observations (
     coverage_epoch_id uuid,
     correlation_material_digest character varying(64),
     CONSTRAINT ai_grid_exposure_observations_confidence_check CHECK (((confidence IS NULL) OR ((confidence >= (0)::double precision) AND (confidence <= (1)::double precision)))),
-    CONSTRAINT ai_grid_exposure_observations_state_check CHECK (((state)::text = ANY ((ARRAY['EXPOSURE_HYPOTHESIS'::character varying, 'VALIDATED_EXPOSURE'::character varying, 'ABSENT'::character varying])::text[])))
+    CONSTRAINT ai_grid_exposure_observations_state_check CHECK (((state)::text = ANY (ARRAY[('EXPOSURE_HYPOTHESIS'::character varying)::text, ('VALIDATED_EXPOSURE'::character varying)::text, ('ABSENT'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ai_grid_exposure_observations FORCE ROW LEVEL SECURITY;
@@ -391,7 +770,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_exposure_observations FORCE ROW LEVEL S
 
 CREATE TABLE ${tenantSchema}.ai_grid_exposure_paths (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     fingerprint character varying(64) NOT NULL,
     correlation_id character varying(128) NOT NULL,
     correlation_version character varying(32) NOT NULL,
@@ -417,8 +796,8 @@ CREATE TABLE ${tenantSchema}.ai_grid_exposure_paths (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     last_complete_epoch_id uuid,
     CONSTRAINT ai_grid_exposure_paths_confidence_check CHECK (((confidence IS NULL) OR ((confidence >= (0)::double precision) AND (confidence <= (1)::double precision)))),
-    CONSTRAINT ai_grid_exposure_paths_state_check CHECK (((state)::text = ANY ((ARRAY['EXPOSURE_HYPOTHESIS'::character varying, 'VALIDATED_EXPOSURE'::character varying, 'CLOSED'::character varying])::text[]))),
-    CONSTRAINT ai_grid_exposure_paths_status_check CHECK (((status)::text = ANY ((ARRAY['OPEN'::character varying, 'CLOSED'::character varying])::text[])))
+    CONSTRAINT ai_grid_exposure_paths_state_check CHECK (((state)::text = ANY (ARRAY[('EXPOSURE_HYPOTHESIS'::character varying)::text, ('VALIDATED_EXPOSURE'::character varying)::text, ('CLOSED'::character varying)::text]))),
+    CONSTRAINT ai_grid_exposure_paths_status_check CHECK (((status)::text = ANY (ARRAY[('OPEN'::character varying)::text, ('CLOSED'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ai_grid_exposure_paths FORCE ROW LEVEL SECURITY;
@@ -430,7 +809,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_exposure_paths FORCE ROW LEVEL SECURITY
 
 CREATE TABLE ${tenantSchema}.ai_grid_facts (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     run_id uuid NOT NULL,
     artifact_id uuid NOT NULL,
     snapshot_manifest_id uuid NOT NULL,
@@ -450,7 +829,7 @@ CREATE TABLE ${tenantSchema}.ai_grid_facts (
     fact_schema_version character varying(32) NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT ai_grid_facts_confidence_check CHECK (((confidence IS NULL) OR ((confidence >= (0)::double precision) AND (confidence <= (1)::double precision)))),
-    CONSTRAINT ai_grid_facts_state_check CHECK (((state)::text = ANY ((ARRAY['KNOWN'::character varying, 'UNKNOWN'::character varying, 'ERROR'::character varying, 'STALE'::character varying])::text[])))
+    CONSTRAINT ai_grid_facts_state_check CHECK (((state)::text = ANY (ARRAY[('KNOWN'::character varying)::text, ('UNKNOWN'::character varying)::text, ('ERROR'::character varying)::text, ('STALE'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ai_grid_facts FORCE ROW LEVEL SECURITY;
@@ -462,7 +841,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_facts FORCE ROW LEVEL SECURITY;
 
 CREATE TABLE ${tenantSchema}.ai_grid_host_context_facts (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     artifact_id uuid NOT NULL,
     fact_key character varying(255) NOT NULL,
     value_type character varying(32) NOT NULL,
@@ -481,8 +860,8 @@ CREATE TABLE ${tenantSchema}.ai_grid_host_context_facts (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     producer_id character varying(128) DEFAULT 'LEGACY_UNBOUND'::character varying NOT NULL,
     CONSTRAINT ai_grid_host_context_facts_confidence_check CHECK (((confidence IS NULL) OR ((confidence >= (0)::double precision) AND (confidence <= (1)::double precision)))),
-    CONSTRAINT ai_grid_host_context_facts_source_port_check CHECK (((source_port)::text = ANY ((ARRAY['IDENTITY'::character varying, 'DATA'::character varying, 'REACHABILITY'::character varying, 'ASSET'::character varying, 'OWNERSHIP'::character varying])::text[]))),
-    CONSTRAINT ai_grid_host_context_facts_state_check CHECK (((state)::text = ANY ((ARRAY['KNOWN'::character varying, 'UNKNOWN'::character varying, 'ERROR'::character varying, 'STALE'::character varying])::text[])))
+    CONSTRAINT ai_grid_host_context_facts_source_port_check CHECK (((source_port)::text = ANY (ARRAY[('IDENTITY'::character varying)::text, ('DATA'::character varying)::text, ('REACHABILITY'::character varying)::text, ('ASSET'::character varying)::text, ('OWNERSHIP'::character varying)::text]))),
+    CONSTRAINT ai_grid_host_context_facts_state_check CHECK (((state)::text = ANY (ARRAY[('KNOWN'::character varying)::text, ('UNKNOWN'::character varying)::text, ('ERROR'::character varying)::text, ('STALE'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ai_grid_host_context_facts FORCE ROW LEVEL SECURITY;
@@ -494,7 +873,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_host_context_facts FORCE ROW LEVEL SECU
 
 CREATE TABLE ${tenantSchema}.ai_grid_outbox (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     event_type character varying(64) NOT NULL,
     aggregate_type character varying(64) NOT NULL,
     aggregate_id uuid NOT NULL,
@@ -517,7 +896,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_outbox FORCE ROW LEVEL SECURITY;
 
 CREATE TABLE ${tenantSchema}.ai_grid_owner_history (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     artifact_id uuid NOT NULL,
     previous_owner_name character varying(255),
     previous_owner_state character varying(32),
@@ -541,7 +920,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_owner_history FORCE ROW LEVEL SECURITY;
 
 CREATE TABLE ${tenantSchema}.ai_grid_policy_artifact_overrides (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     policy_id character varying(128) NOT NULL,
     artifact_id uuid NOT NULL,
     override character varying(16) NOT NULL,
@@ -560,7 +939,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_policy_artifact_overrides FORCE ROW LEV
 
 CREATE TABLE ${tenantSchema}.ai_grid_policy_parameters (
     policy_id character varying(128) NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     parameters_json jsonb DEFAULT '{}'::jsonb NOT NULL,
     updated_by character varying(255) NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
@@ -575,7 +954,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_policy_parameters FORCE ROW LEVEL SECUR
 
 CREATE TABLE ${tenantSchema}.ai_grid_policy_readiness (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     run_id uuid NOT NULL,
     policy_id character varying(128) NOT NULL,
     policy_version character varying(32) NOT NULL,
@@ -593,8 +972,8 @@ CREATE TABLE ${tenantSchema}.ai_grid_policy_readiness (
     missing_evidence_json jsonb DEFAULT '[]'::jsonb NOT NULL,
     computed_at timestamp with time zone DEFAULT now() NOT NULL,
     coverage_epoch_id uuid,
-    CONSTRAINT ai_grid_policy_readiness_readiness_check CHECK (((readiness)::text = ANY ((ARRAY['READY'::character varying, 'PARTIAL'::character varying, 'BLOCKED'::character varying, 'NOT_APPLICABLE'::character varying, 'NO_RESOURCES'::character varying])::text[]))),
-    CONSTRAINT ai_grid_policy_readiness_selection_check CHECK (((selection)::text = ANY ((ARRAY['REQUIRED'::character varying, 'ENABLED'::character varying, 'PREVIEW'::character varying, 'DISABLED'::character varying])::text[])))
+    CONSTRAINT ai_grid_policy_readiness_readiness_check CHECK (((readiness)::text = ANY (ARRAY[('READY'::character varying)::text, ('PARTIAL'::character varying)::text, ('BLOCKED'::character varying)::text, ('NOT_APPLICABLE'::character varying)::text, ('NO_RESOURCES'::character varying)::text]))),
+    CONSTRAINT ai_grid_policy_readiness_selection_check CHECK (((selection)::text = ANY (ARRAY[('REQUIRED'::character varying)::text, ('ENABLED'::character varying)::text, ('PREVIEW'::character varying)::text, ('DISABLED'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ai_grid_policy_readiness FORCE ROW LEVEL SECURITY;
@@ -606,7 +985,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_policy_readiness FORCE ROW LEVEL SECURI
 
 CREATE TABLE ${tenantSchema}.ai_grid_policy_scopes (
     policy_id character varying(128) NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     mode character varying(32) DEFAULT 'ALL'::character varying NOT NULL,
     condition_logic character varying(8) DEFAULT 'AND'::character varying NOT NULL,
     conditions_json jsonb DEFAULT '[]'::jsonb NOT NULL,
@@ -623,7 +1002,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_policy_scopes FORCE ROW LEVEL SECURITY;
 
 CREATE TABLE ${tenantSchema}.ai_grid_policy_selection_history (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     policy_id character varying(128) NOT NULL,
     previous_selection character varying(32),
     selection character varying(32) NOT NULL,
@@ -641,15 +1020,27 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_policy_selection_history FORCE ROW LEVE
 
 CREATE TABLE ${tenantSchema}.ai_grid_policy_selections (
     policy_id character varying(128) NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     selection character varying(32) NOT NULL,
     updated_by character varying(255) NOT NULL,
     reason text,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT ai_grid_policy_selections_selection_check CHECK (((selection)::text = ANY ((ARRAY['REQUIRED'::character varying, 'ENABLED'::character varying, 'PREVIEW'::character varying, 'DISABLED'::character varying])::text[])))
+    platform_policy_version character varying(32),
+    platform_default_selection character varying(32),
+    configuration_source character varying(32) DEFAULT 'PLATFORM_DEFAULT'::character varying NOT NULL,
+    tenant_configured_at timestamp with time zone,
+    CONSTRAINT ai_grid_policy_selection_source_check CHECK (((configuration_source)::text = ANY ((ARRAY['PLATFORM_DEFAULT'::character varying, 'TENANT_OVERRIDE'::character varying])::text[]))),
+    CONSTRAINT ai_grid_policy_selections_selection_check CHECK (((selection)::text = ANY (ARRAY[('REQUIRED'::character varying)::text, ('ENABLED'::character varying)::text, ('PREVIEW'::character varying)::text, ('DISABLED'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ai_grid_policy_selections FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: COLUMN ai_grid_policy_selections.configuration_source; Type: COMMENT; Schema: ${tenantSchema}; Owner: -
+--
+
+COMMENT ON COLUMN ${tenantSchema}.ai_grid_policy_selections.configuration_source IS 'Platform default or an explicit tenant override; platform policy metadata remains read-only here.';
 
 
 --
@@ -658,7 +1049,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_policy_selections FORCE ROW LEVEL SECUR
 
 CREATE TABLE ${tenantSchema}.ai_grid_relationship_snapshots (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     run_id uuid NOT NULL,
     source_artifact_id uuid NOT NULL,
     target_artifact_id uuid NOT NULL,
@@ -678,12 +1069,12 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_relationship_snapshots FORCE ROW LEVEL 
 
 CREATE TABLE ${tenantSchema}.ai_grid_retention_decisions (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     snapshot_body_id uuid NOT NULL,
     decision character varying(32) NOT NULL,
     reason_code character varying(64) NOT NULL,
     evaluated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT ai_grid_retention_decisions_decision_check CHECK (((decision)::text = ANY ((ARRAY['RETAIN'::character varying, 'ARCHIVE'::character varying, 'PURGE_BLOCKED'::character varying, 'PURGE_ELIGIBLE'::character varying])::text[])))
+    CONSTRAINT ai_grid_retention_decisions_decision_check CHECK (((decision)::text = ANY (ARRAY[('RETAIN'::character varying)::text, ('ARCHIVE'::character varying)::text, ('PURGE_BLOCKED'::character varying)::text, ('PURGE_ELIGIBLE'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ai_grid_retention_decisions FORCE ROW LEVEL SECURITY;
@@ -695,7 +1086,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_retention_decisions FORCE ROW LEVEL SEC
 
 CREATE TABLE ${tenantSchema}.ai_grid_retention_policies (
     retention_class character varying(32) NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     retain_days integer NOT NULL,
     archive_after_days integer,
     restricted boolean DEFAULT false NOT NULL,
@@ -704,7 +1095,7 @@ CREATE TABLE ${tenantSchema}.ai_grid_retention_policies (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT ai_grid_retention_policies_check CHECK (((archive_after_days IS NULL) OR ((archive_after_days >= 0) AND (archive_after_days < retain_days)))),
     CONSTRAINT ai_grid_retention_policies_retain_days_check CHECK ((retain_days > 0)),
-    CONSTRAINT ai_grid_retention_policies_retention_class_check CHECK (((retention_class)::text = ANY ((ARRAY['HOT'::character varying, 'ARCHIVE'::character varying, 'RESTRICTED_EVIDENCE'::character varying])::text[])))
+    CONSTRAINT ai_grid_retention_policies_retention_class_check CHECK (((retention_class)::text = ANY (ARRAY[('HOT'::character varying)::text, ('ARCHIVE'::character varying)::text, ('RESTRICTED_EVIDENCE'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ai_grid_retention_policies FORCE ROW LEVEL SECURITY;
@@ -716,7 +1107,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_retention_policies FORCE ROW LEVEL SECU
 
 CREATE TABLE ${tenantSchema}.ai_grid_retention_purge_audit (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     snapshot_body_id uuid NOT NULL,
     content_hash character varying(64) NOT NULL,
     byte_size bigint NOT NULL,
@@ -735,7 +1126,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_retention_purge_audit FORCE ROW LEVEL S
 
 CREATE TABLE ${tenantSchema}.ai_grid_run_metrics (
     run_id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     completed_scope_count bigint DEFAULT 0 NOT NULL,
     processing_duration_ms bigint DEFAULT 0 NOT NULL,
     provider_api_calls bigint,
@@ -788,7 +1179,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_run_metrics FORCE ROW LEVEL SECURITY;
 
 CREATE TABLE ${tenantSchema}.ai_grid_run_scope_metrics (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     run_id uuid NOT NULL,
     scope_key character varying(512) NOT NULL,
     processing_duration_ms bigint NOT NULL,
@@ -805,7 +1196,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_run_scope_metrics FORCE ROW LEVEL SECUR
 
 CREATE TABLE ${tenantSchema}.ai_grid_scan_cadence_rules (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     provider character varying(32) NOT NULL,
     resource_family character varying(128) DEFAULT '*'::character varying NOT NULL,
     environment character varying(64) DEFAULT '*'::character varying NOT NULL,
@@ -827,7 +1218,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_scan_cadence_rules FORCE ROW LEVEL SECU
 
 CREATE TABLE ${tenantSchema}.ai_grid_setup_actions (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     run_id uuid NOT NULL,
     artifact_id uuid,
     policy_id character varying(128),
@@ -844,7 +1235,7 @@ CREATE TABLE ${tenantSchema}.ai_grid_setup_actions (
     resolved_at timestamp with time zone,
     coverage_epoch_id uuid,
     CONSTRAINT ai_grid_setup_actions_priority_check CHECK (((priority >= 1) AND (priority <= 100))),
-    CONSTRAINT ai_grid_setup_actions_status_check CHECK (((status)::text = ANY ((ARRAY['OPEN'::character varying, 'RESOLVED'::character varying])::text[])))
+    CONSTRAINT ai_grid_setup_actions_status_check CHECK (((status)::text = ANY (ARRAY[('OPEN'::character varying)::text, ('RESOLVED'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ai_grid_setup_actions FORCE ROW LEVEL SECURITY;
@@ -856,7 +1247,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_setup_actions FORCE ROW LEVEL SECURITY;
 
 CREATE TABLE ${tenantSchema}.ai_grid_snapshot_bodies (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     content_hash character varying(64) NOT NULL,
     content_json jsonb NOT NULL,
     byte_size bigint NOT NULL,
@@ -880,7 +1271,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_snapshot_bodies FORCE ROW LEVEL SECURIT
 
 CREATE TABLE ${tenantSchema}.ai_grid_snapshot_manifests (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     run_id uuid NOT NULL,
     artifact_id uuid NOT NULL,
     scope_key character varying(512) NOT NULL,
@@ -900,14 +1291,14 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_snapshot_manifests FORCE ROW LEVEL SECU
 
 CREATE TABLE ${tenantSchema}.ai_grid_system_lineage_events (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     event_type character varying(32) NOT NULL,
     run_id uuid,
     rationale text NOT NULL,
     evidence_json jsonb DEFAULT '{}'::jsonb NOT NULL,
     actor character varying(255) NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT ai_grid_system_lineage_events_event_type_check CHECK (((event_type)::text = ANY ((ARRAY['SPLIT'::character varying, 'MERGED'::character varying, 'RETIRED'::character varying, 'SUCCESSOR'::character varying])::text[])))
+    CONSTRAINT ai_grid_system_lineage_events_event_type_check CHECK (((event_type)::text = ANY (ARRAY[('SPLIT'::character varying)::text, ('MERGED'::character varying)::text, ('RETIRED'::character varying)::text, ('SUCCESSOR'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ai_grid_system_lineage_events FORCE ROW LEVEL SECURITY;
@@ -919,12 +1310,12 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_system_lineage_events FORCE ROW LEVEL S
 
 CREATE TABLE ${tenantSchema}.ai_grid_system_lineage_participants (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     event_id uuid NOT NULL,
     system_id uuid NOT NULL,
     system_revision_id uuid,
     participant_role character varying(16) NOT NULL,
-    CONSTRAINT ai_grid_system_lineage_participants_participant_role_check CHECK (((participant_role)::text = ANY ((ARRAY['PREDECESSOR'::character varying, 'SUCCESSOR'::character varying])::text[])))
+    CONSTRAINT ai_grid_system_lineage_participants_participant_role_check CHECK (((participant_role)::text = ANY (ARRAY[('PREDECESSOR'::character varying)::text, ('SUCCESSOR'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ai_grid_system_lineage_participants FORCE ROW LEVEL SECURITY;
@@ -936,7 +1327,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_system_lineage_participants FORCE ROW L
 
 CREATE TABLE ${tenantSchema}.ai_grid_system_membership_decisions (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     system_id uuid NOT NULL,
     resulting_revision_id uuid NOT NULL,
     artifact_id uuid NOT NULL,
@@ -944,7 +1335,7 @@ CREATE TABLE ${tenantSchema}.ai_grid_system_membership_decisions (
     reason text NOT NULL,
     actor character varying(255) NOT NULL,
     decided_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT ai_grid_system_membership_decisions_decision_check CHECK (((decision)::text = ANY ((ARRAY['ACCEPT'::character varying, 'REJECT'::character varying])::text[])))
+    CONSTRAINT ai_grid_system_membership_decisions_decision_check CHECK (((decision)::text = ANY (ARRAY[('ACCEPT'::character varying)::text, ('REJECT'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ai_grid_system_membership_decisions FORCE ROW LEVEL SECURITY;
@@ -955,14 +1346,14 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_system_membership_decisions FORCE ROW L
 --
 
 CREATE TABLE ${tenantSchema}.ai_grid_system_membership_overrides (
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     system_id uuid NOT NULL,
     artifact_id uuid NOT NULL,
     decision character varying(16) NOT NULL,
     reason text NOT NULL,
     actor character varying(255) NOT NULL,
     decided_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT ai_grid_system_membership_overrides_decision_check CHECK (((decision)::text = ANY ((ARRAY['ACCEPT'::character varying, 'REJECT'::character varying])::text[])))
+    CONSTRAINT ai_grid_system_membership_overrides_decision_check CHECK (((decision)::text = ANY (ARRAY[('ACCEPT'::character varying)::text, ('REJECT'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ai_grid_system_membership_overrides FORCE ROW LEVEL SECURITY;
@@ -974,7 +1365,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_system_membership_overrides FORCE ROW L
 
 CREATE TABLE ${tenantSchema}.ai_grid_system_memberships (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     system_revision_id uuid NOT NULL,
     artifact_id uuid NOT NULL,
     membership_state character varying(32) NOT NULL,
@@ -998,7 +1389,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_system_memberships FORCE ROW LEVEL SECU
 
 CREATE TABLE ${tenantSchema}.ai_grid_system_revisions (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     system_id uuid NOT NULL,
     revision integer NOT NULL,
     membership_hash character varying(64) NOT NULL,
@@ -1020,7 +1411,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_system_revisions FORCE ROW LEVEL SECURI
 
 CREATE TABLE ${tenantSchema}.ai_grid_systems (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     stable_key character varying(64) NOT NULL,
     name character varying(512) NOT NULL,
     status character varying(32) DEFAULT 'ACTIVE'::character varying NOT NULL,
@@ -1035,12 +1426,171 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_systems FORCE ROW LEVEL SECURITY;
 
 
 --
+-- Name: ai_runtime_evidence_producers; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.ai_runtime_evidence_producers (
+    producer_id character varying(128) NOT NULL,
+    tenant_id uuid NOT NULL,
+    service_account_id uuid NOT NULL,
+    provider character varying(64) NOT NULL,
+    producer_type character varying(64) NOT NULL,
+    submitted_evidence_class character varying(64) NOT NULL,
+    certification_state character varying(32) DEFAULT 'UNCERTIFIED'::character varying NOT NULL,
+    certified_evidence_families_json jsonb DEFAULT '[]'::jsonb NOT NULL,
+    status character varying(32) DEFAULT 'ACTIVE'::character varying NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ai_runtime_evidence_producer_certification_check CHECK (((certification_state)::text = ANY ((ARRAY['UNCERTIFIED'::character varying, 'CERTIFIED'::character varying, 'REVOKED'::character varying])::text[]))),
+    CONSTRAINT ai_runtime_evidence_producer_families_check CHECK ((jsonb_typeof(certified_evidence_families_json) = 'array'::text)),
+    CONSTRAINT ai_runtime_evidence_producer_status_check CHECK (((status)::text = ANY ((ARRAY['ACTIVE'::character varying, 'INACTIVE'::character varying, 'REVOKED'::character varying])::text[]))),
+    CONSTRAINT ai_runtime_evidence_producer_type_check CHECK (((producer_type)::text = 'RUNTIME_EVIDENCE_PRODUCER'::text))
+);
+
+ALTER TABLE ONLY ${tenantSchema}.ai_runtime_evidence_producers FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: ai_runtime_ingestion_receipts; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.ai_runtime_ingestion_receipts (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    producer_id character varying(128) NOT NULL,
+    status character varying(32) NOT NULL,
+    accepted_count integer DEFAULT 0 NOT NULL,
+    duplicate_count integer DEFAULT 0 NOT NULL,
+    quarantined_count integer DEFAULT 0 NOT NULL,
+    reason_code character varying(128),
+    ingestion_job_id uuid,
+    request_byte_count bigint DEFAULT 0 NOT NULL,
+    request_event_count bigint DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    completed_at timestamp with time zone,
+    CONSTRAINT ai_runtime_ingestion_receipt_counts_check CHECK (((accepted_count >= 0) AND (duplicate_count >= 0) AND (quarantined_count >= 0) AND (request_byte_count >= 0) AND (request_event_count >= 0))),
+    CONSTRAINT ai_runtime_ingestion_receipt_status_check CHECK (((status)::text = ANY ((ARRAY['ACCEPTED'::character varying, 'PROCESSING'::character varying, 'COMPLETED'::character varying, 'REJECTED'::character varying, 'FAILED'::character varying])::text[])))
+);
+
+ALTER TABLE ONLY ${tenantSchema}.ai_runtime_ingestion_receipts FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: ai_runtime_quota_windows; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.ai_runtime_quota_windows (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    source_id character varying(128) NOT NULL,
+    window_start timestamp with time zone NOT NULL,
+    window_end timestamp with time zone NOT NULL,
+    accepted_event_count bigint DEFAULT 0 NOT NULL,
+    accepted_byte_count bigint DEFAULT 0 NOT NULL,
+    rejected_event_count bigint DEFAULT 0 NOT NULL,
+    rejected_byte_count bigint DEFAULT 0 NOT NULL,
+    quota_state character varying(32) DEFAULT 'AVAILABLE'::character varying NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ai_runtime_quota_counts_check CHECK (((accepted_event_count >= 0) AND (accepted_byte_count >= 0) AND (rejected_event_count >= 0) AND (rejected_byte_count >= 0))),
+    CONSTRAINT ai_runtime_quota_state_check CHECK (((quota_state)::text = ANY ((ARRAY['AVAILABLE'::character varying, 'SOFT_LIMIT'::character varying, 'EXHAUSTED'::character varying])::text[]))),
+    CONSTRAINT ai_runtime_quota_window_bounds_check CHECK ((window_end > window_start))
+);
+
+ALTER TABLE ONLY ${tenantSchema}.ai_runtime_quota_windows FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: ai_runtime_source_configurations; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.ai_runtime_source_configurations (
+    source_id character varying(128) NOT NULL,
+    tenant_id uuid NOT NULL,
+    provider character varying(64) NOT NULL,
+    source_kind character varying(32) NOT NULL,
+    feature_key character varying(128),
+    required_for_program_gate boolean DEFAULT false NOT NULL,
+    status character varying(32) DEFAULT 'ACTIVE'::character varying NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ai_runtime_source_kind_check CHECK (((source_kind)::text = ANY ((ARRAY['PROVIDER_CONNECTOR'::character varying, 'TELEMETRY_ADAPTER'::character varying])::text[]))),
+    CONSTRAINT ai_runtime_source_status_check CHECK (((status)::text = ANY ((ARRAY['ACTIVE'::character varying, 'INACTIVE'::character varying])::text[])))
+);
+
+ALTER TABLE ONLY ${tenantSchema}.ai_runtime_source_configurations FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: ai_security_artifact_attribute_ownership; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.ai_security_artifact_attribute_ownership (
+    tenant_id uuid NOT NULL,
+    artifact_id uuid NOT NULL,
+    scope_key character varying(255) NOT NULL,
+    attribute_key character varying(255) NOT NULL,
+    observed_at timestamp with time zone NOT NULL
+);
+
+ALTER TABLE ONLY ${tenantSchema}.ai_security_artifact_attribute_ownership FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: ai_security_artifact_digest_baselines; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.ai_security_artifact_digest_baselines (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    artifact_id uuid NOT NULL,
+    digest_kind character varying(64) NOT NULL,
+    algorithm character varying(64) NOT NULL,
+    key_version character varying(64) NOT NULL,
+    approved_digest text NOT NULL,
+    approval_status character varying(32) NOT NULL,
+    approved_by character varying(255),
+    approved_at timestamp with time zone,
+    revoked_by character varying(255),
+    revoked_at timestamp with time zone,
+    source_run_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    approval_reference_verified boolean DEFAULT false NOT NULL,
+    CONSTRAINT ai_security_digest_baseline_kind_check CHECK (((digest_kind)::text = ANY ((ARRAY['PROMPT'::character varying, 'TOOL_DEFINITION'::character varying, 'GUARDRAIL_CONFIGURATION'::character varying])::text[]))),
+    CONSTRAINT ai_security_digest_baseline_status_check CHECK (((approval_status)::text = ANY ((ARRAY['APPROVED'::character varying, 'REVOKED'::character varying])::text[])))
+);
+
+ALTER TABLE ONLY ${tenantSchema}.ai_security_artifact_digest_baselines FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: ai_security_artifact_digest_observations; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.ai_security_artifact_digest_observations (
+    tenant_id uuid NOT NULL,
+    artifact_id uuid NOT NULL,
+    digest_kind character varying(64) NOT NULL,
+    algorithm character varying(64) NOT NULL,
+    key_version character varying(64) NOT NULL,
+    observed_digest text NOT NULL,
+    comparison_outcome character varying(64) NOT NULL,
+    source_run_id uuid NOT NULL,
+    observed_at timestamp with time zone NOT NULL,
+    CONSTRAINT ai_security_artifact_digest_observatio_comparison_outcome_check CHECK (((comparison_outcome)::text = ANY ((ARRAY['UNAPPROVED'::character varying, 'UNCHANGED'::character varying, 'CHANGED_AFTER_APPROVAL'::character varying, 'BASELINE_UNKNOWN_REAPPROVAL_REQUIRED'::character varying, 'CONTROL_WEAKENED'::character varying, 'CONTROL_CONFIGURATION_CHANGED_REVIEW_REQUIRED'::character varying, 'CONFIGURATION_UNKNOWN'::character varying])::text[]))),
+    CONSTRAINT ai_security_artifact_digest_observations_digest_kind_check CHECK (((digest_kind)::text = ANY ((ARRAY['PROMPT'::character varying, 'TOOL_DEFINITION'::character varying, 'GUARDRAIL_CONFIGURATION'::character varying])::text[])))
+);
+
+ALTER TABLE ONLY ${tenantSchema}.ai_security_artifact_digest_observations FORCE ROW LEVEL SECURITY;
+
+
+--
 -- Name: ai_security_artifact_sources; Type: TABLE; Schema: ${tenantSchema}; Owner: -
 --
 
 CREATE TABLE ${tenantSchema}.ai_security_artifact_sources (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     artifact_id uuid NOT NULL,
     connector_config_id uuid,
     scope_key character varying(512) NOT NULL,
@@ -1058,7 +1608,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_security_artifact_sources FORCE ROW LEVEL SE
 
 CREATE TABLE ${tenantSchema}.ai_security_artifacts (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     provider character varying(32) NOT NULL,
     provider_resource_id character varying(1024) NOT NULL,
     artifact_type character varying(64) NOT NULL,
@@ -1086,10 +1636,10 @@ CREATE TABLE ${tenantSchema}.ai_security_artifacts (
     pii_finding_count integer DEFAULT 0 NOT NULL,
     pii_last_scanned_at timestamp with time zone,
     CONSTRAINT ai_security_artifacts_owner_confidence_check CHECK (((owner_confidence IS NULL) OR ((owner_confidence >= (0)::double precision) AND (owner_confidence <= (1)::double precision)))),
-    CONSTRAINT ai_security_artifacts_owner_state_check CHECK (((owner_state)::text = ANY ((ARRAY['CONFIRMED'::character varying, 'INFERRED'::character varying, 'CANDIDATE'::character varying, 'UNOWNED'::character varying])::text[]))),
+    CONSTRAINT ai_security_artifacts_owner_state_check CHECK (((owner_state)::text = ANY (ARRAY[('CONFIRMED'::character varying)::text, ('INFERRED'::character varying)::text, ('CANDIDATE'::character varying)::text, ('UNOWNED'::character varying)::text]))),
     CONSTRAINT ai_security_artifacts_pii_finding_count_check CHECK ((pii_finding_count >= 0)),
-    CONSTRAINT ai_security_artifacts_pii_scan_status_check CHECK (((pii_scan_status)::text = ANY ((ARRAY['UNKNOWN'::character varying, 'NOT_APPLICABLE'::character varying, 'NOT_SCANNED'::character varying, 'SCANNED_CLEAN'::character varying, 'SCANNED_PII_FOUND'::character varying, 'LOOKUP_FAILED'::character varying])::text[]))),
-    CONSTRAINT ai_security_artifacts_pii_source_check CHECK (((pii_source IS NULL) OR ((pii_source)::text = ANY ((ARRAY['AWS_MACIE'::character varying, 'AZURE_PURVIEW'::character varying])::text[]))))
+    CONSTRAINT ai_security_artifacts_pii_scan_status_check CHECK (((pii_scan_status)::text = ANY (ARRAY[('UNKNOWN'::character varying)::text, ('NOT_APPLICABLE'::character varying)::text, ('NOT_SCANNED'::character varying)::text, ('SCANNED_CLEAN'::character varying)::text, ('SCANNED_PII_FOUND'::character varying)::text, ('LOOKUP_FAILED'::character varying)::text]))),
+    CONSTRAINT ai_security_artifacts_pii_source_check CHECK (((pii_source IS NULL) OR ((pii_source)::text = ANY (ARRAY[('AWS_MACIE'::character varying)::text, ('AZURE_PURVIEW'::character varying)::text]))))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ai_security_artifacts FORCE ROW LEVEL SECURITY;
@@ -1101,7 +1651,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_security_artifacts FORCE ROW LEVEL SECURITY;
 
 CREATE TABLE ${tenantSchema}.ai_security_azure_credential_profiles (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     name character varying(255) NOT NULL,
     auth_type character varying(32) NOT NULL,
     azure_tenant_id character varying(128) NOT NULL,
@@ -1120,11 +1670,33 @@ CREATE TABLE ${tenantSchema}.ai_security_azure_credential_profiles (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     revoked_at timestamp with time zone,
     revoked_by character varying(255),
-    CONSTRAINT ai_security_azure_credential_auth_check CHECK (((auth_type)::text = ANY ((ARRAY['CLIENT_SECRET'::character varying, 'WORKLOAD_FEDERATION'::character varying, 'MANAGED_IDENTITY'::character varying])::text[]))),
-    CONSTRAINT ai_security_azure_credential_status_check CHECK (((status)::text = ANY ((ARRAY['ACTIVE'::character varying, 'EXPIRED'::character varying, 'REVOKED'::character varying])::text[])))
+    CONSTRAINT ai_security_azure_credential_auth_check CHECK (((auth_type)::text = ANY (ARRAY[('CLIENT_SECRET'::character varying)::text, ('WORKLOAD_FEDERATION'::character varying)::text, ('MANAGED_IDENTITY'::character varying)::text]))),
+    CONSTRAINT ai_security_azure_credential_status_check CHECK (((status)::text = ANY (ARRAY[('ACTIVE'::character varying)::text, ('EXPIRED'::character varying)::text, ('REVOKED'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ai_security_azure_credential_profiles FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: ai_security_baseline_history; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.ai_security_baseline_history (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    artifact_id uuid NOT NULL,
+    digest_kind character varying(64) NOT NULL,
+    action character varying(32) NOT NULL,
+    actor character varying(255),
+    source_run_id uuid,
+    algorithm character varying(64),
+    key_version character varying(64),
+    approved_value text,
+    approval_reference_verified boolean DEFAULT false NOT NULL,
+    recorded_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+ALTER TABLE ONLY ${tenantSchema}.ai_security_baseline_history FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -1133,7 +1705,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_security_azure_credential_profiles FORCE ROW
 
 CREATE TABLE ${tenantSchema}.ai_security_connector_configs (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     provider character varying(32) NOT NULL,
     account_id character varying(64) NOT NULL,
     role_arn character varying(512),
@@ -1155,12 +1727,50 @@ ALTER TABLE ONLY ${tenantSchema}.ai_security_connector_configs FORCE ROW LEVEL S
 
 
 --
+-- Name: ai_security_connector_feature_flags; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.ai_security_connector_feature_flags (
+    tenant_id uuid NOT NULL,
+    feature_key character varying(128) NOT NULL,
+    enabled boolean DEFAULT false NOT NULL,
+    kill_switch boolean DEFAULT false NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_by character varying(255),
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+ALTER TABLE ONLY ${tenantSchema}.ai_security_connector_feature_flags FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: ai_security_copilot_studio_configs; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.ai_security_copilot_studio_configs (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    organization_url character varying(512) NOT NULL,
+    credential_profile_id uuid NOT NULL,
+    discovery_enabled boolean DEFAULT false NOT NULL,
+    execution_enabled boolean DEFAULT false NOT NULL,
+    kill_switch boolean DEFAULT false NOT NULL,
+    schedule_cron character varying(128) DEFAULT '0 0 * * * *'::character varying NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    allowed_dataverse_hosts_json jsonb DEFAULT '[]'::jsonb NOT NULL
+);
+
+ALTER TABLE ONLY ${tenantSchema}.ai_security_copilot_studio_configs FORCE ROW LEVEL SECURITY;
+
+
+--
 -- Name: ai_security_observation_receipts; Type: TABLE; Schema: ${tenantSchema}; Owner: -
 --
 
 CREATE TABLE ${tenantSchema}.ai_security_observation_receipts (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     run_id uuid NOT NULL,
     scope_key character varying(512) NOT NULL,
     chunk_sequence integer NOT NULL,
@@ -1178,7 +1788,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_security_observation_receipts FORCE ROW LEVE
 
 CREATE TABLE ${tenantSchema}.ai_security_relationships (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     source_artifact_id uuid NOT NULL,
     target_artifact_id uuid NOT NULL,
     relationship_type character varying(128) NOT NULL,
@@ -1199,7 +1809,7 @@ ALTER TABLE ONLY ${tenantSchema}.ai_security_relationships FORCE ROW LEVEL SECUR
 
 CREATE TABLE ${tenantSchema}.ai_security_snapshot_scopes (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     run_id uuid NOT NULL,
     provider character varying(32) NOT NULL,
     account_id character varying(64) NOT NULL,
@@ -1243,7 +1853,7 @@ CREATE TABLE ${tenantSchema}.applicability_assessments (
     vulnerable_configuration boolean,
     vulnerable_version_present boolean,
     vulnerable_version_range character varying(200),
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     vulnerability_id uuid NOT NULL
 );
 
@@ -1307,10 +1917,10 @@ CREATE TABLE ${tenantSchema}.assets (
     state character varying(255) NOT NULL,
     support_group character varying(255),
     type character varying(255) NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
-    CONSTRAINT assets_business_criticality_check CHECK (((business_criticality)::text = ANY ((ARRAY['LOW'::character varying, 'MEDIUM'::character varying, 'HIGH'::character varying, 'CRITICAL'::character varying])::text[]))),
-    CONSTRAINT assets_state_check CHECK (((state)::text = ANY ((ARRAY['ACTIVE'::character varying, 'INACTIVE'::character varying, 'RETIRED'::character varying, 'DECOMMISSIONED'::character varying])::text[]))),
-    CONSTRAINT assets_type_check CHECK (((type)::text = ANY ((ARRAY['APPLICATION'::character varying, 'HOST'::character varying, 'CONTAINER_IMAGE'::character varying, 'CLOUD_RESOURCE'::character varying])::text[])))
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
+    CONSTRAINT assets_business_criticality_check CHECK (((business_criticality)::text = ANY (ARRAY[('LOW'::character varying)::text, ('MEDIUM'::character varying)::text, ('HIGH'::character varying)::text, ('CRITICAL'::character varying)::text]))),
+    CONSTRAINT assets_state_check CHECK (((state)::text = ANY (ARRAY[('ACTIVE'::character varying)::text, ('INACTIVE'::character varying)::text, ('RETIRED'::character varying)::text, ('DECOMMISSIONED'::character varying)::text]))),
+    CONSTRAINT assets_type_check CHECK (((type)::text = ANY (ARRAY[('APPLICATION'::character varying)::text, ('HOST'::character varying)::text, ('CONTAINER_IMAGE'::character varying)::text, ('CLOUD_RESOURCE'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.assets FORCE ROW LEVEL SECURITY;
@@ -1363,8 +1973,8 @@ CREATE TABLE ${tenantSchema}.aws_discovery_configs (
     resource_types_json character varying(255) NOT NULL,
     source_system character varying(255) NOT NULL,
     updated_at timestamp with time zone NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
-    CONSTRAINT aws_discovery_configs_auth_type_check CHECK (((auth_type)::text = ANY ((ARRAY['INSTANCE_METADATA'::character varying, 'ACCESS_KEY'::character varying, 'CROSS_ACCOUNT_ROLE'::character varying])::text[])))
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
+    CONSTRAINT aws_discovery_configs_auth_type_check CHECK (((auth_type)::text = ANY (ARRAY[('INSTANCE_METADATA'::character varying)::text, ('ACCESS_KEY'::character varying)::text, ('CROSS_ACCOUNT_ROLE'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.aws_discovery_configs FORCE ROW LEVEL SECURITY;
@@ -1390,7 +2000,7 @@ CREATE TABLE ${tenantSchema}.aws_discovery_targets (
     role_arn character varying(255),
     updated_at timestamp with time zone NOT NULL,
     config_id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.aws_discovery_targets FORCE ROW LEVEL SECURITY;
@@ -1402,7 +2012,7 @@ ALTER TABLE ONLY ${tenantSchema}.aws_discovery_targets FORCE ROW LEVEL SECURITY;
 
 CREATE TABLE ${tenantSchema}.azure_discovery_configs (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     source_system character varying(80) DEFAULT 'azure'::character varying NOT NULL,
     auth_type character varying(32) DEFAULT 'CLIENT_SECRET'::character varying NOT NULL,
     azure_tenant_id character varying(128),
@@ -1419,7 +2029,7 @@ CREATE TABLE ${tenantSchema}.azure_discovery_configs (
     last_sync_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT azure_discovery_configs_auth_type_check CHECK (((auth_type)::text = ANY ((ARRAY['CLIENT_SECRET'::character varying, 'MANAGED_IDENTITY'::character varying])::text[])))
+    CONSTRAINT azure_discovery_configs_auth_type_check CHECK (((auth_type)::text = ANY (ARRAY[('CLIENT_SECRET'::character varying)::text, ('MANAGED_IDENTITY'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.azure_discovery_configs FORCE ROW LEVEL SECURITY;
@@ -1431,7 +2041,7 @@ ALTER TABLE ONLY ${tenantSchema}.azure_discovery_configs FORCE ROW LEVEL SECURIT
 
 CREATE TABLE ${tenantSchema}.azure_discovery_targets (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     config_id uuid NOT NULL,
     subscription_id character varying(64),
     subscription_name character varying(255),
@@ -1449,12 +2059,58 @@ ALTER TABLE ONLY ${tenantSchema}.azure_discovery_targets FORCE ROW LEVEL SECURIT
 
 
 --
+-- Name: bom_asset_backfill_state; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.bom_asset_backfill_state (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    asset_id uuid NOT NULL,
+    state character varying(24) DEFAULT 'PENDING'::character varying NOT NULL,
+    attempt_count integer DEFAULT 0 NOT NULL,
+    backfilled_at timestamp with time zone,
+    failure_message text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT bom_asset_backfill_completion_check CHECK ((((state)::text = 'BACKFILLED'::text) = (backfilled_at IS NOT NULL))),
+    CONSTRAINT bom_asset_backfill_state_check CHECK (((state)::text = ANY ((ARRAY['PENDING'::character varying, 'BACKFILLED'::character varying, 'FAILED'::character varying])::text[])))
+);
+
+ALTER TABLE ONLY ${tenantSchema}.bom_asset_backfill_state FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: bom_component_contributions; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.bom_component_contributions (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    source_id uuid NOT NULL,
+    bom_id uuid NOT NULL,
+    bom_component_id uuid,
+    inventory_component_id uuid NOT NULL,
+    resolved_identity_key character varying(700) NOT NULL,
+    contribution_state character varying(24) DEFAULT 'SUPPORTED'::character varying NOT NULL,
+    authoritative_absence boolean DEFAULT false NOT NULL,
+    first_contributed_at timestamp with time zone DEFAULT now() NOT NULL,
+    last_contributed_at timestamp with time zone DEFAULT now() NOT NULL,
+    withdrawn_at timestamp with time zone,
+    CONSTRAINT bom_contribution_absence_requires_withdrawal_check CHECK ((NOT (authoritative_absence AND ((contribution_state)::text = 'SUPPORTED'::text)))),
+    CONSTRAINT bom_contribution_state_check CHECK (((contribution_state)::text = ANY ((ARRAY['SUPPORTED'::character varying, 'WITHDRAWN'::character varying])::text[]))),
+    CONSTRAINT bom_contribution_withdrawal_timestamp_check CHECK ((((contribution_state)::text = 'WITHDRAWN'::text) = (withdrawn_at IS NOT NULL)))
+);
+
+ALTER TABLE ONLY ${tenantSchema}.bom_component_contributions FORCE ROW LEVEL SECURITY;
+
+
+--
 -- Name: bom_component_evidence; Type: TABLE; Schema: ${tenantSchema}; Owner: -
 --
 
 CREATE TABLE ${tenantSchema}.bom_component_evidence (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     bom_component_id uuid NOT NULL,
     bom_id uuid NOT NULL,
     evidence_type character varying(40) NOT NULL,
@@ -1469,12 +2125,32 @@ ALTER TABLE ONLY ${tenantSchema}.bom_component_evidence FORCE ROW LEVEL SECURITY
 
 
 --
+-- Name: bom_component_relationships; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.bom_component_relationships (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    bom_id uuid NOT NULL,
+    source_ref text NOT NULL,
+    target_ref text NOT NULL,
+    source_component_id uuid,
+    target_component_id uuid,
+    relationship_type character varying(32) NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT bom_component_relationship_type_check CHECK (((relationship_type)::text = ANY ((ARRAY['DEPENDS_ON'::character varying, 'COMPOSED_OF'::character varying])::text[])))
+);
+
+ALTER TABLE ONLY ${tenantSchema}.bom_component_relationships FORCE ROW LEVEL SECURITY;
+
+
+--
 -- Name: bom_component_vulnerability_links; Type: TABLE; Schema: ${tenantSchema}; Owner: -
 --
 
 CREATE TABLE ${tenantSchema}.bom_component_vulnerability_links (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     bom_component_id uuid NOT NULL,
     bom_id uuid NOT NULL,
     vulnerability_key character varying(128) NOT NULL,
@@ -1497,7 +2173,7 @@ ALTER TABLE ONLY ${tenantSchema}.bom_component_vulnerability_links FORCE ROW LEV
 
 CREATE TABLE ${tenantSchema}.bom_component_workflows (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     bom_component_id uuid NOT NULL,
     vulnerability_link_id uuid,
     workflow_type character varying(40) DEFAULT 'INVESTIGATION'::character varying NOT NULL,
@@ -1520,7 +2196,7 @@ ALTER TABLE ONLY ${tenantSchema}.bom_component_workflows FORCE ROW LEVEL SECURIT
 CREATE TABLE ${tenantSchema}.bom_components (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     bom_id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     name text NOT NULL,
     version text,
     purl text,
@@ -1549,7 +2225,7 @@ ALTER TABLE ONLY ${tenantSchema}.bom_components FORCE ROW LEVEL SECURITY;
 
 CREATE TABLE ${tenantSchema}.bom_ingestion_records (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     sbom_upload_id uuid,
     asset_id uuid,
     bom_type character varying(20) NOT NULL,
@@ -1575,10 +2251,58 @@ CREATE TABLE ${tenantSchema}.bom_ingestion_records (
     content_type character varying(120),
     content_length_bytes bigint,
     checksum_sha256 character varying(128),
-    previous_bom_id uuid
+    previous_bom_id uuid,
+    source_id uuid,
+    completeness character varying(32) DEFAULT 'PARTIAL'::character varying NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.bom_ingestion_records FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: bom_source_completeness_assertions; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.bom_source_completeness_assertions (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    source_id uuid NOT NULL,
+    bom_id uuid NOT NULL,
+    completeness character varying(32) NOT NULL,
+    asset_scope_json jsonb NOT NULL,
+    asserted_by character varying(255) NOT NULL,
+    asserted_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT bom_source_assertion_completeness_check CHECK (((completeness)::text = ANY ((ARRAY['PARTIAL'::character varying, 'COMPLETE_ASSET_SOFTWARE'::character varying])::text[]))),
+    CONSTRAINT bom_source_assertion_scope_check CHECK ((jsonb_typeof(asset_scope_json) = 'object'::text))
+);
+
+ALTER TABLE ONLY ${tenantSchema}.bom_source_completeness_assertions FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: bom_sources; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.bom_sources (
+    id uuid NOT NULL,
+    tenant_id uuid NOT NULL,
+    bom_type character varying(20) NOT NULL,
+    asset_id uuid,
+    supplier character varying(255),
+    source_reference text,
+    source_key character varying(700),
+    current_bom_id uuid,
+    revision bigint DEFAULT 0 NOT NULL,
+    completeness character varying(32) DEFAULT 'PARTIAL'::character varying NOT NULL,
+    state character varying(32) DEFAULT 'ACTIVE'::character varying NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT bom_sources_cbom_not_software_complete_check CHECK ((NOT (((bom_type)::text = 'CBOM'::text) AND ((completeness)::text = 'COMPLETE_ASSET_SOFTWARE'::text)))),
+    CONSTRAINT bom_sources_completeness_check CHECK (((completeness)::text = ANY ((ARRAY['PARTIAL'::character varying, 'COMPLETE_ASSET_SOFTWARE'::character varying])::text[]))),
+    CONSTRAINT bom_sources_state_check CHECK (((state)::text = ANY ((ARRAY['ACTIVE'::character varying, 'HELD_ENTITLEMENT'::character varying, 'DEFERRED'::character varying])::text[])))
+);
+
+ALTER TABLE ONLY ${tenantSchema}.bom_sources FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -1593,7 +2317,7 @@ CREATE TABLE ${tenantSchema}.campaign_activities (
     body text NOT NULL,
     metadata_json jsonb,
     created_at timestamp with time zone NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.campaign_activities FORCE ROW LEVEL SECURITY;
@@ -1614,7 +2338,7 @@ CREATE TABLE ${tenantSchema}.campaign_delivery_attempts (
     provider_message_id character varying(255),
     detail character varying(1000),
     created_at timestamp with time zone NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.campaign_delivery_attempts FORCE ROW LEVEL SECURITY;
@@ -1640,7 +2364,7 @@ CREATE TABLE ${tenantSchema}.campaign_exceptions (
     decisioned_at timestamp with time zone,
     created_at timestamp with time zone NOT NULL,
     updated_at timestamp with time zone NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.campaign_exceptions FORCE ROW LEVEL SECURITY;
@@ -1656,7 +2380,7 @@ CREATE TABLE ${tenantSchema}.campaign_notes (
     author character varying(255) NOT NULL,
     body text NOT NULL,
     created_at timestamp with time zone NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.campaign_notes FORCE ROW LEVEL SECURITY;
@@ -1675,7 +2399,7 @@ CREATE TABLE ${tenantSchema}.campaign_notify_groups (
     notifications_paused boolean DEFAULT false NOT NULL,
     created_at timestamp with time zone NOT NULL,
     group_email character varying(255),
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.campaign_notify_groups FORCE ROW LEVEL SECURITY;
@@ -1693,7 +2417,7 @@ CREATE TABLE ${tenantSchema}.campaign_vulnerabilities (
     title character varying(500),
     severity character varying(32),
     created_at timestamp with time zone NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.campaign_vulnerabilities FORCE ROW LEVEL SECURITY;
@@ -1712,7 +2436,7 @@ CREATE TABLE ${tenantSchema}.campaign_watchlist_entries (
     trigger_policy character varying(64),
     active boolean DEFAULT true NOT NULL,
     created_at timestamp with time zone NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.campaign_watchlist_entries FORCE ROW LEVEL SECURITY;
@@ -1724,7 +2448,7 @@ ALTER TABLE ONLY ${tenantSchema}.campaign_watchlist_entries FORCE ROW LEVEL SECU
 
 CREATE TABLE ${tenantSchema}.campaigns (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     name character varying(255) NOT NULL,
     summary text,
     status character varying(32) NOT NULL,
@@ -1746,7 +2470,7 @@ ALTER TABLE ONLY ${tenantSchema}.campaigns FORCE ROW LEVEL SECURITY;
 
 CREATE TABLE ${tenantSchema}.cbom_components (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     asset_id uuid,
     source_bom_id uuid NOT NULL,
     bom_ref text,
@@ -1789,7 +2513,7 @@ ALTER TABLE ONLY ${tenantSchema}.cbom_components FORCE ROW LEVEL SECURITY;
 
 CREATE TABLE ${tenantSchema}.cbom_posture_summary (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     asset_id uuid NOT NULL,
     last_source_bom_id uuid,
     total_components integer DEFAULT 0 NOT NULL,
@@ -1815,7 +2539,7 @@ ALTER TABLE ONLY ${tenantSchema}.cbom_posture_summary FORCE ROW LEVEL SECURITY;
 
 CREATE TABLE ${tenantSchema}.cbom_risk_findings (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     cbom_component_id uuid NOT NULL,
     rule_id character varying(100) NOT NULL,
     rule_version character varying(20) DEFAULT '1'::character varying NOT NULL,
@@ -1830,7 +2554,9 @@ CREATE TABLE ${tenantSchema}.cbom_risk_findings (
     first_seen_at timestamp with time zone DEFAULT now() NOT NULL,
     last_seen_at timestamp with time zone DEFAULT now() NOT NULL,
     resolved_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    evidence_state character varying(24) DEFAULT 'SUPPORTED'::character varying NOT NULL,
+    withdrawn_at timestamp with time zone
 );
 
 ALTER TABLE ONLY ${tenantSchema}.cbom_risk_findings FORCE ROW LEVEL SECURITY;
@@ -1849,7 +2575,7 @@ CREATE TABLE ${tenantSchema}.ci_aliases (
     normalized_alias_name character varying(255) NOT NULL,
     source_system character varying(64) NOT NULL,
     ci_id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ci_aliases FORCE ROW LEVEL SECURITY;
@@ -1875,7 +2601,7 @@ CREATE TABLE ${tenantSchema}.cis (
     sys_id character varying(255) NOT NULL,
     updated_at timestamp with time zone NOT NULL,
     asset_id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.cis FORCE ROW LEVEL SECURITY;
@@ -1914,7 +2640,7 @@ CREATE TABLE ${tenantSchema}.component_vulnerability_states (
     vex_status character varying(80),
     vex_target_id uuid,
     component_id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     vulnerability_id uuid NOT NULL
 );
 
@@ -1926,7 +2652,7 @@ ALTER TABLE ONLY ${tenantSchema}.component_vulnerability_states FORCE ROW LEVEL 
 --
 
 CREATE TABLE ${tenantSchema}.dashboard_noise_reduction_projection (
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     never_opened_not_applicable bigint DEFAULT 0 NOT NULL,
     deferred_under_investigation bigint DEFAULT 0 NOT NULL,
     category_counts_json jsonb DEFAULT '{}'::jsonb NOT NULL,
@@ -1950,7 +2676,7 @@ CREATE TABLE ${tenantSchema}.demo_invites (
     accepted_at timestamp with time zone,
     last_sent_at timestamp with time zone,
     request_id uuid,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.demo_invites FORCE ROW LEVEL SECURITY;
@@ -2001,7 +2727,7 @@ CREATE TABLE ${tenantSchema}.discovery_models (
     product_hash character varying(255),
     updated_at timestamp with time zone NOT NULL,
     version_hash character varying(255),
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.discovery_models FORCE ROW LEVEL SECURITY;
@@ -2017,7 +2743,7 @@ CREATE TABLE ${tenantSchema}.finding_comments (
     body character varying(255) NOT NULL,
     created_at timestamp with time zone NOT NULL,
     finding_id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.finding_comments FORCE ROW LEVEL SECURITY;
@@ -2041,7 +2767,7 @@ CREATE TABLE ${tenantSchema}.finding_delta_queue (
     source_key character varying(500),
     source_tag character varying(255),
     status character varying(20) DEFAULT 'PENDING'::character varying NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     visible_after timestamp with time zone DEFAULT now() NOT NULL,
     vulnerability_id uuid
 );
@@ -2075,7 +2801,7 @@ CREATE TABLE ${tenantSchema}.finding_events (
     event_type character varying(255) NOT NULL,
     summary character varying(255) NOT NULL,
     finding_id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.finding_events FORCE ROW LEVEL SECURITY;
@@ -2112,7 +2838,8 @@ CREATE TABLE ${tenantSchema}.finding_list_projection (
     updated_at timestamp with time zone NOT NULL,
     created_at timestamp with time zone NOT NULL,
     first_observed_at timestamp with time zone,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
+    finding_kind character varying(32) DEFAULT 'VULNERABILITY'::character varying NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.finding_list_projection FORCE ROW LEVEL SECURITY;
@@ -2124,7 +2851,7 @@ ALTER TABLE ONLY ${tenantSchema}.finding_list_projection FORCE ROW LEVEL SECURIT
 
 CREATE TABLE ${tenantSchema}.finding_reviews (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     finding_id uuid NOT NULL,
     disposition character varying(32) NOT NULL,
     reason text,
@@ -2142,7 +2869,7 @@ ALTER TABLE ONLY ${tenantSchema}.finding_reviews FORCE ROW LEVEL SECURITY;
 
 CREATE TABLE ${tenantSchema}.finding_subjects (
     id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     finding_id uuid NOT NULL,
     subject_type character varying(32) NOT NULL,
     subject_id uuid NOT NULL,
@@ -2164,7 +2891,7 @@ CREATE TABLE ${tenantSchema}.finding_workspace_projection_status (
     finding_count bigint NOT NULL,
     source_finding_count bigint DEFAULT 0 NOT NULL,
     last_rebuild_duration_ms bigint,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.finding_workspace_projection_status FORCE ROW LEVEL SECURITY;
@@ -2214,7 +2941,7 @@ CREATE TABLE ${tenantSchema}.findings (
     vex_status character varying(64),
     asset_id uuid,
     component_id uuid,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     vulnerability_id uuid,
     finding_kind character varying(32) DEFAULT 'VULNERABILITY'::character varying NOT NULL,
     fingerprint character varying(64),
@@ -2224,10 +2951,12 @@ CREATE TABLE ${tenantSchema}.findings (
     policy_version character varying(32),
     reason_code character varying(128),
     assessment_id uuid,
-    CONSTRAINT findings_creation_source_check CHECK (((creation_source)::text = ANY ((ARRAY['MANUAL'::character varying, 'AUTOMATIC'::character varying, 'AI_SECURITY'::character varying])::text[]))),
-    CONSTRAINT findings_decision_state_check CHECK (((decision_state)::text = ANY ((ARRAY['AFFECTED'::character varying, 'NOT_AFFECTED'::character varying, 'FIXED'::character varying, 'UNDER_INVESTIGATION'::character varying, 'NEEDS_REVIEW'::character varying])::text[]))),
-    CONSTRAINT findings_kind_check CHECK (((finding_kind)::text = ANY ((ARRAY['VULNERABILITY'::character varying, 'AI_POSTURE'::character varying, 'AI_EXPOSURE'::character varying])::text[]))),
-    CONSTRAINT findings_status_check CHECK (((status)::text = ANY ((ARRAY['OPEN'::character varying, 'RESOLVED'::character varying, 'SUPPRESSED'::character varying, 'AUTO_CLOSED'::character varying])::text[]))),
+    github_advisory_id uuid,
+    ghsa_id character varying(20),
+    CONSTRAINT findings_creation_source_check CHECK (((creation_source)::text = ANY (ARRAY[('MANUAL'::character varying)::text, ('AUTOMATIC'::character varying)::text, ('AI_SECURITY'::character varying)::text]))),
+    CONSTRAINT findings_decision_state_check CHECK (((decision_state)::text = ANY (ARRAY[('AFFECTED'::character varying)::text, ('NOT_AFFECTED'::character varying)::text, ('FIXED'::character varying)::text, ('UNDER_INVESTIGATION'::character varying)::text, ('NEEDS_REVIEW'::character varying)::text]))),
+    CONSTRAINT findings_kind_check CHECK (((finding_kind)::text = ANY ((ARRAY['VULNERABILITY'::character varying, 'AI_POSTURE'::character varying, 'AI_EXPOSURE'::character varying, 'AI_RUNTIME'::character varying])::text[]))),
+    CONSTRAINT findings_status_check CHECK (((status)::text = ANY (ARRAY[('OPEN'::character varying)::text, ('RESOLVED'::character varying)::text, ('SUPPRESSED'::character varying)::text, ('AUTO_CLOSED'::character varying)::text]))),
     CONSTRAINT findings_vulnerability_subject_check CHECK ((((finding_kind)::text <> 'VULNERABILITY'::text) OR ((vulnerability_id IS NOT NULL) AND ((asset_id IS NOT NULL) OR (component_id IS NOT NULL)))))
 );
 
@@ -2252,7 +2981,7 @@ CREATE TABLE ${tenantSchema}.fix_records (
     source_urls jsonb,
     summary character varying(255) NOT NULL,
     updated_at timestamp with time zone NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.fix_records FORCE ROW LEVEL SECURITY;
@@ -2279,7 +3008,7 @@ CREATE TABLE ${tenantSchema}.github_sbom_sources (
     path character varying(1000) NOT NULL,
     repo character varying(255) NOT NULL,
     updated_at timestamp with time zone NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     github_token text
 );
 
@@ -2308,8 +3037,8 @@ CREATE TABLE ${tenantSchema}.ingestion_jobs (
     failure_message text,
     visible_at timestamp with time zone DEFAULT now() NOT NULL,
     sbom_upload_id uuid,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
-    CONSTRAINT ingestion_jobs_status_check CHECK (((status)::text = ANY ((ARRAY['QUEUED'::character varying, 'RUNNING'::character varying, 'SUCCEEDED'::character varying, 'FAILED'::character varying, 'CANCELLED'::character varying])::text[])))
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
+    CONSTRAINT ingestion_jobs_status_check CHECK (((status)::text = ANY (ARRAY[('QUEUED'::character varying)::text, ('RUNNING'::character varying)::text, ('SUCCEEDED'::character varying)::text, ('FAILED'::character varying)::text, ('CANCELLED'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ingestion_jobs FORCE ROW LEVEL SECURITY;
@@ -2326,7 +3055,7 @@ CREATE TABLE ${tenantSchema}.inventory_component_cpe_map (
     observed_version character varying(255),
     component_id uuid NOT NULL,
     cpe_id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.inventory_component_cpe_map FORCE ROW LEVEL SECURITY;
@@ -2365,11 +3094,13 @@ CREATE TABLE ${tenantSchema}.inventory_components (
     manual_identity_reason character varying(400),
     manual_identity_confirmed_by character varying(255),
     manual_identity_confirmed_at timestamp with time zone,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     package_group character varying(255),
     license text,
     scope character varying(30),
-    CONSTRAINT inventory_components_component_status_check CHECK (((component_status)::text = ANY ((ARRAY['ACTIVE'::character varying, 'RETIRED'::character varying])::text[])))
+    bom_evidence_state character varying(24) DEFAULT 'LEGACY_UNKNOWN'::character varying NOT NULL,
+    bom_evidence_updated_at timestamp with time zone,
+    CONSTRAINT inventory_components_component_status_check CHECK (((component_status)::text = ANY (ARRAY[('ACTIVE'::character varying)::text, ('RETIRED'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.inventory_components FORCE ROW LEVEL SECURITY;
@@ -2387,7 +3118,7 @@ CREATE TABLE ${tenantSchema}.investigation_activities (
     metadata text,
     performed_by character varying(100),
     investigation_id bigint NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.investigation_activities FORCE ROW LEVEL SECURITY;
@@ -2420,7 +3151,7 @@ CREATE TABLE ${tenantSchema}.investigation_attachments (
     uploaded_at timestamp with time zone NOT NULL,
     uploaded_by character varying(100),
     investigation_id bigint NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.investigation_attachments FORCE ROW LEVEL SECURITY;
@@ -2446,7 +3177,7 @@ ALTER TABLE ${tenantSchema}.investigation_attachments ALTER COLUMN id ADD GENERA
 
 CREATE TABLE ${tenantSchema}.investigation_runbook (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     cve_external_id character varying(50) NOT NULL,
     task_states jsonb DEFAULT '[]'::jsonb NOT NULL,
     agent_suggestions jsonb DEFAULT '{}'::jsonb NOT NULL,
@@ -2485,7 +3216,7 @@ CREATE TABLE ${tenantSchema}.investigations (
     systems_affected text,
     updated_at timestamp with time zone NOT NULL,
     vuln_references text,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     vulnerability_id uuid NOT NULL
 );
 
@@ -2522,7 +3253,7 @@ CREATE TABLE ${tenantSchema}.org_cve_ai_artifacts (
     investigation_summary_mode character varying(255),
     investigation_summary_output_json jsonb,
     updated_at timestamp with time zone NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.org_cve_ai_artifacts FORCE ROW LEVEL SECURITY;
@@ -2568,11 +3299,11 @@ CREATE TABLE ${tenantSchema}.org_cve_records (
     unknown_component_count bigint NOT NULL,
     updated_at timestamp with time zone NOT NULL,
     vuln_status character varying(255),
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     vulnerability_id uuid NOT NULL,
-    CONSTRAINT org_cve_records_applicability_state_check CHECK (((applicability_state)::text = ANY ((ARRAY['APPLICABLE'::character varying, 'NOT_APPLICABLE'::character varying, 'UNKNOWN'::character varying])::text[]))),
-    CONSTRAINT org_cve_records_impact_state_check CHECK (((impact_state)::text = ANY ((ARRAY['IMPACTED'::character varying, 'NOT_IMPACTED'::character varying, 'FIXED'::character varying, 'NO_PATCH'::character varying, 'UNDER_INVESTIGATION'::character varying, 'UNKNOWN'::character varying])::text[]))),
-    CONSTRAINT org_cve_records_org_impact_check CHECK (((org_impact)::text = ANY ((ARRAY['NONE'::character varying, 'LOW'::character varying, 'MEDIUM'::character varying, 'HIGH'::character varying])::text[])))
+    CONSTRAINT org_cve_records_applicability_state_check CHECK (((applicability_state)::text = ANY (ARRAY[('APPLICABLE'::character varying)::text, ('NOT_APPLICABLE'::character varying)::text, ('UNKNOWN'::character varying)::text]))),
+    CONSTRAINT org_cve_records_impact_state_check CHECK (((impact_state)::text = ANY (ARRAY[('IMPACTED'::character varying)::text, ('NOT_IMPACTED'::character varying)::text, ('FIXED'::character varying)::text, ('NO_PATCH'::character varying)::text, ('UNDER_INVESTIGATION'::character varying)::text, ('UNKNOWN'::character varying)::text]))),
+    CONSTRAINT org_cve_records_org_impact_check CHECK (((org_impact)::text = ANY (ARRAY[('NONE'::character varying)::text, ('LOW'::character varying)::text, ('MEDIUM'::character varying)::text, ('HIGH'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.org_cve_records FORCE ROW LEVEL SECURITY;
@@ -2590,7 +3321,7 @@ CREATE TABLE ${tenantSchema}.ownership_rules (
     name character varying(255) NOT NULL,
     updated_at timestamp with time zone NOT NULL,
     user_group character varying(255) NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.ownership_rules FORCE ROW LEVEL SECURITY;
@@ -2602,7 +3333,7 @@ ALTER TABLE ONLY ${tenantSchema}.ownership_rules FORCE ROW LEVEL SECURITY;
 
 CREATE TABLE ${tenantSchema}.quality_issue_projection (
     id text NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     issue_key text NOT NULL,
     domain text NOT NULL,
     issue_type text NOT NULL,
@@ -2666,14 +3397,14 @@ CREATE TABLE ${tenantSchema}.risk_policies (
     low_sla_days integer NOT NULL,
     medium_sla_days integer NOT NULL,
     updated_at timestamp with time zone NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     copilot_enabled boolean DEFAULT false NOT NULL,
     copilot_shadow_mode boolean DEFAULT true NOT NULL,
     copilot_auto_run boolean DEFAULT false NOT NULL,
     agent_auto_threshold double precision DEFAULT 0.85 NOT NULL,
     agent_review_threshold double precision DEFAULT 0.60 NOT NULL,
     agent_max_concurrent integer DEFAULT 10 NOT NULL,
-    CONSTRAINT risk_policies_finding_generation_mode_check CHECK (((finding_generation_mode)::text = ANY ((ARRAY['AUTO'::character varying, 'MANUAL'::character varying])::text[])))
+    CONSTRAINT risk_policies_finding_generation_mode_check CHECK (((finding_generation_mode)::text = ANY (ARRAY[('AUTO'::character varying)::text, ('MANUAL'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.risk_policies FORCE ROW LEVEL SECURITY;
@@ -2701,9 +3432,9 @@ CREATE TABLE ${tenantSchema}.sbom_uploads (
     source_reference character varying(255),
     status character varying(255) NOT NULL,
     uploaded_at timestamp with time zone NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
-    CONSTRAINT sbom_uploads_format_check CHECK (((format)::text = ANY ((ARRAY['CYCLONEDX'::character varying, 'SPDX'::character varying, 'HOST_INVENTORY'::character varying, 'UNKNOWN'::character varying])::text[]))),
-    CONSTRAINT sbom_uploads_status_check CHECK (((status)::text = ANY ((ARRAY['IN_PROGRESS'::character varying, 'SUCCESS'::character varying, 'FAILURE'::character varying])::text[])))
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
+    CONSTRAINT sbom_uploads_format_check CHECK (((format)::text = ANY (ARRAY[('CYCLONEDX'::character varying)::text, ('SPDX'::character varying)::text, ('HOST_INVENTORY'::character varying)::text, ('UNKNOWN'::character varying)::text]))),
+    CONSTRAINT sbom_uploads_status_check CHECK (((status)::text = ANY (ARRAY[('IN_PROGRESS'::character varying)::text, ('SUCCESS'::character varying)::text, ('FAILURE'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.sbom_uploads FORCE ROW LEVEL SECURITY;
@@ -2734,8 +3465,8 @@ CREATE TABLE ${tenantSchema}.sccm_cmdb_configs (
     source_system character varying(255) NOT NULL,
     updated_at timestamp with time zone NOT NULL,
     username character varying(255),
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
-    CONSTRAINT sccm_cmdb_configs_auth_type_check CHECK (((auth_type)::text = ANY ((ARRAY['SQL_AUTH'::character varying, 'WINDOWS_AUTH'::character varying])::text[])))
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
+    CONSTRAINT sccm_cmdb_configs_auth_type_check CHECK (((auth_type)::text = ANY (ARRAY[('SQL_AUTH'::character varying)::text, ('WINDOWS_AUTH'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.sccm_cmdb_configs FORCE ROW LEVEL SECURITY;
@@ -2754,7 +3485,7 @@ CREATE TABLE ${tenantSchema}.service_accounts (
     role character varying(255) NOT NULL,
     status character varying(255) NOT NULL,
     updated_at timestamp with time zone NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.service_accounts FORCE ROW LEVEL SECURITY;
@@ -2788,8 +3519,8 @@ CREATE TABLE ${tenantSchema}.servicenow_cmdb_configs (
     source_system character varying(255) NOT NULL,
     updated_at timestamp with time zone NOT NULL,
     username character varying(255),
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
-    CONSTRAINT servicenow_cmdb_configs_auth_type_check CHECK (((auth_type)::text = ANY ((ARRAY['BASIC'::character varying, 'BEARER'::character varying])::text[])))
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
+    CONSTRAINT servicenow_cmdb_configs_auth_type_check CHECK (((auth_type)::text = ANY (ARRAY[('BASIC'::character varying)::text, ('BEARER'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.servicenow_cmdb_configs FORCE ROW LEVEL SECURITY;
@@ -2801,7 +3532,7 @@ ALTER TABLE ONLY ${tenantSchema}.servicenow_cmdb_configs FORCE ROW LEVEL SECURIT
 
 CREATE TABLE ${tenantSchema}.software_identity_cluster_link (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     source_type character varying(40) NOT NULL,
     source_key character varying(500) NOT NULL,
     target_identity_id uuid NOT NULL,
@@ -2821,7 +3552,7 @@ ALTER TABLE ONLY ${tenantSchema}.software_identity_cluster_link FORCE ROW LEVEL 
 --
 
 CREATE TABLE ${tenantSchema}.software_identity_metadata (
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     software_identity_id uuid NOT NULL,
     owner text,
     licensed text DEFAULT 'Unknown'::text NOT NULL,
@@ -2840,7 +3571,7 @@ ALTER TABLE ONLY ${tenantSchema}.software_identity_metadata FORCE ROW LEVEL SECU
 --
 
 CREATE TABLE ${tenantSchema}.software_identity_summary (
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
     software_identity_id uuid NOT NULL,
     display_name text,
     canonical_key text,
@@ -2901,7 +3632,7 @@ CREATE TABLE ${tenantSchema}.software_instances (
     discovery_model_id uuid,
     inventory_component_id uuid,
     software_identity_id uuid,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.software_instances FORCE ROW LEVEL SECURITY;
@@ -2925,7 +3656,7 @@ CREATE TABLE ${tenantSchema}.software_inventory_items (
     version character varying(255) NOT NULL,
     asset_id uuid,
     component_id uuid NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.software_inventory_items FORCE ROW LEVEL SECURITY;
@@ -2947,12 +3678,80 @@ CREATE TABLE ${tenantSchema}.suppression_rules (
     updated_at timestamp with time zone NOT NULL,
     valid_from timestamp with time zone,
     valid_to timestamp with time zone,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL,
-    CONSTRAINT suppression_rules_record_type_check CHECK (((record_type)::text = ANY ((ARRAY['CVE'::character varying, 'FINDING'::character varying])::text[]))),
-    CONSTRAINT suppression_rules_state_check CHECK (((state)::text = ANY ((ARRAY['DRAFT'::character varying, 'APPROVED'::character varying, 'IN_REVIEW'::character varying, 'REJECTED'::character varying, 'EXPIRED'::character varying])::text[])))
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL,
+    CONSTRAINT suppression_rules_record_type_check CHECK (((record_type)::text = ANY (ARRAY[('CVE'::character varying)::text, ('FINDING'::character varying)::text]))),
+    CONSTRAINT suppression_rules_state_check CHECK (((state)::text = ANY (ARRAY[('DRAFT'::character varying)::text, ('APPROVED'::character varying)::text, ('IN_REVIEW'::character varying)::text, ('REJECTED'::character varying)::text, ('EXPIRED'::character varying)::text])))
 );
 
 ALTER TABLE ONLY ${tenantSchema}.suppression_rules FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: tenant_ghsa_integrations; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.tenant_ghsa_integrations (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    is_enabled boolean DEFAULT false,
+    enabled_at timestamp without time zone,
+    disabled_at timestamp without time zone,
+    auto_create_findings boolean DEFAULT true,
+    auto_correlate_components boolean DEFAULT true,
+    create_finding_for_low_severity boolean DEFAULT false,
+    reason_enabled character varying(255),
+    enabled_by_user_id uuid,
+    created_at timestamp without time zone DEFAULT now(),
+    updated_at timestamp without time zone DEFAULT now()
+);
+
+ALTER TABLE ONLY ${tenantSchema}.tenant_ghsa_integrations FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: tenant_ghsa_subscriptions; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.tenant_ghsa_subscriptions (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    advisory_id uuid NOT NULL,
+    subscription_reason character varying(100),
+    is_active boolean DEFAULT true,
+    subscribed_at timestamp without time zone DEFAULT now(),
+    unsubscribed_at timestamp without time zone,
+    created_at timestamp without time zone DEFAULT now()
+);
+
+ALTER TABLE ONLY ${tenantSchema}.tenant_ghsa_subscriptions FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Name: tenant_github_repository_component_advisories; Type: TABLE; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE TABLE ${tenantSchema}.tenant_github_repository_component_advisories (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    github_source_id uuid NOT NULL,
+    component_id character varying(500) NOT NULL,
+    advisory_id uuid NOT NULL,
+    is_affected boolean NOT NULL,
+    installed_version character varying(50) NOT NULL,
+    is_installed_version_vulnerable boolean NOT NULL,
+    vulnerable_range_reason character varying(255),
+    finding_id uuid,
+    finding_kind character varying(50) DEFAULT 'AI_GITHUB_ADVISORY'::character varying,
+    recommended_fixed_version character varying(50),
+    upgrade_available boolean,
+    discovered_at timestamp without time zone DEFAULT now(),
+    first_alert_sent_at timestamp without time zone,
+    last_alert_sent_at timestamp without time zone,
+    created_at timestamp without time zone DEFAULT now(),
+    updated_at timestamp without time zone DEFAULT now()
+);
+
+ALTER TABLE ONLY ${tenantSchema}.tenant_github_repository_component_advisories FORCE ROW LEVEL SECURITY;
 
 
 --
@@ -2966,10 +3765,1116 @@ CREATE TABLE ${tenantSchema}.vulnerability_source_filter_configs (
     filters_json text,
     source_system character varying(255) NOT NULL,
     updated_at timestamp with time zone NOT NULL,
-    tenant_id uuid DEFAULT 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid NOT NULL
+    tenant_id uuid DEFAULT '${tenantId}'::uuid NOT NULL
 );
 
 ALTER TABLE ONLY ${tenantSchema}.vulnerability_source_filter_configs FORCE ROW LEVEL SECURITY;
+
+
+--
+-- Data for Name: ai_agent_deployment_settings; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_agent_execution_cursors; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_agent_execution_events; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_agent_execution_participants; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_agent_execution_receipts; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_agent_executions; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_bom_declared_resources; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_bom_projection_admissions; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_bom_projection_receipts; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_bom_provenance_facts; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_bom_resource_vulnerability_links; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_approved_agent_manifests; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_artifact_classifications; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_assessments; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_budget_admissions; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_budget_alerts; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_budget_config; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+INSERT INTO ${tenantSchema}.ai_grid_budget_config (tenant_id, enforcement_mode, daily_scan_limit, daily_provider_api_call_limit, daily_new_snapshot_bytes_limit, daily_processing_ms_limit, retained_snapshot_bytes_limit, warning_ratio, updated_by, reason, updated_at, runtime_quota_window_seconds, rolling_runtime_event_limit, rolling_runtime_byte_limit) VALUES ('${tenantId}', 'OBSERVE', 24, 10000, 1073741824, 3600000, 10737418240, 0.8, 'ai-grid-bootstrap', 'Initial observable AI Grid budget', '2026-10-13 04:32:30.776065+05:30', 86400, NULL, NULL);
+
+
+--
+-- Data for Name: ai_grid_capability_manifests; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_capability_observations; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_component_allowlists; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_coverage_gaps; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_current_coverage_artifacts; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_current_coverage_state; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_current_expected_candidates; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_evidence_holds; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_exposure_associations; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_exposure_dispositions; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_exposure_executions; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_exposure_observations; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_exposure_paths; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_facts; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_host_context_facts; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_outbox; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_owner_history; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_policy_artifact_overrides; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_policy_parameters; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_policy_readiness; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_policy_scopes; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_policy_selection_history; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_policy_selections; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_relationship_snapshots; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_retention_decisions; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_retention_policies; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_retention_purge_audit; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_run_metrics; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_run_scope_metrics; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_scan_cadence_rules; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_setup_actions; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_snapshot_bodies; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_snapshot_manifests; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_system_lineage_events; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_system_lineage_participants; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_system_membership_decisions; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_system_membership_overrides; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_system_memberships; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_system_revisions; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_grid_systems; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_runtime_evidence_producers; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_runtime_ingestion_receipts; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_runtime_quota_windows; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_runtime_source_configurations; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_security_artifact_attribute_ownership; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_security_artifact_digest_baselines; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_security_artifact_digest_observations; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_security_artifact_sources; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_security_artifacts; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_security_azure_credential_profiles; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_security_baseline_history; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_security_connector_configs; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_security_connector_feature_flags; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_security_copilot_studio_configs; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_security_observation_receipts; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_security_relationships; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ai_security_snapshot_scopes; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: applicability_assessments; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: assets; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: audit_events; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: aws_discovery_configs; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: aws_discovery_targets; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: azure_discovery_configs; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: azure_discovery_targets; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: bom_asset_backfill_state; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: bom_component_contributions; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: bom_component_evidence; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: bom_component_relationships; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: bom_component_vulnerability_links; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: bom_component_workflows; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: bom_components; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: bom_ingestion_records; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: bom_source_completeness_assertions; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: bom_sources; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: campaign_activities; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: campaign_delivery_attempts; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: campaign_exceptions; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: campaign_notes; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: campaign_notify_groups; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: campaign_vulnerabilities; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: campaign_watchlist_entries; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: campaigns; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: cbom_components; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: cbom_posture_summary; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: cbom_risk_findings; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ci_aliases; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: cis; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: component_vulnerability_states; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: dashboard_noise_reduction_projection; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: demo_invites; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: demo_requests; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: discovery_models; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: finding_comments; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: finding_delta_queue; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: finding_events; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: finding_list_projection; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: finding_reviews; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: finding_subjects; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: finding_workspace_projection_status; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: findings; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: fix_records; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: github_sbom_sources; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ingestion_jobs; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: inventory_component_cpe_map; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: inventory_components; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: investigation_activities; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: investigation_attachments; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: investigation_runbook; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: investigations; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: org_cve_ai_artifacts; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: org_cve_records; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: ownership_rules; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: quality_issue_projection; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: risk_policies; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: sbom_uploads; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: sccm_cmdb_configs; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: service_accounts; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: servicenow_cmdb_configs; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: software_identity_cluster_link; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: software_identity_metadata; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: software_identity_summary; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: software_instances; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: software_inventory_items; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: suppression_rules; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: tenant_ghsa_integrations; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: tenant_ghsa_subscriptions; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: tenant_github_repository_component_advisories; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Data for Name: vulnerability_source_filter_configs; Type: TABLE DATA; Schema: ${tenantSchema}; Owner: -
+--
+
+
+
+--
+-- Name: applicability_assessments_id_seq; Type: SEQUENCE SET; Schema: ${tenantSchema}; Owner: -
+--
+
+SELECT pg_catalog.setval('${tenantSchema}.applicability_assessments_id_seq', 1, false);
+
+
+--
+-- Name: finding_delta_queue_id_seq; Type: SEQUENCE SET; Schema: ${tenantSchema}; Owner: -
+--
+
+SELECT pg_catalog.setval('${tenantSchema}.finding_delta_queue_id_seq', 1, false);
+
+
+--
+-- Name: investigation_activities_id_seq; Type: SEQUENCE SET; Schema: ${tenantSchema}; Owner: -
+--
+
+SELECT pg_catalog.setval('${tenantSchema}.investigation_activities_id_seq', 1, false);
+
+
+--
+-- Name: investigation_attachments_id_seq; Type: SEQUENCE SET; Schema: ${tenantSchema}; Owner: -
+--
+
+SELECT pg_catalog.setval('${tenantSchema}.investigation_attachments_id_seq', 1, false);
+
+
+--
+-- Name: investigations_id_seq; Type: SEQUENCE SET; Schema: ${tenantSchema}; Owner: -
+--
+
+SELECT pg_catalog.setval('${tenantSchema}.investigations_id_seq', 1, false);
+
+
+--
+-- Name: ai_agent_deployment_settings ai_agent_deployment_settings_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_deployment_settings
+    ADD CONSTRAINT ai_agent_deployment_settings_pkey PRIMARY KEY (tenant_id);
+
+
+--
+-- Name: ai_agent_execution_cursors ai_agent_execution_cursors_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_execution_cursors
+    ADD CONSTRAINT ai_agent_execution_cursors_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: ai_agent_execution_cursors ai_agent_execution_cursors_tenant_id_connector_id_source_sc_key; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_execution_cursors
+    ADD CONSTRAINT ai_agent_execution_cursors_tenant_id_connector_id_source_sc_key UNIQUE (tenant_id, connector_id, source, scope_key);
+
+
+--
+-- Name: ai_agent_execution_events ai_agent_execution_events_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_execution_events
+    ADD CONSTRAINT ai_agent_execution_events_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: ai_agent_execution_events ai_agent_execution_events_tenant_id_execution_id_sequence_key; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_execution_events
+    ADD CONSTRAINT ai_agent_execution_events_tenant_id_execution_id_sequence_key UNIQUE (tenant_id, execution_id, sequence);
+
+
+--
+-- Name: ai_agent_execution_participants ai_agent_execution_participan_tenant_id_execution_id_artifa_key; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_execution_participants
+    ADD CONSTRAINT ai_agent_execution_participan_tenant_id_execution_id_artifa_key UNIQUE (tenant_id, execution_id, artifact_id, participant_role);
+
+
+--
+-- Name: ai_agent_execution_participants ai_agent_execution_participants_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_execution_participants
+    ADD CONSTRAINT ai_agent_execution_participants_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: ai_agent_execution_receipts ai_agent_execution_receipts_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_execution_receipts
+    ADD CONSTRAINT ai_agent_execution_receipts_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: ai_agent_execution_receipts ai_agent_execution_receipts_tenant_id_idempotency_key_key; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_execution_receipts
+    ADD CONSTRAINT ai_agent_execution_receipts_tenant_id_idempotency_key_key UNIQUE (tenant_id, idempotency_key);
+
+
+--
+-- Name: ai_agent_executions ai_agent_executions_approval_state_check; Type: CHECK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_agent_executions
+    ADD CONSTRAINT ai_agent_executions_approval_state_check CHECK (((approval_state IS NULL) OR ((approval_state)::text = ANY ((ARRAY['APPROVED'::character varying, 'DENIED'::character varying, 'REQUIRED'::character varying, 'NOT_REQUIRED'::character varying, 'BYPASSED'::character varying, 'UNKNOWN'::character varying])::text[])))) NOT VALID;
+
+
+--
+-- Name: ai_agent_executions ai_agent_executions_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_executions
+    ADD CONSTRAINT ai_agent_executions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: ai_agent_executions ai_agent_executions_policy_state_check; Type: CHECK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_agent_executions
+    ADD CONSTRAINT ai_agent_executions_policy_state_check CHECK (((policy_state IS NULL) OR ((policy_state)::text = ANY ((ARRAY['ALLOWED'::character varying, 'DENIED'::character varying, 'BLOCKED'::character varying, 'NOT_EVALUATED'::character varying, 'UNKNOWN'::character varying])::text[])))) NOT VALID;
+
+
+--
+-- Name: ai_agent_executions ai_agent_executions_tenant_id_provider_provider_execution_i_key; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_executions
+    ADD CONSTRAINT ai_agent_executions_tenant_id_provider_provider_execution_i_key UNIQUE (tenant_id, provider, provider_execution_digest);
+
+
+--
+-- Name: ai_agent_executions ai_agent_executions_tenant_provider_execution_digest_key; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_executions
+    ADD CONSTRAINT ai_agent_executions_tenant_provider_execution_digest_key UNIQUE (tenant_id, provider, provider_execution_digest, digest_key_version);
+
+
+--
+-- Name: ai_bom_declared_resources ai_bom_declared_resources_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_declared_resources
+    ADD CONSTRAINT ai_bom_declared_resources_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: ai_bom_declared_resources ai_bom_declared_resources_tenant_id_source_id_identity_valu_key; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_declared_resources
+    ADD CONSTRAINT ai_bom_declared_resources_tenant_id_source_id_identity_valu_key UNIQUE (tenant_id, source_id, identity_value);
+
+
+--
+-- Name: ai_bom_projection_admissions ai_bom_projection_admissions_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_projection_admissions
+    ADD CONSTRAINT ai_bom_projection_admissions_pkey PRIMARY KEY (tenant_id, admission_date);
+
+
+--
+-- Name: ai_bom_projection_receipts ai_bom_projection_receipts_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_projection_receipts
+    ADD CONSTRAINT ai_bom_projection_receipts_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: ai_bom_projection_receipts ai_bom_projection_receipts_tenant_id_source_id_source_revis_key; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_projection_receipts
+    ADD CONSTRAINT ai_bom_projection_receipts_tenant_id_source_id_source_revis_key UNIQUE (tenant_id, source_id, source_revision, operation, projection_version);
+
+
+--
+-- Name: ai_bom_provenance_facts ai_bom_provenance_facts_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_provenance_facts
+    ADD CONSTRAINT ai_bom_provenance_facts_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: ai_bom_provenance_facts ai_bom_provenance_facts_tenant_id_asset_id_fact_key_key; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_provenance_facts
+    ADD CONSTRAINT ai_bom_provenance_facts_tenant_id_asset_id_fact_key_key UNIQUE (tenant_id, asset_id, fact_key);
+
+
+--
+-- Name: ai_bom_resource_vulnerability_links ai_bom_resource_vulnerability_links_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_resource_vulnerability_links
+    ADD CONSTRAINT ai_bom_resource_vulnerability_links_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: ai_bom_resource_vulnerability_links ai_bom_resource_vulnerability_tenant_id_declared_resource_i_key; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_resource_vulnerability_links
+    ADD CONSTRAINT ai_bom_resource_vulnerability_tenant_id_declared_resource_i_key UNIQUE (tenant_id, declared_resource_id, finding_id);
+
+
+--
+-- Name: ai_grid_approved_agent_manifests ai_grid_approved_agent_manife_tenant_id_version_artifact_id_key; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_grid_approved_agent_manifests
+    ADD CONSTRAINT ai_grid_approved_agent_manife_tenant_id_version_artifact_id_key UNIQUE (tenant_id, version_artifact_id);
+
+
+--
+-- Name: ai_grid_approved_agent_manifests ai_grid_approved_agent_manifests_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_grid_approved_agent_manifests
+    ADD CONSTRAINT ai_grid_approved_agent_manifests_pkey PRIMARY KEY (id);
 
 
 --
@@ -2994,14 +4899,6 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_artifact_classifications
 
 ALTER TABLE ONLY ${tenantSchema}.ai_grid_assessments
     ADD CONSTRAINT ai_grid_assessments_pkey PRIMARY KEY (id);
-
-
---
--- Name: ai_grid_assessments ai_grid_assessments_tenant_id_run_id_policy_id_subject_type_key; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
---
-
-ALTER TABLE ONLY ${tenantSchema}.ai_grid_assessments
-    ADD CONSTRAINT ai_grid_assessments_tenant_id_run_id_policy_id_subject_type_key UNIQUE (tenant_id, run_id, policy_id, subject_type, subject_id);
 
 
 --
@@ -3037,6 +4934,22 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_budget_config
 
 
 --
+-- Name: ai_grid_capability_manifests ai_grid_capability_manifests_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_grid_capability_manifests
+    ADD CONSTRAINT ai_grid_capability_manifests_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: ai_grid_capability_manifests ai_grid_capability_manifests_run_capability_region_key; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_grid_capability_manifests
+    ADD CONSTRAINT ai_grid_capability_manifests_run_capability_region_key UNIQUE (tenant_id, run_id, provider, account_id, region, capability_id);
+
+
+--
 -- Name: ai_grid_capability_observations ai_grid_capability_observatio_tenant_id_run_id_provider_cap_key; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
 --
 
@@ -3050,6 +4963,22 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_capability_observations
 
 ALTER TABLE ONLY ${tenantSchema}.ai_grid_capability_observations
     ADD CONSTRAINT ai_grid_capability_observations_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: ai_grid_component_allowlists ai_grid_component_allowlists_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_grid_component_allowlists
+    ADD CONSTRAINT ai_grid_component_allowlists_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: ai_grid_component_allowlists ai_grid_component_allowlists_tenant_id_provider_component_k_key; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_grid_component_allowlists
+    ADD CONSTRAINT ai_grid_component_allowlists_tenant_id_provider_component_k_key UNIQUE (tenant_id, provider, component_kind, component_digest);
 
 
 --
@@ -3517,6 +5446,78 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_systems
 
 
 --
+-- Name: ai_runtime_evidence_producers ai_runtime_evidence_producers_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_runtime_evidence_producers
+    ADD CONSTRAINT ai_runtime_evidence_producers_pkey PRIMARY KEY (producer_id);
+
+
+--
+-- Name: ai_runtime_ingestion_receipts ai_runtime_ingestion_receipts_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_runtime_ingestion_receipts
+    ADD CONSTRAINT ai_runtime_ingestion_receipts_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: ai_runtime_quota_windows ai_runtime_quota_windows_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_runtime_quota_windows
+    ADD CONSTRAINT ai_runtime_quota_windows_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: ai_runtime_quota_windows ai_runtime_quota_windows_tenant_id_source_id_window_start_key; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_runtime_quota_windows
+    ADD CONSTRAINT ai_runtime_quota_windows_tenant_id_source_id_window_start_key UNIQUE (tenant_id, source_id, window_start);
+
+
+--
+-- Name: ai_runtime_source_configurations ai_runtime_source_configurations_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_runtime_source_configurations
+    ADD CONSTRAINT ai_runtime_source_configurations_pkey PRIMARY KEY (source_id);
+
+
+--
+-- Name: ai_security_artifact_attribute_ownership ai_security_artifact_attribute_ownership_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_security_artifact_attribute_ownership
+    ADD CONSTRAINT ai_security_artifact_attribute_ownership_pkey PRIMARY KEY (tenant_id, artifact_id, scope_key, attribute_key);
+
+
+--
+-- Name: ai_security_artifact_digest_baselines ai_security_artifact_digest_b_tenant_id_artifact_id_digest__key; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_security_artifact_digest_baselines
+    ADD CONSTRAINT ai_security_artifact_digest_b_tenant_id_artifact_id_digest__key UNIQUE (tenant_id, artifact_id, digest_kind);
+
+
+--
+-- Name: ai_security_artifact_digest_baselines ai_security_artifact_digest_baselines_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_security_artifact_digest_baselines
+    ADD CONSTRAINT ai_security_artifact_digest_baselines_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: ai_security_artifact_digest_observations ai_security_artifact_digest_observations_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_security_artifact_digest_observations
+    ADD CONSTRAINT ai_security_artifact_digest_observations_pkey PRIMARY KEY (tenant_id, artifact_id, digest_kind);
+
+
+--
 -- Name: ai_security_artifact_sources ai_security_artifact_sources_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
 --
 
@@ -3565,6 +5566,14 @@ ALTER TABLE ONLY ${tenantSchema}.ai_security_azure_credential_profiles
 
 
 --
+-- Name: ai_security_baseline_history ai_security_baseline_history_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_security_baseline_history
+    ADD CONSTRAINT ai_security_baseline_history_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: ai_security_connector_configs ai_security_connector_configs_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
 --
 
@@ -3578,6 +5587,30 @@ ALTER TABLE ONLY ${tenantSchema}.ai_security_connector_configs
 
 ALTER TABLE ONLY ${tenantSchema}.ai_security_connector_configs
     ADD CONSTRAINT ai_security_connector_configs_tenant_id_provider_account_id_key UNIQUE (tenant_id, provider, account_id);
+
+
+--
+-- Name: ai_security_connector_feature_flags ai_security_connector_feature_flags_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_security_connector_feature_flags
+    ADD CONSTRAINT ai_security_connector_feature_flags_pkey PRIMARY KEY (tenant_id, feature_key);
+
+
+--
+-- Name: ai_security_copilot_studio_configs ai_security_copilot_studio_confi_tenant_id_organization_url_key; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_security_copilot_studio_configs
+    ADD CONSTRAINT ai_security_copilot_studio_confi_tenant_id_organization_url_key UNIQUE (tenant_id, organization_url);
+
+
+--
+-- Name: ai_security_copilot_studio_configs ai_security_copilot_studio_configs_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_security_copilot_studio_configs
+    ADD CONSTRAINT ai_security_copilot_studio_configs_pkey PRIMARY KEY (id);
 
 
 --
@@ -3693,11 +5726,59 @@ ALTER TABLE ONLY ${tenantSchema}.azure_discovery_targets
 
 
 --
+-- Name: bom_asset_backfill_state bom_asset_backfill_state_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.bom_asset_backfill_state
+    ADD CONSTRAINT bom_asset_backfill_state_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: bom_asset_backfill_state bom_asset_backfill_state_tenant_id_asset_id_key; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.bom_asset_backfill_state
+    ADD CONSTRAINT bom_asset_backfill_state_tenant_id_asset_id_key UNIQUE (tenant_id, asset_id);
+
+
+--
+-- Name: bom_component_contributions bom_component_contributions_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.bom_component_contributions
+    ADD CONSTRAINT bom_component_contributions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: bom_component_contributions bom_component_contributions_tenant_id_source_id_inventory_c_key; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.bom_component_contributions
+    ADD CONSTRAINT bom_component_contributions_tenant_id_source_id_inventory_c_key UNIQUE (tenant_id, source_id, inventory_component_id);
+
+
+--
 -- Name: bom_component_evidence bom_component_evidence_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
 --
 
 ALTER TABLE ONLY ${tenantSchema}.bom_component_evidence
     ADD CONSTRAINT bom_component_evidence_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: bom_component_relationships bom_component_relationships_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.bom_component_relationships
+    ADD CONSTRAINT bom_component_relationships_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: bom_component_relationships bom_component_relationships_tenant_id_bom_id_source_ref_tar_key; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.bom_component_relationships
+    ADD CONSTRAINT bom_component_relationships_tenant_id_bom_id_source_ref_tar_key UNIQUE (tenant_id, bom_id, source_ref, target_ref, relationship_type);
 
 
 --
@@ -3725,11 +5806,35 @@ ALTER TABLE ONLY ${tenantSchema}.bom_components
 
 
 --
+-- Name: bom_ingestion_records bom_ingestion_records_completeness_check; Type: CHECK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.bom_ingestion_records
+    ADD CONSTRAINT bom_ingestion_records_completeness_check CHECK (((completeness)::text = ANY ((ARRAY['PARTIAL'::character varying, 'COMPLETE_ASSET_SOFTWARE'::character varying])::text[]))) NOT VALID;
+
+
+--
 -- Name: bom_ingestion_records bom_ingestion_records_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
 --
 
 ALTER TABLE ONLY ${tenantSchema}.bom_ingestion_records
     ADD CONSTRAINT bom_ingestion_records_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: bom_source_completeness_assertions bom_source_completeness_assertions_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.bom_source_completeness_assertions
+    ADD CONSTRAINT bom_source_completeness_assertions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: bom_sources bom_sources_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.bom_sources
+    ADD CONSTRAINT bom_sources_pkey PRIMARY KEY (id);
 
 
 --
@@ -3826,6 +5931,14 @@ ALTER TABLE ONLY ${tenantSchema}.cbom_posture_summary
 
 ALTER TABLE ONLY ${tenantSchema}.cbom_posture_summary
     ADD CONSTRAINT cbom_posture_summary_tenant_id_asset_id_key UNIQUE (tenant_id, asset_id);
+
+
+--
+-- Name: cbom_risk_findings cbom_risk_findings_evidence_state_check; Type: CHECK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.cbom_risk_findings
+    ADD CONSTRAINT cbom_risk_findings_evidence_state_check CHECK (((evidence_state)::text = ANY ((ARRAY['SUPPORTED'::character varying, 'CONFLICTING'::character varying, 'WITHDRAWN'::character varying, 'LEGACY_UNKNOWN'::character varying])::text[]))) NOT VALID;
 
 
 --
@@ -4005,6 +6118,14 @@ ALTER TABLE ONLY ${tenantSchema}.inventory_component_cpe_map
 
 
 --
+-- Name: inventory_components inventory_components_bom_evidence_state_check; Type: CHECK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.inventory_components
+    ADD CONSTRAINT inventory_components_bom_evidence_state_check CHECK (((bom_evidence_state)::text = ANY ((ARRAY['SUPPORTED'::character varying, 'CONFLICTING'::character varying, 'WITHDRAWN'::character varying, 'LEGACY_UNKNOWN'::character varying])::text[]))) NOT VALID;
+
+
+--
 -- Name: inventory_components inventory_components_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
 --
 
@@ -4162,6 +6283,38 @@ ALTER TABLE ONLY ${tenantSchema}.software_inventory_items
 
 ALTER TABLE ONLY ${tenantSchema}.suppression_rules
     ADD CONSTRAINT suppression_rules_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: tenant_ghsa_integrations tenant_ghsa_integrations_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.tenant_ghsa_integrations
+    ADD CONSTRAINT tenant_ghsa_integrations_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: tenant_ghsa_integrations tenant_ghsa_integrations_tenant_id_key; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.tenant_ghsa_integrations
+    ADD CONSTRAINT tenant_ghsa_integrations_tenant_id_key UNIQUE (tenant_id);
+
+
+--
+-- Name: tenant_ghsa_subscriptions tenant_ghsa_subscriptions_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.tenant_ghsa_subscriptions
+    ADD CONSTRAINT tenant_ghsa_subscriptions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: tenant_github_repository_component_advisories tenant_github_repository_component_advisories_pkey; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.tenant_github_repository_component_advisories
+    ADD CONSTRAINT tenant_github_repository_component_advisories_pkey PRIMARY KEY (id);
 
 
 --
@@ -4341,6 +6494,14 @@ ALTER TABLE ONLY ${tenantSchema}.vulnerability_source_filter_configs
 
 
 --
+-- Name: ai_grid_assessments uq_ai_grid_assessments_evaluation_identity; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_grid_assessments
+    ADD CONSTRAINT uq_ai_grid_assessments_evaluation_identity UNIQUE (tenant_id, run_id, policy_id, subject_type, subject_id, fingerprint);
+
+
+--
 -- Name: ai_grid_exposure_observations uq_ai_grid_exposure_observation_epoch; Type: CONSTRAINT; Schema: ${tenantSchema}; Owner: -
 --
 
@@ -4362,6 +6523,118 @@ ALTER TABLE ONLY ${tenantSchema}.investigation_runbook
 
 ALTER TABLE ONLY ${tenantSchema}.vulnerability_source_filter_configs
     ADD CONSTRAINT vulnerability_source_filter_configs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: ai_security_baseline_history_artifact_id_recorded_at_idx; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX ai_security_baseline_history_artifact_id_recorded_at_idx ON ${tenantSchema}.ai_security_baseline_history USING btree (artifact_id, recorded_at);
+
+
+--
+-- Name: idx_ai_agent_execution_events_consequential_time; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_ai_agent_execution_events_consequential_time ON ${tenantSchema}.ai_agent_execution_events USING btree (tenant_id, event_time DESC, action_category) WHERE ((action_category)::text = ANY ((ARRAY['WRITE'::character varying, 'DELETE'::character varying, 'SEND'::character varying, 'EXECUTE'::character varying, 'ADMIN'::character varying, 'PAYMENT'::character varying, 'PUBLISH'::character varying])::text[]));
+
+
+--
+-- Name: idx_ai_agent_execution_participants_artifact_evidence; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_ai_agent_execution_participants_artifact_evidence ON ${tenantSchema}.ai_agent_execution_participants USING btree (tenant_id, artifact_id, evidence_time DESC, execution_id);
+
+
+--
+-- Name: idx_ai_agent_execution_participants_execution; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_ai_agent_execution_participants_execution ON ${tenantSchema}.ai_agent_execution_participants USING btree (execution_id, participant_role);
+
+
+--
+-- Name: idx_ai_agent_executions_agent_time; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_ai_agent_executions_agent_time ON ${tenantSchema}.ai_agent_executions USING btree (agent_artifact_id, evidence_time DESC);
+
+
+--
+-- Name: idx_ai_agent_executions_source_time; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_ai_agent_executions_source_time ON ${tenantSchema}.ai_agent_executions USING btree (source, evidence_time DESC);
+
+
+--
+-- Name: idx_ai_agent_executions_tenant_agent_evidence; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_ai_agent_executions_tenant_agent_evidence ON ${tenantSchema}.ai_agent_executions USING btree (tenant_id, agent_artifact_id, evidence_time DESC);
+
+
+--
+-- Name: idx_ai_agent_executions_tenant_version_evidence; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_ai_agent_executions_tenant_version_evidence ON ${tenantSchema}.ai_agent_executions USING btree (tenant_id, agent_version_artifact_id, evidence_time DESC) WHERE (agent_version_artifact_id IS NOT NULL);
+
+
+--
+-- Name: idx_ai_agent_roster; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_ai_agent_roster ON ${tenantSchema}.ai_security_artifacts USING btree (native_kind, last_observed_at DESC, id) WHERE (active = true);
+
+
+--
+-- Name: idx_ai_bom_declared_resources_kind; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_ai_bom_declared_resources_kind ON ${tenantSchema}.ai_bom_declared_resources USING btree (tenant_id, resource_kind, deployment_state);
+
+
+--
+-- Name: idx_ai_bom_declared_resources_source; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_ai_bom_declared_resources_source ON ${tenantSchema}.ai_bom_declared_resources USING btree (tenant_id, source_id);
+
+
+--
+-- Name: idx_ai_bom_declared_resources_unlinked; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_ai_bom_declared_resources_unlinked ON ${tenantSchema}.ai_bom_declared_resources USING btree (tenant_id, deployment_state) WHERE ((deployment_state)::text <> 'LINKED'::text);
+
+
+--
+-- Name: idx_ai_bom_provenance_facts_source; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_ai_bom_provenance_facts_source ON ${tenantSchema}.ai_bom_provenance_facts USING btree (tenant_id, source_id);
+
+
+--
+-- Name: idx_ai_bom_resource_vulnerability_links_finding; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_ai_bom_resource_vulnerability_links_finding ON ${tenantSchema}.ai_bom_resource_vulnerability_links USING btree (tenant_id, finding_id);
+
+
+--
+-- Name: idx_ai_bom_resource_vulnerability_links_resource; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_ai_bom_resource_vulnerability_links_resource ON ${tenantSchema}.ai_bom_resource_vulnerability_links USING btree (tenant_id, declared_resource_id);
+
+
+--
+-- Name: idx_ai_grid_approved_manifests_agent; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_ai_grid_approved_manifests_agent ON ${tenantSchema}.ai_grid_approved_agent_manifests USING btree (tenant_id, agent_artifact_id, approval_status);
 
 
 --
@@ -4393,10 +6666,24 @@ CREATE INDEX idx_ai_grid_budget_alerts_open ON ${tenantSchema}.ai_grid_budget_al
 
 
 --
+-- Name: idx_ai_grid_capability_manifests_unfinished; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_ai_grid_capability_manifests_unfinished ON ${tenantSchema}.ai_grid_capability_manifests USING btree (created_at) WHERE ((status)::text = 'REGISTERED'::text);
+
+
+--
 -- Name: idx_ai_grid_capability_observations_run; Type: INDEX; Schema: ${tenantSchema}; Owner: -
 --
 
 CREATE INDEX idx_ai_grid_capability_observations_run ON ${tenantSchema}.ai_grid_capability_observations USING btree (run_id, provider, capability_id);
+
+
+--
+-- Name: idx_ai_grid_component_allowlists_lookup; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_ai_grid_component_allowlists_lookup ON ${tenantSchema}.ai_grid_component_allowlists USING btree (tenant_id, provider, component_kind, status);
 
 
 --
@@ -4596,6 +6883,20 @@ CREATE INDEX idx_ai_grid_system_revision_epoch ON ${tenantSchema}.ai_grid_system
 
 
 --
+-- Name: idx_ai_relationship_snapshot_routes; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_ai_relationship_snapshot_routes ON ${tenantSchema}.ai_grid_relationship_snapshots USING btree (run_id, source_artifact_id, relationship_type);
+
+
+--
+-- Name: idx_ai_scopes_deployment_latest; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_ai_scopes_deployment_latest ON ${tenantSchema}.ai_security_snapshot_scopes USING btree (provider, account_id, region, resource_family, completed_at DESC) WHERE (completed_at IS NOT NULL);
+
+
+--
 -- Name: idx_ai_security_artifacts_scope; Type: INDEX; Schema: ${tenantSchema}; Owner: -
 --
 
@@ -4621,6 +6922,13 @@ CREATE INDEX idx_ai_security_azure_credentials_expiry ON ${tenantSchema}.ai_secu
 --
 
 CREATE INDEX idx_ai_security_connector_provider_target ON ${tenantSchema}.ai_security_connector_configs USING btree (provider, source_target_id);
+
+
+--
+-- Name: idx_ai_security_digest_baselines_artifact; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_ai_security_digest_baselines_artifact ON ${tenantSchema}.ai_security_artifact_digest_baselines USING btree (artifact_id, approval_status);
 
 
 --
@@ -4708,6 +7016,13 @@ CREATE INDEX idx_azure_discovery_targets_tenant_enabled ON ${tenantSchema}.azure
 
 
 --
+-- Name: idx_bom_asset_backfill_pending; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_bom_asset_backfill_pending ON ${tenantSchema}.bom_asset_backfill_state USING btree (tenant_id, state);
+
+
+--
 -- Name: idx_bom_comp_active; Type: INDEX; Schema: ${tenantSchema}; Owner: -
 --
 
@@ -4743,6 +7058,41 @@ CREATE INDEX idx_bom_comp_tenant ON ${tenantSchema}.bom_components USING btree (
 
 
 --
+-- Name: idx_bom_component_relationships_bom; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_bom_component_relationships_bom ON ${tenantSchema}.bom_component_relationships USING btree (tenant_id, bom_id);
+
+
+--
+-- Name: idx_bom_component_relationships_source; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_bom_component_relationships_source ON ${tenantSchema}.bom_component_relationships USING btree (tenant_id, source_component_id);
+
+
+--
+-- Name: idx_bom_contributions_bom; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_bom_contributions_bom ON ${tenantSchema}.bom_component_contributions USING btree (bom_id);
+
+
+--
+-- Name: idx_bom_contributions_inventory; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_bom_contributions_inventory ON ${tenantSchema}.bom_component_contributions USING btree (tenant_id, inventory_component_id, contribution_state);
+
+
+--
+-- Name: idx_bom_contributions_source; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_bom_contributions_source ON ${tenantSchema}.bom_component_contributions USING btree (tenant_id, source_id, contribution_state);
+
+
+--
 -- Name: idx_bom_evidence_bom; Type: INDEX; Schema: ${tenantSchema}; Owner: -
 --
 
@@ -4754,6 +7104,13 @@ CREATE INDEX idx_bom_evidence_bom ON ${tenantSchema}.bom_component_evidence USIN
 --
 
 CREATE INDEX idx_bom_evidence_component ON ${tenantSchema}.bom_component_evidence USING btree (bom_component_id, evidence_type);
+
+
+--
+-- Name: idx_bom_ingestion_records_source; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_bom_ingestion_records_source ON ${tenantSchema}.bom_ingestion_records USING btree (source_id);
 
 
 --
@@ -4803,6 +7160,27 @@ CREATE INDEX idx_bom_ir_status_type ON ${tenantSchema}.bom_ingestion_records USI
 --
 
 CREATE INDEX idx_bom_ir_tenant ON ${tenantSchema}.bom_ingestion_records USING btree (tenant_id);
+
+
+--
+-- Name: idx_bom_source_assertions_source; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_bom_source_assertions_source ON ${tenantSchema}.bom_source_completeness_assertions USING btree (tenant_id, source_id, asserted_at DESC);
+
+
+--
+-- Name: idx_bom_sources_tenant_asset; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_bom_sources_tenant_asset ON ${tenantSchema}.bom_sources USING btree (tenant_id, asset_id, bom_type);
+
+
+--
+-- Name: idx_bom_sources_tenant_state; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_bom_sources_tenant_state ON ${tenantSchema}.bom_sources USING btree (tenant_id, state);
 
 
 --
@@ -5093,6 +7471,13 @@ CREATE INDEX idx_finding_list_projection_incident_status ON ${tenantSchema}.find
 
 
 --
+-- Name: idx_finding_list_projection_kind; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_finding_list_projection_kind ON ${tenantSchema}.finding_list_projection USING btree (tenant_id, finding_kind, status);
+
+
+--
 -- Name: idx_finding_list_projection_owner_status; Type: INDEX; Schema: ${tenantSchema}; Owner: -
 --
 
@@ -5170,6 +7555,13 @@ CREATE INDEX idx_findings_auto_close_eligible ON ${tenantSchema}.findings USING 
 
 
 --
+-- Name: idx_findings_ghsa; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_findings_ghsa ON ${tenantSchema}.findings USING btree (tenant_id, ghsa_id) WHERE (ghsa_id IS NOT NULL);
+
+
+--
 -- Name: idx_findings_tenant_component_vuln; Type: INDEX; Schema: ${tenantSchema}; Owner: -
 --
 
@@ -5240,6 +7632,27 @@ CREATE INDEX idx_fix_records_tenant_cve ON ${tenantSchema}.fix_records USING btr
 
 
 --
+-- Name: idx_ghsa_integration_enabled; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_ghsa_integration_enabled ON ${tenantSchema}.tenant_ghsa_integrations USING btree (is_enabled);
+
+
+--
+-- Name: idx_ghsa_subscription_active; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_ghsa_subscription_active ON ${tenantSchema}.tenant_ghsa_subscriptions USING btree (tenant_id, is_active);
+
+
+--
+-- Name: idx_ghsa_subscription_unique; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_ghsa_subscription_unique ON ${tenantSchema}.tenant_ghsa_subscriptions USING btree (tenant_id, advisory_id);
+
+
+--
 -- Name: idx_github_sbom_sources_enabled; Type: INDEX; Schema: ${tenantSchema}; Owner: -
 --
 
@@ -5293,6 +7706,13 @@ CREATE INDEX idx_ingestion_jobs_status_visible ON ${tenantSchema}.ingestion_jobs
 --
 
 CREATE INDEX idx_inventory_component_digest ON ${tenantSchema}.inventory_components USING btree (component_digest);
+
+
+--
+-- Name: idx_inventory_components_bom_evidence; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_inventory_components_bom_evidence ON ${tenantSchema}.inventory_components USING btree (tenant_id, bom_evidence_state);
 
 
 --
@@ -5436,6 +7856,27 @@ CREATE INDEX idx_quality_issue_projection_refs ON ${tenantSchema}.quality_issue_
 
 
 --
+-- Name: idx_repo_comp_advisory_affected; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_repo_comp_advisory_affected ON ${tenantSchema}.tenant_github_repository_component_advisories USING btree (tenant_id, is_affected) WHERE (is_affected = true);
+
+
+--
+-- Name: idx_repo_comp_advisory_finding; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_repo_comp_advisory_finding ON ${tenantSchema}.tenant_github_repository_component_advisories USING btree (tenant_id, finding_id) WHERE (finding_id IS NOT NULL);
+
+
+--
+-- Name: idx_repo_comp_advisory_source; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE INDEX idx_repo_comp_advisory_source ON ${tenantSchema}.tenant_github_repository_component_advisories USING btree (tenant_id, github_source_id);
+
+
+--
 -- Name: idx_runbook_cve_external_id; Type: INDEX; Schema: ${tenantSchema}; Owner: -
 --
 
@@ -5576,10 +8017,17 @@ CREATE UNIQUE INDEX uk_ai_grid_budget_alert_open_metric ON ${tenantSchema}.ai_gr
 
 
 --
+-- Name: uk_bom_sources_tenant_source_key; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE UNIQUE INDEX uk_bom_sources_tenant_source_key ON ${tenantSchema}.bom_sources USING btree (tenant_id, source_key) WHERE (source_key IS NOT NULL);
+
+
+--
 -- Name: uk_demo_requests_active_email; Type: INDEX; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE UNIQUE INDEX uk_demo_requests_active_email ON ${tenantSchema}.demo_requests USING btree (lower((email)::text)) WHERE ((status)::text = ANY ((ARRAY['PENDING'::character varying, 'SENT'::character varying, 'ERROR'::character varying])::text[]));
+CREATE UNIQUE INDEX uk_demo_requests_active_email ON ${tenantSchema}.demo_requests USING btree (lower((email)::text)) WHERE ((status)::text = ANY (ARRAY[('PENDING'::character varying)::text, ('SENT'::character varying)::text, ('ERROR'::character varying)::text]));
 
 
 --
@@ -5600,7 +8048,14 @@ CREATE UNIQUE INDEX uk_findings_tenant_fingerprint ON ${tenantSchema}.findings U
 -- Name: uk_ingestion_jobs_dedupe_active; Type: INDEX; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE UNIQUE INDEX uk_ingestion_jobs_dedupe_active ON ${tenantSchema}.ingestion_jobs USING btree (dedupe_key) WHERE ((status)::text = ANY ((ARRAY['QUEUED'::character varying, 'RUNNING'::character varying])::text[]));
+CREATE UNIQUE INDEX uk_ingestion_jobs_dedupe_active ON ${tenantSchema}.ingestion_jobs USING btree (dedupe_key) WHERE ((status)::text = ANY (ARRAY[('QUEUED'::character varying)::text, ('RUNNING'::character varying)::text]));
+
+
+--
+-- Name: uq_ai_agent_execution_events_provider_event; Type: INDEX; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_ai_agent_execution_events_provider_event ON ${tenantSchema}.ai_agent_execution_events USING btree (tenant_id, producer_id, provider_event_digest, digest_key_version) WHERE ((producer_id IS NOT NULL) AND (provider_event_digest IS NOT NULL) AND (digest_key_version IS NOT NULL));
 
 
 --
@@ -5608,6 +8063,230 @@ CREATE UNIQUE INDEX uk_ingestion_jobs_dedupe_active ON ${tenantSchema}.ingestion
 --
 
 CREATE UNIQUE INDEX uq_cluster_link_active ON ${tenantSchema}.software_identity_cluster_link USING btree (tenant_id, source_type, source_key) WHERE (revoked_at IS NULL);
+
+
+--
+-- Name: ai_agent_execution_cursors ai_agent_execution_cursors_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_execution_cursors
+    ADD CONSTRAINT ai_agent_execution_cursors_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
+-- Name: ai_agent_execution_events ai_agent_execution_events_execution_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_execution_events
+    ADD CONSTRAINT ai_agent_execution_events_execution_id_fkey FOREIGN KEY (execution_id) REFERENCES ${tenantSchema}.ai_agent_executions(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ai_agent_execution_events ai_agent_execution_events_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_execution_events
+    ADD CONSTRAINT ai_agent_execution_events_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
+-- Name: ai_agent_execution_participants ai_agent_execution_participants_artifact_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_execution_participants
+    ADD CONSTRAINT ai_agent_execution_participants_artifact_id_fkey FOREIGN KEY (artifact_id) REFERENCES ${tenantSchema}.ai_security_artifacts(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ai_agent_execution_participants ai_agent_execution_participants_execution_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_execution_participants
+    ADD CONSTRAINT ai_agent_execution_participants_execution_id_fkey FOREIGN KEY (execution_id) REFERENCES ${tenantSchema}.ai_agent_executions(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ai_agent_execution_participants ai_agent_execution_participants_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_execution_participants
+    ADD CONSTRAINT ai_agent_execution_participants_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
+-- Name: ai_agent_execution_receipts ai_agent_execution_receipts_execution_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_execution_receipts
+    ADD CONSTRAINT ai_agent_execution_receipts_execution_id_fkey FOREIGN KEY (execution_id) REFERENCES ${tenantSchema}.ai_agent_executions(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ai_agent_execution_receipts ai_agent_execution_receipts_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_execution_receipts
+    ADD CONSTRAINT ai_agent_execution_receipts_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
+-- Name: ai_agent_executions ai_agent_executions_agent_artifact_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_executions
+    ADD CONSTRAINT ai_agent_executions_agent_artifact_id_fkey FOREIGN KEY (agent_artifact_id) REFERENCES ${tenantSchema}.ai_security_artifacts(id);
+
+
+--
+-- Name: ai_agent_executions ai_agent_executions_agent_version_artifact_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_executions
+    ADD CONSTRAINT ai_agent_executions_agent_version_artifact_id_fkey FOREIGN KEY (agent_version_artifact_id) REFERENCES ${tenantSchema}.ai_security_artifacts(id);
+
+
+--
+-- Name: ai_agent_executions ai_agent_executions_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_agent_executions
+    ADD CONSTRAINT ai_agent_executions_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
+-- Name: ai_bom_declared_resources ai_bom_declared_resources_linked_artifact_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_declared_resources
+    ADD CONSTRAINT ai_bom_declared_resources_linked_artifact_id_fkey FOREIGN KEY (linked_artifact_id) REFERENCES ${tenantSchema}.ai_security_artifacts(id) ON DELETE SET NULL;
+
+
+--
+-- Name: ai_bom_declared_resources ai_bom_declared_resources_proposed_artifact_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_declared_resources
+    ADD CONSTRAINT ai_bom_declared_resources_proposed_artifact_id_fkey FOREIGN KEY (proposed_artifact_id) REFERENCES ${tenantSchema}.ai_security_artifacts(id) ON DELETE SET NULL;
+
+
+--
+-- Name: ai_bom_declared_resources ai_bom_declared_resources_source_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_declared_resources
+    ADD CONSTRAINT ai_bom_declared_resources_source_id_fkey FOREIGN KEY (source_id) REFERENCES ${tenantSchema}.bom_sources(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ai_bom_declared_resources ai_bom_declared_resources_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_declared_resources
+    ADD CONSTRAINT ai_bom_declared_resources_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
+-- Name: ai_bom_projection_admissions ai_bom_projection_admissions_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_projection_admissions
+    ADD CONSTRAINT ai_bom_projection_admissions_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
+-- Name: ai_bom_projection_receipts ai_bom_projection_receipts_source_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_projection_receipts
+    ADD CONSTRAINT ai_bom_projection_receipts_source_id_fkey FOREIGN KEY (source_id) REFERENCES ${tenantSchema}.bom_sources(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ai_bom_projection_receipts ai_bom_projection_receipts_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_projection_receipts
+    ADD CONSTRAINT ai_bom_projection_receipts_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
+-- Name: ai_bom_provenance_facts ai_bom_provenance_facts_asset_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_provenance_facts
+    ADD CONSTRAINT ai_bom_provenance_facts_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES ${tenantSchema}.assets(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ai_bom_provenance_facts ai_bom_provenance_facts_source_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_provenance_facts
+    ADD CONSTRAINT ai_bom_provenance_facts_source_id_fkey FOREIGN KEY (source_id) REFERENCES ${tenantSchema}.bom_sources(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ai_bom_provenance_facts ai_bom_provenance_facts_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_provenance_facts
+    ADD CONSTRAINT ai_bom_provenance_facts_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
+-- Name: ai_bom_resource_vulnerability_links ai_bom_resource_vulnerability_links_declared_resource_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_resource_vulnerability_links
+    ADD CONSTRAINT ai_bom_resource_vulnerability_links_declared_resource_id_fkey FOREIGN KEY (declared_resource_id) REFERENCES ${tenantSchema}.ai_bom_declared_resources(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ai_bom_resource_vulnerability_links ai_bom_resource_vulnerability_links_finding_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_resource_vulnerability_links
+    ADD CONSTRAINT ai_bom_resource_vulnerability_links_finding_id_fkey FOREIGN KEY (finding_id) REFERENCES ${tenantSchema}.findings(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ai_bom_resource_vulnerability_links ai_bom_resource_vulnerability_links_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_resource_vulnerability_links
+    ADD CONSTRAINT ai_bom_resource_vulnerability_links_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
+-- Name: ai_bom_resource_vulnerability_links ai_bom_resource_vulnerability_links_via_component_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_bom_resource_vulnerability_links
+    ADD CONSTRAINT ai_bom_resource_vulnerability_links_via_component_id_fkey FOREIGN KEY (via_component_id) REFERENCES ${tenantSchema}.inventory_components(id) ON DELETE SET NULL;
+
+
+--
+-- Name: ai_grid_approved_agent_manifests ai_grid_approved_agent_manifests_agent_artifact_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_grid_approved_agent_manifests
+    ADD CONSTRAINT ai_grid_approved_agent_manifests_agent_artifact_id_fkey FOREIGN KEY (agent_artifact_id) REFERENCES ${tenantSchema}.ai_security_artifacts(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ai_grid_approved_agent_manifests ai_grid_approved_agent_manifests_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_grid_approved_agent_manifests
+    ADD CONSTRAINT ai_grid_approved_agent_manifests_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
+-- Name: ai_grid_approved_agent_manifests ai_grid_approved_agent_manifests_version_artifact_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_grid_approved_agent_manifests
+    ADD CONSTRAINT ai_grid_approved_agent_manifests_version_artifact_id_fkey FOREIGN KEY (version_artifact_id) REFERENCES ${tenantSchema}.ai_security_artifacts(id) ON DELETE CASCADE;
 
 
 --
@@ -5667,11 +8346,27 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_budget_config
 
 
 --
+-- Name: ai_grid_capability_manifests ai_grid_capability_manifests_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_grid_capability_manifests
+    ADD CONSTRAINT ai_grid_capability_manifests_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
 -- Name: ai_grid_capability_observations ai_grid_capability_observations_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
 --
 
 ALTER TABLE ONLY ${tenantSchema}.ai_grid_capability_observations
     ADD CONSTRAINT ai_grid_capability_observations_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
+-- Name: ai_grid_component_allowlists ai_grid_component_allowlists_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_grid_component_allowlists
+    ADD CONSTRAINT ai_grid_component_allowlists_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
 
 
 --
@@ -6307,6 +9002,94 @@ ALTER TABLE ONLY ${tenantSchema}.ai_grid_systems
 
 
 --
+-- Name: ai_runtime_evidence_producers ai_runtime_evidence_producers_service_account_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_runtime_evidence_producers
+    ADD CONSTRAINT ai_runtime_evidence_producers_service_account_id_fkey FOREIGN KEY (service_account_id) REFERENCES ${tenantSchema}.service_accounts(id);
+
+
+--
+-- Name: ai_runtime_evidence_producers ai_runtime_evidence_producers_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_runtime_evidence_producers
+    ADD CONSTRAINT ai_runtime_evidence_producers_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
+-- Name: ai_runtime_ingestion_receipts ai_runtime_ingestion_receipts_producer_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_runtime_ingestion_receipts
+    ADD CONSTRAINT ai_runtime_ingestion_receipts_producer_id_fkey FOREIGN KEY (producer_id) REFERENCES ${tenantSchema}.ai_runtime_evidence_producers(producer_id);
+
+
+--
+-- Name: ai_runtime_ingestion_receipts ai_runtime_ingestion_receipts_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_runtime_ingestion_receipts
+    ADD CONSTRAINT ai_runtime_ingestion_receipts_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
+-- Name: ai_runtime_quota_windows ai_runtime_quota_windows_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_runtime_quota_windows
+    ADD CONSTRAINT ai_runtime_quota_windows_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
+-- Name: ai_runtime_source_configurations ai_runtime_source_configurations_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_runtime_source_configurations
+    ADD CONSTRAINT ai_runtime_source_configurations_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
+-- Name: ai_security_artifact_attribute_ownership ai_security_artifact_attribute_ownership_artifact_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_security_artifact_attribute_ownership
+    ADD CONSTRAINT ai_security_artifact_attribute_ownership_artifact_fkey FOREIGN KEY (artifact_id) REFERENCES ${tenantSchema}.ai_security_artifacts(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ai_security_artifact_digest_baselines ai_security_artifact_digest_baselines_artifact_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_security_artifact_digest_baselines
+    ADD CONSTRAINT ai_security_artifact_digest_baselines_artifact_id_fkey FOREIGN KEY (artifact_id) REFERENCES ${tenantSchema}.ai_security_artifacts(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ai_security_artifact_digest_baselines ai_security_artifact_digest_baselines_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_security_artifact_digest_baselines
+    ADD CONSTRAINT ai_security_artifact_digest_baselines_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
+-- Name: ai_security_artifact_digest_observations ai_security_artifact_digest_observations_artifact_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_security_artifact_digest_observations
+    ADD CONSTRAINT ai_security_artifact_digest_observations_artifact_id_fkey FOREIGN KEY (artifact_id) REFERENCES ${tenantSchema}.ai_security_artifacts(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ai_security_artifact_digest_observations ai_security_artifact_digest_observations_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_security_artifact_digest_observations
+    ADD CONSTRAINT ai_security_artifact_digest_observations_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
 -- Name: ai_security_artifact_sources ai_security_artifact_sources_artifact_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
 --
 
@@ -6347,6 +9130,22 @@ ALTER TABLE ONLY ${tenantSchema}.ai_security_azure_credential_profiles
 
 
 --
+-- Name: ai_security_baseline_history ai_security_baseline_history_artifact_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_security_baseline_history
+    ADD CONSTRAINT ai_security_baseline_history_artifact_id_fkey FOREIGN KEY (artifact_id) REFERENCES ${tenantSchema}.ai_security_artifacts(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ai_security_baseline_history ai_security_baseline_history_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_security_baseline_history
+    ADD CONSTRAINT ai_security_baseline_history_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
 -- Name: ai_security_connector_configs ai_security_connector_configs_credential_profile_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
 --
 
@@ -6360,6 +9159,30 @@ ALTER TABLE ONLY ${tenantSchema}.ai_security_connector_configs
 
 ALTER TABLE ONLY ${tenantSchema}.ai_security_connector_configs
     ADD CONSTRAINT ai_security_connector_configs_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
+-- Name: ai_security_connector_feature_flags ai_security_connector_feature_flags_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_security_connector_feature_flags
+    ADD CONSTRAINT ai_security_connector_feature_flags_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
+-- Name: ai_security_copilot_studio_configs ai_security_copilot_studio_configs_credential_profile_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_security_copilot_studio_configs
+    ADD CONSTRAINT ai_security_copilot_studio_configs_credential_profile_id_fkey FOREIGN KEY (credential_profile_id) REFERENCES ${tenantSchema}.ai_security_azure_credential_profiles(id);
+
+
+--
+-- Name: ai_security_copilot_studio_configs ai_security_copilot_studio_configs_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.ai_security_copilot_studio_configs
+    ADD CONSTRAINT ai_security_copilot_studio_configs_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
 
 
 --
@@ -6403,6 +9226,46 @@ ALTER TABLE ONLY ${tenantSchema}.ai_security_snapshot_scopes
 
 
 --
+-- Name: bom_asset_backfill_state bom_asset_backfill_state_asset_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.bom_asset_backfill_state
+    ADD CONSTRAINT bom_asset_backfill_state_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES ${tenantSchema}.assets(id) ON DELETE CASCADE;
+
+
+--
+-- Name: bom_asset_backfill_state bom_asset_backfill_state_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.bom_asset_backfill_state
+    ADD CONSTRAINT bom_asset_backfill_state_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
+-- Name: bom_component_contributions bom_component_contributions_inventory_component_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.bom_component_contributions
+    ADD CONSTRAINT bom_component_contributions_inventory_component_id_fkey FOREIGN KEY (inventory_component_id) REFERENCES ${tenantSchema}.inventory_components(id) ON DELETE CASCADE;
+
+
+--
+-- Name: bom_component_contributions bom_component_contributions_source_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.bom_component_contributions
+    ADD CONSTRAINT bom_component_contributions_source_id_fkey FOREIGN KEY (source_id) REFERENCES ${tenantSchema}.bom_sources(id) ON DELETE CASCADE;
+
+
+--
+-- Name: bom_component_contributions bom_component_contributions_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.bom_component_contributions
+    ADD CONSTRAINT bom_component_contributions_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
 -- Name: bom_component_evidence bom_component_evidence_bom_component_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
 --
 
@@ -6424,6 +9287,14 @@ ALTER TABLE ONLY ${tenantSchema}.bom_component_evidence
 
 ALTER TABLE ONLY ${tenantSchema}.bom_component_evidence
     ADD CONSTRAINT bom_component_evidence_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
+-- Name: bom_component_relationships bom_component_relationships_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.bom_component_relationships
+    ADD CONSTRAINT bom_component_relationships_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
 
 
 --
@@ -6483,11 +9354,51 @@ ALTER TABLE ONLY ${tenantSchema}.bom_components
 
 
 --
+-- Name: bom_ingestion_records bom_ingestion_records_source_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.bom_ingestion_records
+    ADD CONSTRAINT bom_ingestion_records_source_id_fkey FOREIGN KEY (source_id) REFERENCES ${tenantSchema}.bom_sources(id);
+
+
+--
 -- Name: bom_ingestion_records bom_ingestion_records_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
 --
 
 ALTER TABLE ONLY ${tenantSchema}.bom_ingestion_records
     ADD CONSTRAINT bom_ingestion_records_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
+-- Name: bom_source_completeness_assertions bom_source_completeness_assertions_source_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.bom_source_completeness_assertions
+    ADD CONSTRAINT bom_source_completeness_assertions_source_id_fkey FOREIGN KEY (source_id) REFERENCES ${tenantSchema}.bom_sources(id) ON DELETE CASCADE;
+
+
+--
+-- Name: bom_source_completeness_assertions bom_source_completeness_assertions_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.bom_source_completeness_assertions
+    ADD CONSTRAINT bom_source_completeness_assertions_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
+
+
+--
+-- Name: bom_sources bom_sources_asset_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.bom_sources
+    ADD CONSTRAINT bom_sources_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES ${tenantSchema}.assets(id) ON DELETE CASCADE;
+
+
+--
+-- Name: bom_sources bom_sources_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.bom_sources
+    ADD CONSTRAINT bom_sources_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id);
 
 
 --
@@ -7371,6 +10282,118 @@ ALTER TABLE ONLY ${tenantSchema}.org_cve_ai_artifacts
 
 
 --
+-- Name: tenant_ghsa_integrations tenant_ghsa_integrations_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.tenant_ghsa_integrations
+    ADD CONSTRAINT tenant_ghsa_integrations_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id) ON DELETE CASCADE;
+
+
+--
+-- Name: tenant_ghsa_subscriptions tenant_ghsa_subscriptions_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.tenant_ghsa_subscriptions
+    ADD CONSTRAINT tenant_ghsa_subscriptions_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id) ON DELETE CASCADE;
+
+
+--
+-- Name: tenant_github_repository_component_advisories tenant_github_repository_component_adviso_github_source_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.tenant_github_repository_component_advisories
+    ADD CONSTRAINT tenant_github_repository_component_adviso_github_source_id_fkey FOREIGN KEY (github_source_id) REFERENCES ${tenantSchema}.github_sbom_sources(id) ON DELETE CASCADE;
+
+
+--
+-- Name: tenant_github_repository_component_advisories tenant_github_repository_component_advisories_finding_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.tenant_github_repository_component_advisories
+    ADD CONSTRAINT tenant_github_repository_component_advisories_finding_id_fkey FOREIGN KEY (finding_id) REFERENCES ${tenantSchema}.findings(id) ON DELETE SET NULL;
+
+
+--
+-- Name: tenant_github_repository_component_advisories tenant_github_repository_component_advisories_tenant_id_fkey; Type: FK CONSTRAINT; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ONLY ${tenantSchema}.tenant_github_repository_component_advisories
+    ADD CONSTRAINT tenant_github_repository_component_advisories_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES platform.tenants(id) ON DELETE CASCADE;
+
+
+--
+-- Name: ai_agent_deployment_settings; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_agent_deployment_settings ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: ai_agent_execution_cursors; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_agent_execution_cursors ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: ai_agent_execution_events; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_agent_execution_events ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: ai_agent_execution_participants; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_agent_execution_participants ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: ai_agent_execution_receipts; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_agent_execution_receipts ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: ai_agent_executions; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_agent_executions ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: ai_bom_declared_resources; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_bom_declared_resources ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: ai_bom_projection_admissions; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_bom_projection_admissions ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: ai_bom_projection_receipts; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_bom_projection_receipts ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: ai_bom_provenance_facts; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_bom_provenance_facts ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: ai_bom_resource_vulnerability_links; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_bom_resource_vulnerability_links ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: ai_grid_approved_agent_manifests; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_grid_approved_agent_manifests ENABLE ROW LEVEL SECURITY;
+
+--
 -- Name: ai_grid_artifact_classifications; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
 --
 
@@ -7401,10 +10424,22 @@ ALTER TABLE ${tenantSchema}.ai_grid_budget_alerts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ${tenantSchema}.ai_grid_budget_config ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: ai_grid_capability_manifests; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_grid_capability_manifests ENABLE ROW LEVEL SECURITY;
+
+--
 -- Name: ai_grid_capability_observations; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
 --
 
 ALTER TABLE ${tenantSchema}.ai_grid_capability_observations ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: ai_grid_component_allowlists; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_grid_component_allowlists ENABLE ROW LEVEL SECURITY;
 
 --
 -- Name: ai_grid_coverage_gaps; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
@@ -7629,6 +10664,48 @@ ALTER TABLE ${tenantSchema}.ai_grid_system_revisions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ${tenantSchema}.ai_grid_systems ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: ai_runtime_evidence_producers; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_runtime_evidence_producers ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: ai_runtime_ingestion_receipts; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_runtime_ingestion_receipts ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: ai_runtime_quota_windows; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_runtime_quota_windows ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: ai_runtime_source_configurations; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_runtime_source_configurations ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: ai_security_artifact_attribute_ownership; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_security_artifact_attribute_ownership ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: ai_security_artifact_digest_baselines; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_security_artifact_digest_baselines ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: ai_security_artifact_digest_observations; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_security_artifact_digest_observations ENABLE ROW LEVEL SECURITY;
+
+--
 -- Name: ai_security_artifact_sources; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
 --
 
@@ -7647,10 +10724,28 @@ ALTER TABLE ${tenantSchema}.ai_security_artifacts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ${tenantSchema}.ai_security_azure_credential_profiles ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: ai_security_baseline_history; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_security_baseline_history ENABLE ROW LEVEL SECURITY;
+
+--
 -- Name: ai_security_connector_configs; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
 --
 
 ALTER TABLE ${tenantSchema}.ai_security_connector_configs ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: ai_security_connector_feature_flags; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_security_connector_feature_flags ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: ai_security_copilot_studio_configs; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.ai_security_copilot_studio_configs ENABLE ROW LEVEL SECURITY;
 
 --
 -- Name: ai_security_observation_receipts; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
@@ -7713,10 +10808,28 @@ ALTER TABLE ${tenantSchema}.azure_discovery_configs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ${tenantSchema}.azure_discovery_targets ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: bom_asset_backfill_state; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.bom_asset_backfill_state ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: bom_component_contributions; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.bom_component_contributions ENABLE ROW LEVEL SECURITY;
+
+--
 -- Name: bom_component_evidence; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
 --
 
 ALTER TABLE ${tenantSchema}.bom_component_evidence ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: bom_component_relationships; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.bom_component_relationships ENABLE ROW LEVEL SECURITY;
 
 --
 -- Name: bom_component_vulnerability_links; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
@@ -7741,6 +10854,18 @@ ALTER TABLE ${tenantSchema}.bom_components ENABLE ROW LEVEL SECURITY;
 --
 
 ALTER TABLE ${tenantSchema}.bom_ingestion_records ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: bom_source_completeness_assertions; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.bom_source_completeness_assertions ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: bom_sources; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.bom_sources ENABLE ROW LEVEL SECURITY;
 
 --
 -- Name: campaign_activities; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
@@ -8037,6 +11162,108 @@ ALTER TABLE ${tenantSchema}.software_inventory_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ${tenantSchema}.suppression_rules ENABLE ROW LEVEL SECURITY;
 
 --
+-- Name: tenant_ghsa_integrations; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.tenant_ghsa_integrations ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: tenant_ghsa_subscriptions; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.tenant_ghsa_subscriptions ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: tenant_github_repository_component_advisories; Type: ROW SECURITY; Schema: ${tenantSchema}; Owner: -
+--
+
+ALTER TABLE ${tenantSchema}.tenant_github_repository_component_advisories ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: ai_agent_deployment_settings tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_agent_deployment_settings USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_agent_execution_cursors tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_agent_execution_cursors USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_agent_execution_events tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_agent_execution_events USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_agent_execution_participants tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_agent_execution_participants USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_agent_execution_receipts tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_agent_execution_receipts USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_agent_executions tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_agent_executions USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_bom_declared_resources tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_bom_declared_resources USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_bom_projection_admissions tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_bom_projection_admissions USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_bom_projection_receipts tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_bom_projection_receipts USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_bom_provenance_facts tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_bom_provenance_facts USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_bom_resource_vulnerability_links tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_bom_resource_vulnerability_links USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_approved_agent_manifests tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_grid_approved_agent_manifests USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
 -- Name: ai_grid_artifact_classifications tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
@@ -8072,10 +11299,24 @@ CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_grid_budget_config USING ((
 
 
 --
+-- Name: ai_grid_capability_manifests tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_grid_capability_manifests USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
 -- Name: ai_grid_capability_observations tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
 CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_grid_capability_observations USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_component_allowlists tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_grid_component_allowlists USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
 
 
 --
@@ -8338,6 +11579,55 @@ CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_grid_systems USING ((tenant
 
 
 --
+-- Name: ai_runtime_evidence_producers tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_runtime_evidence_producers USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_runtime_ingestion_receipts tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_runtime_ingestion_receipts USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_runtime_quota_windows tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_runtime_quota_windows USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_runtime_source_configurations tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_runtime_source_configurations USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_security_artifact_attribute_ownership tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_security_artifact_attribute_ownership USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_security_artifact_digest_baselines tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_security_artifact_digest_baselines USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_security_artifact_digest_observations tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_security_artifact_digest_observations USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
 -- Name: ai_security_artifact_sources tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
@@ -8359,10 +11649,31 @@ CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_security_azure_credential_p
 
 
 --
+-- Name: ai_security_baseline_history tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_security_baseline_history USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
 -- Name: ai_security_connector_configs tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
 CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_security_connector_configs USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_security_connector_feature_flags tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_security_connector_feature_flags USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_security_copilot_studio_configs tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_security_copilot_studio_configs USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
 
 
 --
@@ -8390,14 +11701,14 @@ CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_security_snapshot_scopes US
 -- Name: applicability_assessments tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.applicability_assessments USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.applicability_assessments USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: assets tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.assets USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.assets USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
@@ -8411,203 +11722,238 @@ CREATE POLICY tenant_isolation ON ${tenantSchema}.audit_events USING (((tenant_i
 -- Name: aws_discovery_configs tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.aws_discovery_configs USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.aws_discovery_configs USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: aws_discovery_targets tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.aws_discovery_targets USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.aws_discovery_targets USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: azure_discovery_configs tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.azure_discovery_configs USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.azure_discovery_configs USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: azure_discovery_targets tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.azure_discovery_targets USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.azure_discovery_targets USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+
+
+--
+-- Name: bom_asset_backfill_state tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.bom_asset_backfill_state USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: bom_component_contributions tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.bom_component_contributions USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
 
 
 --
 -- Name: bom_component_evidence tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.bom_component_evidence USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.bom_component_evidence USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+
+
+--
+-- Name: bom_component_relationships tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.bom_component_relationships USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
 
 
 --
 -- Name: bom_component_vulnerability_links tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.bom_component_vulnerability_links USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.bom_component_vulnerability_links USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: bom_component_workflows tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.bom_component_workflows USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.bom_component_workflows USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: bom_components tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.bom_components USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.bom_components USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: bom_ingestion_records tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.bom_ingestion_records USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.bom_ingestion_records USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+
+
+--
+-- Name: bom_source_completeness_assertions tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.bom_source_completeness_assertions USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: bom_sources tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.bom_sources USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
 
 
 --
 -- Name: campaign_activities tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.campaign_activities USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.campaign_activities USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: campaign_delivery_attempts tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.campaign_delivery_attempts USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.campaign_delivery_attempts USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: campaign_exceptions tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.campaign_exceptions USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.campaign_exceptions USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: campaign_notes tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.campaign_notes USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.campaign_notes USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: campaign_notify_groups tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.campaign_notify_groups USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.campaign_notify_groups USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: campaign_vulnerabilities tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.campaign_vulnerabilities USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.campaign_vulnerabilities USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: campaign_watchlist_entries tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.campaign_watchlist_entries USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.campaign_watchlist_entries USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: campaigns tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.campaigns USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.campaigns USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: cbom_components tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.cbom_components USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.cbom_components USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: cbom_posture_summary tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.cbom_posture_summary USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.cbom_posture_summary USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: cbom_risk_findings tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.cbom_risk_findings USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.cbom_risk_findings USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: ci_aliases tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.ci_aliases USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ci_aliases USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: cis tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.cis USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.cis USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: component_vulnerability_states tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.component_vulnerability_states USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.component_vulnerability_states USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: dashboard_noise_reduction_projection tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.dashboard_noise_reduction_projection USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.dashboard_noise_reduction_projection USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: demo_invites tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.demo_invites USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.demo_invites USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: discovery_models tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.discovery_models USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.discovery_models USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: finding_comments tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.finding_comments USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.finding_comments USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: finding_delta_queue tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.finding_delta_queue USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.finding_delta_queue USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: finding_events tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.finding_events USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.finding_events USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
@@ -8642,182 +11988,994 @@ CREATE POLICY tenant_isolation ON ${tenantSchema}.finding_workspace_projection_s
 -- Name: findings tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.findings USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.findings USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: fix_records tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.fix_records USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.fix_records USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: github_sbom_sources tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.github_sbom_sources USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.github_sbom_sources USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: ingestion_jobs tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.ingestion_jobs USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ingestion_jobs USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: inventory_component_cpe_map tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.inventory_component_cpe_map USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.inventory_component_cpe_map USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: inventory_components tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.inventory_components USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.inventory_components USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: investigation_activities tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.investigation_activities USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.investigation_activities USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: investigation_attachments tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.investigation_attachments USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.investigation_attachments USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: investigation_runbook tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.investigation_runbook USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.investigation_runbook USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: investigations tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.investigations USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.investigations USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: org_cve_ai_artifacts tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.org_cve_ai_artifacts USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.org_cve_ai_artifacts USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: org_cve_records tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.org_cve_records USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.org_cve_records USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: ownership_rules tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.ownership_rules USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.ownership_rules USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: quality_issue_projection tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.quality_issue_projection USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.quality_issue_projection USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: risk_policies tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.risk_policies USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.risk_policies USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: sbom_uploads tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.sbom_uploads USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.sbom_uploads USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: sccm_cmdb_configs tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.sccm_cmdb_configs USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.sccm_cmdb_configs USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: service_accounts tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.service_accounts USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.service_accounts USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: servicenow_cmdb_configs tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.servicenow_cmdb_configs USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.servicenow_cmdb_configs USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: software_identity_cluster_link tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.software_identity_cluster_link USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.software_identity_cluster_link USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: software_identity_metadata tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.software_identity_metadata USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.software_identity_metadata USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: software_identity_summary tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.software_identity_summary USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.software_identity_summary USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: software_instances tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.software_instances USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.software_instances USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: software_inventory_items tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.software_inventory_items USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.software_inventory_items USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
 
 
 --
 -- Name: suppression_rules tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.suppression_rules USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.suppression_rules USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+
+
+--
+-- Name: tenant_ghsa_integrations tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.tenant_ghsa_integrations USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: tenant_ghsa_subscriptions tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.tenant_ghsa_subscriptions USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: tenant_github_repository_component_advisories tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_isolation ON ${tenantSchema}.tenant_github_repository_component_advisories USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
 
 
 --
 -- Name: vulnerability_source_filter_configs tenant_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
 --
 
-CREATE POLICY tenant_isolation ON ${tenantSchema}.vulnerability_source_filter_configs USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = 'e5fe0d29-1d64-4175-8ce6-c34f42b214cc'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+CREATE POLICY tenant_isolation ON ${tenantSchema}.vulnerability_source_filter_configs USING ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid))) WITH CHECK ((((NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid = '${tenantId}'::uuid) AND (tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)));
+
+
+--
+-- Name: ai_grid_artifact_classifications tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_artifact_classifications USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_assessments tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_assessments USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_budget_admissions tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_budget_admissions USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_budget_alerts tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_budget_alerts USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_budget_config tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_budget_config USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_capability_observations tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_capability_observations USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_coverage_gaps tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_coverage_gaps USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_current_coverage_artifacts tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_current_coverage_artifacts USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_current_coverage_state tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_current_coverage_state USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_current_expected_candidates tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_current_expected_candidates USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_evidence_holds tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_evidence_holds USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_exposure_associations tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_exposure_associations USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_exposure_dispositions tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_exposure_dispositions USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_exposure_executions tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_exposure_executions USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_exposure_observations tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_exposure_observations USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_exposure_paths tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_exposure_paths USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_facts tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_facts USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_host_context_facts tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_host_context_facts USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_outbox tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_outbox USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_owner_history tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_owner_history USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_policy_artifact_overrides tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_policy_artifact_overrides USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_policy_parameters tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_policy_parameters USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_policy_readiness tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_policy_readiness USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_policy_scopes tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_policy_scopes USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_policy_selection_history tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_policy_selection_history USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_policy_selections tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_policy_selections USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_relationship_snapshots tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_relationship_snapshots USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_retention_decisions tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_retention_decisions USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_retention_policies tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_retention_policies USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_retention_purge_audit tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_retention_purge_audit USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_run_metrics tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_run_metrics USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_run_scope_metrics tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_run_scope_metrics USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_scan_cadence_rules tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_scan_cadence_rules USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_setup_actions tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_setup_actions USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_snapshot_bodies tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_snapshot_bodies USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_snapshot_manifests tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_snapshot_manifests USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_system_lineage_events tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_system_lineage_events USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_system_lineage_participants tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_system_lineage_participants USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_system_membership_decisions tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_system_membership_decisions USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_system_membership_overrides tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_system_membership_overrides USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_system_memberships tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_system_memberships USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_system_revisions tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_system_revisions USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_grid_systems tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_grid_systems USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_security_artifact_sources tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_security_artifact_sources USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_security_artifacts tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_security_artifacts USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_security_azure_credential_profiles tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_security_azure_credential_profiles USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_security_connector_configs tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_security_connector_configs USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_security_observation_receipts tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_security_observation_receipts USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_security_relationships tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_security_relationships USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ai_security_snapshot_scopes tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ai_security_snapshot_scopes USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: applicability_assessments tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.applicability_assessments USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: assets tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.assets USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: audit_events tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.audit_events USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: aws_discovery_configs tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.aws_discovery_configs USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: aws_discovery_targets tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.aws_discovery_targets USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: azure_discovery_configs tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.azure_discovery_configs USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: azure_discovery_targets tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.azure_discovery_targets USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: bom_component_evidence tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.bom_component_evidence USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: bom_component_vulnerability_links tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.bom_component_vulnerability_links USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: bom_component_workflows tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.bom_component_workflows USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: bom_components tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.bom_components USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: bom_ingestion_records tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.bom_ingestion_records USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: campaign_activities tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.campaign_activities USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: campaign_delivery_attempts tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.campaign_delivery_attempts USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: campaign_exceptions tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.campaign_exceptions USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: campaign_notes tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.campaign_notes USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: campaign_notify_groups tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.campaign_notify_groups USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: campaign_vulnerabilities tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.campaign_vulnerabilities USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: campaign_watchlist_entries tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.campaign_watchlist_entries USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: campaigns tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.campaigns USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: cbom_components tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.cbom_components USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: cbom_posture_summary tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.cbom_posture_summary USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: cbom_risk_findings tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.cbom_risk_findings USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ci_aliases tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ci_aliases USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: cis tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.cis USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: component_vulnerability_states tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.component_vulnerability_states USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: dashboard_noise_reduction_projection tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.dashboard_noise_reduction_projection USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: demo_invites tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.demo_invites USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: demo_requests tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.demo_requests USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: discovery_models tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.discovery_models USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: finding_comments tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.finding_comments USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: finding_delta_queue tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.finding_delta_queue USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: finding_events tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.finding_events USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: finding_list_projection tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.finding_list_projection USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: finding_reviews tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.finding_reviews USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: finding_subjects tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.finding_subjects USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: finding_workspace_projection_status tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.finding_workspace_projection_status USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: findings tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.findings USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: fix_records tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.fix_records USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: github_sbom_sources tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.github_sbom_sources USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ingestion_jobs tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ingestion_jobs USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: inventory_component_cpe_map tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.inventory_component_cpe_map USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: inventory_components tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.inventory_components USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: investigation_activities tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.investigation_activities USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: investigation_attachments tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.investigation_attachments USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: investigation_runbook tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.investigation_runbook USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: investigations tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.investigations USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: org_cve_ai_artifacts tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.org_cve_ai_artifacts USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: org_cve_records tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.org_cve_records USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: ownership_rules tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.ownership_rules USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: quality_issue_projection tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.quality_issue_projection USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: risk_policies tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.risk_policies USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: sbom_uploads tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.sbom_uploads USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: sccm_cmdb_configs tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.sccm_cmdb_configs USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: service_accounts tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.service_accounts USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: servicenow_cmdb_configs tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.servicenow_cmdb_configs USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: software_identity_cluster_link tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.software_identity_cluster_link USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: software_identity_metadata tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.software_identity_metadata USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: software_identity_summary tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.software_identity_summary USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: software_instances tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.software_instances USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: software_inventory_items tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.software_inventory_items USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: suppression_rules tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.suppression_rules USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
+
+
+--
+-- Name: vulnerability_source_filter_configs tenant_runtime_isolation; Type: POLICY; Schema: ${tenantSchema}; Owner: -
+--
+
+CREATE POLICY tenant_runtime_isolation ON ${tenantSchema}.vulnerability_source_filter_configs USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id'::text, true), ''::text))::uuid));
 
 
 --
@@ -8828,359 +12986,4 @@ ALTER TABLE ${tenantSchema}.vulnerability_source_filter_configs ENABLE ROW LEVEL
 
 --
 -- PostgreSQL database dump complete
--- The baseline is installed by the schema owner before a tenant session exists.
--- Temporarily let that owner bypass the policy while it creates the default
--- budget row; the table is forced back to RLS immediately afterwards.
-ALTER TABLE ${tenantSchema}.ai_grid_budget_config NO FORCE ROW LEVEL SECURITY;
-
-INSERT INTO ${tenantSchema}.ai_grid_budget_config
-    (tenant_id, enforcement_mode, daily_scan_limit, daily_provider_api_call_limit,
-     daily_new_snapshot_bytes_limit, daily_processing_ms_limit, retained_snapshot_bytes_limit,
-     warning_ratio, updated_by, reason)
-VALUES ((SELECT id FROM platform.tenants WHERE schema_name = '${tenantSchema}' LIMIT 1),
-        'OBSERVE', 24, 10000, 1073741824, 3600000, 10737418240,
-        0.80, 'ai-grid-bootstrap', 'Initial observable AI Grid budget')
-ON CONFLICT (tenant_id) DO NOTHING;
-
-ALTER TABLE ${tenantSchema}.ai_grid_budget_config FORCE ROW LEVEL SECURITY;
-
--- PostgreSQL database dump complete
--- Add tenant-parameterized access for newly provisioned schemas. The dump's
--- default-workspace policies remain for compatibility; this permissive policy
--- makes the same schema safe for its actual platform tenant ID.
-DO $$
-DECLARE table_record record;
-BEGIN
-    FOR table_record IN
-        SELECT table_name
-          FROM information_schema.columns
-         WHERE table_schema = '${tenantSchema}'
-           AND column_name = 'tenant_id'
-    LOOP
-        EXECUTE format(
-            'CREATE POLICY tenant_runtime_isolation ON %I.%I '
-            'USING (tenant_id = NULLIF(current_setting(''app.current_tenant_id'', true), '''')::uuid) '
-            'WITH CHECK (tenant_id = NULLIF(current_setting(''app.current_tenant_id'', true), '''')::uuid)',
-            '${tenantSchema}', table_record.table_name);
-    END LOOP;
-END $$;
 --
--- Tenant-side policy state records the platform baseline separately from tenant overrides.
-ALTER TABLE ${tenantSchema}.ai_grid_policy_selections
-    ADD COLUMN IF NOT EXISTS platform_policy_version varchar(32),
-    ADD COLUMN IF NOT EXISTS platform_default_selection varchar(32),
-    ADD COLUMN IF NOT EXISTS configuration_source varchar(32) NOT NULL DEFAULT 'PLATFORM_DEFAULT',
-    ADD COLUMN IF NOT EXISTS tenant_configured_at timestamp with time zone;
-
-ALTER TABLE ${tenantSchema}.ai_grid_policy_selections
-    ADD CONSTRAINT ai_grid_policy_selection_source_check
-    CHECK (configuration_source IN ('PLATFORM_DEFAULT', 'TENANT_OVERRIDE'));
-
-COMMENT ON COLUMN ${tenantSchema}.ai_grid_policy_selections.configuration_source IS 'Platform default or an explicit tenant override; platform policy metadata remains read-only here.';
-
--- Microsoft connector gap-closure plumbing. Behaviour remains disabled until source gates pass.
-CREATE TABLE ${tenantSchema}.ai_agent_executions (
-    id uuid PRIMARY KEY,
-    tenant_id uuid NOT NULL REFERENCES platform.tenants(id),
-    provider varchar(64) NOT NULL,
-    provider_execution_id varchar(512) NOT NULL,
-    agent_artifact_id uuid REFERENCES ${tenantSchema}.ai_security_artifacts(id),
-    source varchar(64) NOT NULL,
-    started_at timestamptz,
-    completed_at timestamptz,
-    status varchar(32) NOT NULL,
-    outcome_category varchar(64),
-    approval_state varchar(64),
-    policy_state varchar(64),
-    classification varchar(64),
-    api_version varchar(64),
-    token_count bigint,
-    latency_ms bigint,
-    retry_count integer,
-    spend_micros bigint,
-    evidence_time timestamptz NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (tenant_id, provider, provider_execution_id)
-);
-CREATE INDEX idx_ai_agent_executions_agent_time ON ${tenantSchema}.ai_agent_executions(agent_artifact_id, evidence_time DESC);
-
-CREATE TABLE ${tenantSchema}.ai_agent_execution_events (
-    id uuid PRIMARY KEY,
-    tenant_id uuid NOT NULL REFERENCES platform.tenants(id),
-    execution_id uuid NOT NULL REFERENCES ${tenantSchema}.ai_agent_executions(id) ON DELETE CASCADE,
-    sequence bigint NOT NULL,
-    event_time timestamptz NOT NULL,
-    event_type varchar(64) NOT NULL,
-    status varchar(32),
-    classification varchar(64),
-    evidence_time timestamptz NOT NULL,
-    UNIQUE (tenant_id, execution_id, sequence)
-);
-
-CREATE TABLE ${tenantSchema}.ai_agent_execution_cursors (
-    id uuid PRIMARY KEY,
-    tenant_id uuid NOT NULL REFERENCES platform.tenants(id),
-    connector_id uuid NOT NULL,
-    source varchar(64) NOT NULL,
-    scope_key varchar(512) NOT NULL,
-    provider_timestamp timestamptz,
-    provider_stable_id varchar(512),
-    lookback_days integer NOT NULL DEFAULT 30,
-    overlap_days integer NOT NULL DEFAULT 3,
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (tenant_id, connector_id, source, scope_key)
-);
-
-CREATE TABLE ${tenantSchema}.ai_agent_execution_receipts (
-    id uuid PRIMARY KEY,
-    tenant_id uuid NOT NULL REFERENCES platform.tenants(id),
-    connector_id uuid NOT NULL,
-    source varchar(64) NOT NULL,
-    scope_key varchar(512) NOT NULL,
-    idempotency_key varchar(512) NOT NULL,
-    content_hash varchar(128) NOT NULL,
-    accepted_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (tenant_id, idempotency_key)
-);
-
-CREATE TABLE ${tenantSchema}.ai_security_connector_feature_flags (
-    tenant_id uuid NOT NULL REFERENCES platform.tenants(id),
-    feature_key varchar(128) NOT NULL,
-    enabled boolean NOT NULL DEFAULT false,
-    kill_switch boolean NOT NULL DEFAULT false,
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (tenant_id, feature_key)
-);
-
-ALTER TABLE ${tenantSchema}.ai_agent_executions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ${tenantSchema}.ai_agent_execution_events ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ${tenantSchema}.ai_agent_execution_cursors ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ${tenantSchema}.ai_agent_execution_receipts ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ${tenantSchema}.ai_security_connector_feature_flags ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ${tenantSchema}.ai_agent_executions FORCE ROW LEVEL SECURITY;
-ALTER TABLE ${tenantSchema}.ai_agent_execution_events FORCE ROW LEVEL SECURITY;
-ALTER TABLE ${tenantSchema}.ai_agent_execution_cursors FORCE ROW LEVEL SECURITY;
-ALTER TABLE ${tenantSchema}.ai_agent_execution_receipts FORCE ROW LEVEL SECURITY;
-ALTER TABLE ${tenantSchema}.ai_security_connector_feature_flags FORCE ROW LEVEL SECURITY;
-
-CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_agent_executions
-    USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)))
-    WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)));
-CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_agent_execution_events
-    USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)))
-    WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)));
-CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_agent_execution_cursors
-    USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)))
-    WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)));
-CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_agent_execution_receipts
-    USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)))
-    WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)));
-CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_security_connector_feature_flags
-    USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)))
-    WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)));
--- Runtime execution identifiers are tenant-scoped HMAC digests, never provider plaintext.
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM ${tenantSchema}.ai_agent_executions)
-       OR EXISTS (SELECT 1 FROM ${tenantSchema}.ai_agent_execution_cursors)
-       OR EXISTS (SELECT 1 FROM ${tenantSchema}.ai_agent_execution_receipts) THEN
-        RAISE EXCEPTION 'runtime metadata tables must be empty before the HMAC identity boundary is installed';
-    END IF;
-END $$;
-
-ALTER TABLE ${tenantSchema}.ai_agent_executions
-    RENAME COLUMN provider_execution_id TO provider_execution_digest;
-
-ALTER TABLE ${tenantSchema}.ai_agent_execution_cursors
-    RENAME COLUMN provider_stable_id TO provider_stable_digest;
-
-ALTER TABLE ${tenantSchema}.ai_agent_executions
-    ADD COLUMN IF NOT EXISTS digest_key_version varchar(64) NOT NULL DEFAULT 'v1';
-
-ALTER TABLE ${tenantSchema}.ai_agent_executions
-    DROP CONSTRAINT IF EXISTS ai_agent_executions_tenant_id_provider_provider_execution_id_key;
-
-ALTER TABLE ${tenantSchema}.ai_agent_executions
-    ADD CONSTRAINT ai_agent_executions_tenant_provider_execution_digest_key
-        UNIQUE (tenant_id, provider, provider_execution_digest, digest_key_version);
-
-CREATE INDEX IF NOT EXISTS idx_ai_agent_executions_source_time
-    ON ${tenantSchema}.ai_agent_executions(source, evidence_time DESC);
-CREATE TABLE ${tenantSchema}.ai_security_copilot_studio_configs (
-    id uuid PRIMARY KEY,
-    tenant_id uuid NOT NULL REFERENCES platform.tenants(id),
-    organization_url varchar(512) NOT NULL,
-    credential_profile_id uuid NOT NULL REFERENCES ${tenantSchema}.ai_security_azure_credential_profiles(id),
-    discovery_enabled boolean NOT NULL DEFAULT false,
-    execution_enabled boolean NOT NULL DEFAULT false,
-    kill_switch boolean NOT NULL DEFAULT false,
-    schedule_cron varchar(128) NOT NULL DEFAULT '0 0 * * * *',
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (tenant_id, organization_url)
-);
-ALTER TABLE ${tenantSchema}.ai_security_copilot_studio_configs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ${tenantSchema}.ai_security_copilot_studio_configs FORCE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_security_copilot_studio_configs
-    USING ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)))
-    WITH CHECK ((tenant_id = (NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)));
--- Append-only closure for AI runtime correlation, digest approvals, and connector rollout controls.
-CREATE TABLE ${tenantSchema}.ai_security_artifact_digest_baselines (
-    id uuid PRIMARY KEY,
-    tenant_id uuid NOT NULL REFERENCES platform.tenants(id),
-    artifact_id uuid NOT NULL REFERENCES ${tenantSchema}.ai_security_artifacts(id) ON DELETE CASCADE,
-    digest_kind varchar(64) NOT NULL,
-    algorithm varchar(64) NOT NULL,
-    key_version varchar(64) NOT NULL,
-    approved_digest varchar(256) NOT NULL,
-    approval_status varchar(32) NOT NULL,
-    approved_by varchar(255),
-    approved_at timestamptz,
-    revoked_by varchar(255),
-    revoked_at timestamptz,
-    source_run_id uuid,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT ai_security_digest_baseline_kind_check
-        CHECK (digest_kind IN ('PROMPT', 'TOOL_DEFINITION')),
-    CONSTRAINT ai_security_digest_baseline_status_check
-        CHECK (approval_status IN ('APPROVED', 'REVOKED')),
-    UNIQUE (tenant_id, artifact_id, digest_kind)
-);
-
-ALTER TABLE ${tenantSchema}.ai_security_artifact_digest_baselines ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ${tenantSchema}.ai_security_artifact_digest_baselines FORCE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_security_artifact_digest_baselines
-    USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
-    WITH CHECK (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
-
-CREATE TABLE ${tenantSchema}.ai_security_artifact_digest_observations (
-    tenant_id uuid NOT NULL REFERENCES platform.tenants(id),
-    artifact_id uuid NOT NULL REFERENCES ${tenantSchema}.ai_security_artifacts(id) ON DELETE CASCADE,
-    digest_kind varchar(64) NOT NULL,
-    algorithm varchar(64) NOT NULL,
-    key_version varchar(64) NOT NULL,
-    observed_digest varchar(256) NOT NULL,
-    comparison_outcome varchar(64) NOT NULL,
-    source_run_id uuid NOT NULL,
-    observed_at timestamptz NOT NULL,
-    PRIMARY KEY (tenant_id, artifact_id, digest_kind),
-    CHECK (digest_kind IN ('PROMPT', 'TOOL_DEFINITION')),
-    CHECK (comparison_outcome IN ('UNAPPROVED', 'UNCHANGED', 'CHANGED_AFTER_APPROVAL',
-                                  'BASELINE_UNKNOWN_REAPPROVAL_REQUIRED'))
-);
-ALTER TABLE ${tenantSchema}.ai_security_artifact_digest_observations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ${tenantSchema}.ai_security_artifact_digest_observations FORCE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_security_artifact_digest_observations
-    USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
-    WITH CHECK (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
-
-ALTER TABLE ${tenantSchema}.ai_agent_executions
-    ADD COLUMN agent_version_artifact_id uuid REFERENCES ${tenantSchema}.ai_security_artifacts(id),
-    ADD COLUMN provider_agent_digest varchar(256),
-    ADD COLUMN provider_agent_version_digest varchar(256),
-    ADD COLUMN correlation_status varchar(32) NOT NULL DEFAULT 'UNRESOLVED',
-    ADD COLUMN correlation_diagnostic varchar(128),
-    ADD CONSTRAINT ai_agent_execution_correlation_status_check
-        CHECK (correlation_status IN ('RESOLVED', 'UNRESOLVED', 'NOT_APPLICABLE'));
-
-ALTER TABLE ${tenantSchema}.ai_agent_execution_receipts
-    ADD COLUMN execution_id uuid REFERENCES ${tenantSchema}.ai_agent_executions(id) ON DELETE CASCADE;
-
-CREATE TABLE ${tenantSchema}.ai_agent_execution_participants (
-    id uuid PRIMARY KEY,
-    tenant_id uuid NOT NULL REFERENCES platform.tenants(id),
-    execution_id uuid NOT NULL REFERENCES ${tenantSchema}.ai_agent_executions(id) ON DELETE CASCADE,
-    artifact_id uuid NOT NULL REFERENCES ${tenantSchema}.ai_security_artifacts(id) ON DELETE CASCADE,
-    participant_role varchar(32) NOT NULL,
-    evidence_time timestamptz NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT ai_agent_execution_participant_role_check
-        CHECK (participant_role IN ('MODEL', 'TOOL', 'PROMPT', 'COMPONENT')),
-    UNIQUE (tenant_id, execution_id, artifact_id, participant_role)
-);
-
-ALTER TABLE ${tenantSchema}.ai_agent_execution_participants ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ${tenantSchema}.ai_agent_execution_participants FORCE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_agent_execution_participants
-    USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
-    WITH CHECK (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
-CREATE INDEX idx_ai_agent_execution_participants_execution
-    ON ${tenantSchema}.ai_agent_execution_participants(execution_id, participant_role);
-
-ALTER TABLE ${tenantSchema}.ai_security_connector_feature_flags
-    ADD COLUMN updated_by varchar(255),
-    ADD COLUMN created_at timestamptz NOT NULL DEFAULT now();
-
-ALTER TABLE ${tenantSchema}.ai_security_copilot_studio_configs
-    ADD COLUMN allowed_dataverse_hosts_json jsonb NOT NULL DEFAULT '[]'::jsonb;
-
-CREATE INDEX idx_ai_security_digest_baselines_artifact
-    ON ${tenantSchema}.ai_security_artifact_digest_baselines(artifact_id, approval_status);
--- Performance-only indexes for the virtual runtime graph overlay. V7 remains functionally compatible.
-CREATE INDEX idx_ai_agent_executions_tenant_agent_evidence
-    ON ${tenantSchema}.ai_agent_executions(tenant_id, agent_artifact_id, evidence_time DESC);
-
-CREATE INDEX idx_ai_agent_executions_tenant_version_evidence
-    ON ${tenantSchema}.ai_agent_executions(tenant_id, agent_version_artifact_id, evidence_time DESC)
-    WHERE agent_version_artifact_id IS NOT NULL;
-
-CREATE INDEX idx_ai_agent_execution_participants_artifact_evidence
-    ON ${tenantSchema}.ai_agent_execution_participants(tenant_id, artifact_id, evidence_time DESC, execution_id);
--- migration-guard: tenant-only
-ALTER TABLE ${tenantSchema}.ai_grid_capability_observations
-    ADD COLUMN IF NOT EXISTS reason_code character varying(64),
-    ADD COLUMN IF NOT EXISTS evidence_scopes_json jsonb NOT NULL DEFAULT '[]'::jsonb;
-
-COMMENT ON COLUMN ${tenantSchema}.ai_grid_capability_observations.reason_code IS
-    'Stable connector outcome reason; not an inferred provider capability.';
-COMMENT ON COLUMN ${tenantSchema}.ai_grid_capability_observations.evidence_scopes_json IS
-    'Scope keys that directly produced this capability observation.';
--- migration-guard: tenant-only
-CREATE TABLE IF NOT EXISTS ${tenantSchema}.ai_security_artifact_attribute_ownership (
-    tenant_id uuid NOT NULL,
-    artifact_id uuid NOT NULL,
-    scope_key character varying(255) NOT NULL,
-    attribute_key character varying(255) NOT NULL,
-    observed_at timestamp with time zone NOT NULL,
-    CONSTRAINT ai_security_artifact_attribute_ownership_pkey
-        PRIMARY KEY (tenant_id, artifact_id, scope_key, attribute_key),
-    CONSTRAINT ai_security_artifact_attribute_ownership_artifact_fkey
-        FOREIGN KEY (artifact_id) REFERENCES ${tenantSchema}.ai_security_artifacts(id) ON DELETE CASCADE
-);
-
-ALTER TABLE ${tenantSchema}.ai_security_artifact_attribute_ownership ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ${tenantSchema}.ai_security_artifact_attribute_ownership FORCE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation
-    ON ${tenantSchema}.ai_security_artifact_attribute_ownership
-    USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
-    WITH CHECK (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
-
-CREATE TABLE ${tenantSchema}.ai_grid_capability_manifests (
-    id uuid PRIMARY KEY,
-    tenant_id uuid NOT NULL REFERENCES platform.tenants(id),
-    run_id uuid NOT NULL,
-    provider varchar(32) NOT NULL,
-    connector_id uuid NOT NULL,
-    account_id varchar(255) NOT NULL,
-    region varchar(128) NOT NULL,
-    capability_id varchar(128) NOT NULL,
-    required_scope_keys_json jsonb NOT NULL,
-    status varchar(32) NOT NULL DEFAULT 'REGISTERED',
-    created_at timestamptz NOT NULL DEFAULT now(),
-    finalized_at timestamptz,
-    CONSTRAINT ai_grid_capability_manifests_status_check
-        CHECK (status IN ('REGISTERED','FINALIZED')),
-    CONSTRAINT ai_grid_capability_manifests_run_capability_region_key
-        UNIQUE (tenant_id, run_id, provider, account_id, region, capability_id)
-);
-
-CREATE INDEX idx_ai_grid_capability_manifests_unfinished
-    ON ${tenantSchema}.ai_grid_capability_manifests (created_at)
-    WHERE status = 'REGISTERED';
-
-ALTER TABLE ${tenantSchema}.ai_grid_capability_manifests ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ${tenantSchema}.ai_grid_capability_manifests FORCE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation ON ${tenantSchema}.ai_grid_capability_manifests
-    USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
-    WITH CHECK (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);

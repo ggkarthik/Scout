@@ -125,7 +125,7 @@ describe('AiPoliciesPage', () => {
     // Policies from all providers share one table; provider is shown in its column.
     expect(screen.queryByRole('heading', { name: 'AWS policies' })).not.toBeInTheDocument();
     // Nine policy columns plus five framework-coverage and nine telemetry columns.
-    expect(screen.getAllByRole('columnheader')).toHaveLength(23);
+    expect(screen.getAllByRole('columnheader')).toHaveLength(14);
     expect(screen.getByRole('checkbox', { name: 'Select Sensitive-data agent lacks PII guardrail' })).toBeInTheDocument();
     // A conditional-capability policy is flagged, but metadata is no longer inline.
     expect(screen.getByText(/needs capability/)).toBeInTheDocument();
@@ -150,20 +150,12 @@ describe('AiPoliciesPage', () => {
     expect(screen.queryByText(/Unknown 2/)).not.toBeInTheDocument();
   });
 
-  it('shows a schema coverage gap as not assessed instead of an API error', async () => {
-    vi.mocked(api.getAiRuntimeTelemetryReadiness).mockResolvedValue({
-      windowStart: '2026-01-01T00:00:00Z', windowEnd: '2026-01-15T00:00:00Z', windowDays: 14,
-      minimumFillRate: 0.95, minimumAgentCorrelationRate: 0.9, minimumVersionCorrelationRate: 0.8,
-      minimumExecutionsPerProvider: 100, minimumVersionApplicableExecutions: 50,
-      available: false, program2EntryGateMet: false,
-      blockers: ['TENANT_SCHEMA_UPGRADE_REQUIRED'], providers: [],
-    });
+  it('does not request or show runtime telemetry readiness', async () => {
     vi.spyOn(api, 'listAiGridPolicies').mockResolvedValue([buildPolicy()]);
     renderPoliciesPage();
-
-    expect(await screen.findByText('Not assessed')).toBeInTheDocument();
-    expect(screen.getByText(/required tenant schema upgrade/)).toBeInTheDocument();
-    expect(screen.queryByText(/could not be loaded/)).not.toBeInTheDocument();
+    await screen.findByText(buildPolicy().name);
+    expect(api.getAiRuntimeTelemetryReadiness).not.toHaveBeenCalled();
+    expect(screen.queryByText('Runtime telemetry gate')).not.toBeInTheDocument();
   });
 
   it('turns internal framework blocker codes into customer-readable explanations', async () => {

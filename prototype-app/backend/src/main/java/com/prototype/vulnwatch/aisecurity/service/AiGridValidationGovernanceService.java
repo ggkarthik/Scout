@@ -505,6 +505,7 @@ public class AiGridValidationGovernanceService {
     }
 
     public PolicyApproval approvePolicy(String policyId, String tenantTestNote, String actor) {
+        if (AiRuntimeScope.runtimePolicy(policyId, null)) AiRuntimeScope.requireInScope();
         return TenantContext.runAsPlatform(() -> transactions.execute(status -> {
             String version = singleCurrentVersion(policyId);
             PolicyCandidate candidate = policyCandidate(policyId, version);
@@ -567,12 +568,13 @@ public class AiGridValidationGovernanceService {
                        and target_tenant_ids_json @> cast(:tenantId as jsonb)
                 )
                 """, Map.of("policyId", policyId, "version", version,
-                "tenantId", "[\"" + tenantId + "\"]"), Boolean.class));
+                "tenantId", json(List.of(tenantId))), Boolean.class));
         return Boolean.TRUE.equals(exists);
     }
 
     /** Deploys a validated package to explicit dev/test tenants without approving it. */
     public DevDeployment deployToDevTenants(String policyId, List<UUID> targetTenantIds, String testNote, String actor) {
+        if (AiRuntimeScope.runtimePolicy(policyId, null)) AiRuntimeScope.requireInScope();
         if (targetTenantIds == null || targetTenantIds.isEmpty()) throw badRequest("Select at least one dev/test tenant");
         if (new LinkedHashSet<>(targetTenantIds).size() != targetTenantIds.size()) throw badRequest("Dev/test cohort contains duplicate tenant IDs");
         List<Tenant> cohort = targetTenantIds.stream().map(tenants::requireTenantUuid).toList();
@@ -582,7 +584,7 @@ public class AiGridValidationGovernanceService {
             String version = singleCurrentVersion(policyId);
             PolicyCandidate candidate = policyCandidate(policyId, version);
             if (!"VALIDATED".equals(candidate.lifecycle())) throw conflict("Only VALIDATED policies can be deployed to dev/test tenants");
-            String ids = "[" + targetTenantIds.stream().map(id -> "\"" + id + "\"").collect(java.util.stream.Collectors.joining(",")) + "]";
+            String ids = json(targetTenantIds);
             UUID deploymentId = UUID.randomUUID();
             jdbc.update("""
                     insert into platform.ai_grid_policy_dev_deployments
@@ -603,10 +605,15 @@ public class AiGridValidationGovernanceService {
 
     /** Publishes an already-approved policy to an explicit active canary cohort. */
     public PolicyPublication publishApprovedPolicy(String policyId, PublishCommand command, String actor) {
-        List<UUID> tenantIds = command != null && command.publishAll()
+        if (AiRuntimeScope.runtimePolicy(policyId, null)) AiRuntimeScope.requireInScope();
+        boolean publishAll = command != null && command.publishAll();
+        if (!publishAll && (command == null || command.targetTenantIds() == null
+                || command.targetTenantIds().isEmpty())) {
+            throw badRequest("Select at least one tenant or publish to all active tenants");
+        }
+        List<UUID> tenantIds = publishAll
                 ? tenants.listTenants().stream().filter(t -> "ACTIVE".equals(t.getStatus())).map(Tenant::getId).toList()
-                : command == null || command.targetTenantIds() == null || command.targetTenantIds().isEmpty()
-                    ? List.of(tenants.getDefaultTenant().getId()) : command.targetTenantIds();
+                : command.targetTenantIds();
         if (tenantIds.isEmpty()) throw conflict("No active tenants are available for publication");
         if (new LinkedHashSet<>(tenantIds).size() != tenantIds.size()) throw badRequest("CANARY cohort contains duplicate tenant IDs");
         List<Tenant> cohort = tenantIds.stream().map(tenants::requireTenantUuid).toList();
@@ -621,12 +628,11 @@ public class AiGridValidationGovernanceService {
                 throw conflict("CANARY cohort tenant lacks a complete snapshot or dev/test deployment: " + tenant.getSlug());
             }
         }
-        boolean publishAll = command != null && command.publishAll();
         String rolloutStage = publishAll ? "GENERAL_AVAILABILITY" : "CANARY";
         // GA is not a canary cohort. Keep the target list in the release binding for
         // audit/rollout work, but expose an empty canary list in distribution metadata.
-        String tenantIdsJson = "[" + tenantIds.stream().map(id -> "\"" + id + "\"").collect(java.util.stream.Collectors.joining(",")) + "]";
-        String canaryTenantIdsJson = publishAll ? "[]" : tenantIdsJson;
+        String tenantIdsJson = json(tenantIds);
+        String canaryTenantIdsJson = json(publishAll ? List.of() : tenantIds);
         return TenantContext.runAsPlatform(() -> transactions.execute(status -> {
             String version = singleCurrentVersion(policyId);
             PolicyCandidate candidate = policyCandidate(policyId, version);
@@ -642,8 +648,9 @@ public class AiGridValidationGovernanceService {
             if (approvalId == null) throw conflict("A current digest-bound approval is required before publishing");
             if (!"APPROVED".equals(candidate.lifecycle())) throw conflict("Policy lifecycle must be APPROVED");
             UUID bindingId = UUID.randomUUID();
-            String distribution = "{\"available\":true,\"rolloutStage\":\"" + rolloutStage + "\",\"canaryTenantIds\":"
-                    + canaryTenantIdsJson + ",\"targetTenantIds\":" + tenantIdsJson + ",\"pinnedVersion\":\"" + version + "\"}";
+            String distribution = json(Map.of("available", true, "rolloutStage", rolloutStage,
+                    "canaryTenantIds", publishAll ? List.of() : tenantIds,
+                    "targetTenantIds", tenantIds, "pinnedVersion", version));
             try {
                 jdbc.update("""
                         insert into platform.ai_grid_policy_release_bindings

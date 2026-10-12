@@ -1,0 +1,25 @@
+{
+  "intent": "Create the requested synthetic NoScan test agent noscan-test-prompt-20261005",
+  "command": "agent_update",
+  "parameters": {
+    "projectEndpoint": "https://ravikanukollu-1991-resource.services.ai.azure.com/api/projects/ravikanukollu-1991",
+    "agentName": "noscan-test-prompt-20261005",
+    "agentDefinition": {
+      "kind": "prompt",
+      "model": "gpt-5-mini",
+      "reasoning": {
+        "effort": "low"
+      },
+      "instructions": "You are Northwind Demo FAQ Assistant, a synthetic inventory test agent. Answer general product support questions concisely. Ask for missing information. Never request secrets, claim access to customer records, issue refunds, or modify orders. Clearly label any examples as synthetic.",
+      "tools": []
+    },
+    "creationOptions": {
+      "description": "Synthetic NoScan inventory test fixture; no production actions.",
+      "metadata": {
+        "purpose": "noscan-test-fixture",
+        "created_on": "2026-10-05",
+        "data": "synthetic"
+      }
+    }
+  }
+}

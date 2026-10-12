@@ -68,6 +68,17 @@ class AzureAiManagementClientTest {
     }
 
     @Test
+    void pinsGraphAgentIdentityEndpointForDirectoryInventory() {
+        assertDoesNotThrow(() -> client.validateGraphUri(URI.create(
+                "https://graph.microsoft.com/v1.0/servicePrincipals/microsoft.graph.agentIdentity?$skiptoken=next")));
+        assertThrows(AzureAiManagementClient.AzureApiException.class,
+                () -> client.validateGraphUri(URI.create(
+                        "https://graph.microsoft.com.attacker.example/v1.0/servicePrincipals/microsoft.graph.agentIdentity")));
+        assertThrows(AzureAiManagementClient.AzureApiException.class,
+                () -> client.validateGraphUri(URI.create("https://graph.microsoft.com/v1.0/users")));
+    }
+
+    @Test
     void classifiesSubscriptionRoleAssignmentsAsGlobalRbac() {
         assertEquals(
                 "AZURE_RBAC_GLOBAL",

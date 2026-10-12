@@ -37,16 +37,19 @@ public class AiAgentExecutionController {
             @RequestParam(required = false) Instant to,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
+        com.prototype.vulnwatch.aisecurity.service.AiRuntimeScope.requireInScope();
         return executions.list(tenant(), agentId, agentVersionId, status, source, from, to, page, size);
     }
 
     @GetMapping("/{executionId}/timeline")
     public List<AiAgentExecutionApiService.ExecutionEventResponse> timeline(@PathVariable UUID executionId) {
+        com.prototype.vulnwatch.aisecurity.service.AiRuntimeScope.requireInScope();
         return executions.timeline(tenant(), executionId);
     }
 
     @GetMapping("/{executionId}/relationships")
     public List<AiAgentExecutionApiService.ExecutionRelationshipResponse> relationships(@PathVariable UUID executionId) {
+        com.prototype.vulnwatch.aisecurity.service.AiRuntimeScope.requireInScope();
         return executions.relationships(tenant(), executionId);
     }
 

@@ -7,7 +7,7 @@ import { useActor } from '../features/auth/context';
 import { hasRole } from '../features/auth/roles';
 import { ProviderLogo } from '../features/ai-security/ProviderLogo';
 import { formatLabel, severityClassName } from '../features/cve-workbench/formatting';
-import type { AiFrameworkCoverage, AiFrameworkDefinition, AiGridPolicy, AiGridPolicyAssessmentStateSummary, AiGridPolicySelection, AiRuntimeTelemetryReadiness } from '../features/ai-security/types';
+import type { AiFrameworkCoverage, AiFrameworkDefinition, AiGridPolicy, AiGridPolicyAssessmentStateSummary, AiGridPolicySelection } from '../features/ai-security/types';
 
 const SEVERITY_RANK: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
 const PROVIDER_ORDER = ['AWS', 'AZURE', 'MULTI_CLOUD'];
@@ -82,7 +82,7 @@ function userReadableBlockers(blockers: string[]): string[] {
     }
     const messages: Record<string, string> = {
       TENANT_SCHEMA_VERSION_UNAVAILABLE: 'This workspace needs a schema upgrade before framework coverage can be assessed.',
-      TENANT_SCHEMA_UPGRADE_REQUIRED: 'This workspace needs a schema upgrade before runtime telemetry can be assessed.',
+      TENANT_SCHEMA_UPGRADE_REQUIRED: 'This workspace needs a schema upgrade before policy evidence can be assessed.',
       NO_COVERAGE_EPOCH: 'Framework coverage has not been assessed yet.',
       POLICY_PAUSED_PENDING_EVIDENCE: 'A mapped policy is paused until the required evidence is available.',
       POLICY_NOT_DISTRIBUTED: 'A mapped policy is not available to this workspace.',
@@ -107,7 +107,6 @@ export function AiPoliciesPage() {
     queryKey: ['ai-framework-coverage', framework.framework, framework.frameworkVersion],
     queryFn: () => api.getAiFrameworkCoverage(framework.framework, framework.frameworkVersion),
   })) });
-  const telemetryQuery = useQuery({ queryKey: ['ai-runtime-telemetry-readiness'], queryFn: api.getAiRuntimeTelemetryReadiness });
   const assessmentStatesQuery = useQuery({ queryKey: ['ai-assessment-states-latest'], queryFn: api.getLatestAiGridAssessmentStates });
   const mutation = useMutation({
     mutationFn: ({ id, selection }: { id: string; selection: AiGridPolicySelection }) =>
@@ -166,7 +165,6 @@ export function AiPoliciesPage() {
       {!policiesQuery.isError ? <PolicyInsights insights={policyInsights} loading={policiesQuery.isLoading} /> : null}
 
       <TenantFrameworkCoverage frameworksQuery={frameworksQuery} coverageQueries={coverageQueries} />
-      <RuntimeTelemetryGate query={telemetryQuery} />
 
       {policiesQuery.isLoading ? (
         <section className="panel"><div className="empty-state"><p>Loading policies…</p></div></section>
@@ -293,20 +291,6 @@ function TenantFrameworkCoverage({ frameworksQuery, coverageQueries }: {
         </tbody></table></div><p className="panel-caption">Legacy compatibility: {coverage.legacyCompatibility.distributed} of {coverage.legacyCompatibility.policies} policies distributed.</p></> : null}
       </div>;
     })}
-  </section>;
-}
-
-function RuntimeTelemetryGate({ query }: {
-  query: { data?: AiRuntimeTelemetryReadiness; isLoading: boolean; isError: boolean };
-}) {
-  const status = query.isError ? 'Unavailable' : query.isLoading ? 'Checking'
-    : query.data && !query.data.available ? 'Not assessed'
-    : query.data?.program2EntryGateMet ? 'Ready' : 'Blocked';
-  return <section className="panel"><div className="panel-header"><div><h3>Runtime telemetry gate</h3><p className="panel-caption">Program 2 remains blocked until both pilot providers meet the fixed server-side thresholds for this tenant.</p></div><span className={statusClass(status)}>{status}</span></div>
-    {query.isError ? <p className="notice error">Runtime telemetry readiness could not be loaded; this is not a gate result.</p> : null}
-    {query.isLoading ? <p role="status">Checking runtime telemetry readiness…</p> : null}
-    {query.data && !query.data.available ? <p className="notice">Runtime telemetry is not assessed because this workspace has not received the required tenant schema upgrade.</p> : null}
-    {query.data?.available ? <div className="table-scroll"><table className="data-table"><thead><tr><th>Source</th><th>Executions / events</th><th>Decision fill</th><th>Correlation</th><th>Delivery lag</th><th>Duplicate / quarantine</th><th>Volume / estimated cost</th><th>Quota</th><th>Alerts / blockers</th></tr></thead><tbody>{query.data.providers.map((providerRow) => <tr key={providerRow.sourceId}><td>{providerRow.provider}<div className="panel-caption">{providerRow.sourceKind === 'TELEMETRY_ADAPTER' ? `${providerRow.sourceId} · ${providerRow.certificationState ?? 'UNCERTIFIED'}` : providerRow.sourceId}</div></td><td>{providerRow.executions} / {providerRow.consequentialEvents}</td><td>A {Math.round(providerRow.approvalStateFillRate * 100)}% · P {Math.round(providerRow.policyStateFillRate * 100)}% · O {Math.round(providerRow.actionOutcomeFillRate * 100)}%</td><td>Agent {Math.round(providerRow.agentCorrelationRate * 100)}% · Version {Math.round(providerRow.versionCorrelationRate * 100)}% ({providerRow.versionApplicableExecutions})</td><td>{Math.round(providerRow.averageDeliveryLatencyMs)} ms</td><td>{(providerRow.duplicateRate * 100).toFixed(1)}% / {(providerRow.quarantineRate * 100).toFixed(1)}%</td><td>{providerRow.acceptedEvents} accepted · {(providerRow.receivedBytes / 1_048_576).toFixed(2)} MiB · ${providerRow.estimatedStorageCostUsd.toFixed(4)}/mo</td><td>{providerRow.quotaExhausted ? 'Exhausted' : providerRow.quotaSoftLimit ? 'Soft limit' : 'Available'}</td><td>{userReadableBlockers([...providerRow.alerts, ...providerRow.blockers]).join(' ') || '—'}</td></tr>)}</tbody></table></div> : null}
   </section>;
 }
 

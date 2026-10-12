@@ -80,6 +80,41 @@ class FindingJsonbPersistencePostgresIntegrationTest {
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private com.prototype.vulnwatch.service.FindingListProjectionService projections;
+
+    @Test
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    void runtimeHistoryIsExcludedFromOffsetCursorAndDashboardCounts() {
+        ensureDefaultTenant();
+        Tenant tenant = tenantService.getDefaultTenant();
+        long before = findingRepository.countByStatus(FindingStatus.OPEN);
+        Finding posture = new Finding();
+        posture.setTenant(tenant);
+        posture.setFindingKind("AI_POSTURE");
+        posture.setMatchedBy("scope-test");
+        posture.setSeverityOverride("HIGH");
+        posture = findingRepository.saveAndFlush(posture);
+        Finding runtime = new Finding();
+        runtime.setTenant(tenant);
+        runtime.setFindingKind("AI_RUNTIME");
+        runtime.setMatchedBy("runtime-only-filter");
+        runtime = findingRepository.saveAndFlush(runtime);
+        assertEquals(before + 1, findingRepository.countByStatus(FindingStatus.OPEN));
+        org.junit.jupiter.api.Assertions.assertFalse(findingRepository.findDistinctMatchMethodsByTenant(tenant)
+                .contains("runtime-only-filter"));
+        var filter = new com.prototype.vulnwatch.dto.FindingsFilter(null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null,null);
+        var offsetIds = findingRepository.findAll(com.prototype.vulnwatch.service.FindingFilterSpecifications.byFilter(tenant,filter))
+                .stream().map(Finding::getId).toList();
+        org.junit.jupiter.api.Assertions.assertTrue(offsetIds.contains(posture.getId()));
+        org.junit.jupiter.api.Assertions.assertFalse(offsetIds.contains(runtime.getId()));
+        projections.refreshTenant(tenant);
+        var cursorIds = projections.queryPage(tenant,filter,null,200).findingIds();
+        org.junit.jupiter.api.Assertions.assertTrue(cursorIds.contains(posture.getId()));
+        org.junit.jupiter.api.Assertions.assertFalse(cursorIds.contains(runtime.getId()));
+        assertNotNull(findingRepository.findById(runtime.getId()).orElseThrow()); // evidence retained
+    }
+
     @Test
     void persistsAndUpdatesJsonbEvidenceFields() {
         ensureDefaultTenant();

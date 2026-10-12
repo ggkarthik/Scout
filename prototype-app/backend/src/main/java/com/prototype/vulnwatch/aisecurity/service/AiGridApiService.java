@@ -156,6 +156,7 @@ public class AiGridApiService {
                     with policy_runs as (
                         select policy_id, policy_version, run_id, max(evaluated_at) evaluated_at
                           from ai_grid_assessments
+                         where subject_type <> 'EXECUTION' and policy_id not like 'AGCF-RT-%'
                          group by policy_id, policy_version, run_id
                     ), latest_runs as (
                         select policy_id, policy_version, run_id,
@@ -312,7 +313,8 @@ public class AiGridApiService {
                               order by max(a_latest.evaluated_at) desc, a_latest.run_id desc limit 1
                          )
                   ) assessment_totals on true
-                 where p.release_family in ('AGCF_PHASE_1', 'AGCF_PHASE_2')
+                 where p.evaluation_mode not like 'RUNTIME_%' and p.policy_id not like 'AGCF-RT-%'
+                   and p.release_family in ('AGCF_PHASE_1', 'AGCF_PHASE_2')
                    and p.lifecycle in ('VALIDATED', 'APPROVED', 'PUBLISHED', 'CANARY')
                    and platform.ai_grid_policy_visible_to_tenant(
                            d.available, d.rollout_stage, d.canary_tenant_ids_json, cast(:tenantId as uuid))
@@ -341,7 +343,7 @@ public class AiGridApiService {
                        p.framework_mappings_json::text framework_mappings_json
                   from platform.ai_grid_policy_versions p
                   left join ai_grid_policy_selections s on s.policy_id = p.policy_id
-                 where p.policy_id = :policyId
+                 where p.policy_id = :policyId and p.evaluation_mode not like 'RUNTIME_%' and p.policy_id not like 'AGCF-RT-%'
                    and p.release_family = 'AGCF_PHASE_1'
                    and p.lifecycle in ('PUBLISHED', 'CANARY', 'RETIRED')
                  order by p.published_at desc nulls last, p.version desc
@@ -356,6 +358,7 @@ public class AiGridApiService {
     }
 
     public void updateSelection(Tenant tenant, String policyId, String selection, String actor, String reason) {
+        if (AiRuntimeScope.runtimePolicy(policyId, null)) AiRuntimeScope.requireInScope();
         if (!List.of("REQUIRED", "ENABLED", "PREVIEW", "DISABLED").contains(selection))
             throw new IllegalArgumentException("Invalid AI policy selection");
         tenantExecution.run(tenant, () -> transactions.executeWithoutResult(status -> {
@@ -416,6 +419,7 @@ public class AiGridApiService {
                             select v.version
                               from platform.ai_grid_policy_versions v
                              where v.policy_id = d.policy_id
+                               and v.evaluation_mode not like 'RUNTIME_%' and v.policy_id not like 'AGCF-RT-%'
                                and v.release_family in ('AGCF_PHASE_1', 'AGCF_PHASE_2')
                                and v.lifecycle in ('VALIDATED','APPROVED','CANARY','PUBLISHED')
                                and (d.pinned_version is null or d.pinned_version = v.version)

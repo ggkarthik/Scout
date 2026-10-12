@@ -154,7 +154,7 @@ public class AiGridReadinessService {
                            no_decision_count, error_count, missing_assessment_count,
                            required_facts_json::text, available_facts_json::text,
                            missing_evidence_json::text, computed_at
-                      from ai_grid_policy_readiness where coverage_epoch_id = :epochId
+                      from ai_grid_policy_readiness where coverage_epoch_id = :epochId and policy_id not like 'AGCF-RT-%'
                      order by case selection when 'REQUIRED' then 1 when 'ENABLED' then 2
                               when 'PREVIEW' then 3 else 4 end, policy_id
                     """, Map.of("epochId", state.epochId()), (rs, n) -> new PolicyReadinessView(
@@ -172,13 +172,12 @@ public class AiGridReadinessService {
     public List<SetupActionView> latestSetupActions(Tenant tenant) {
         return tenantExecution.run(tenant, () -> {
             AiGridCoverageService.CurrentState state = coverage.currentState();
-            if (state == null) return List.of();
             return jdbc.query("""
                     select id, run_id, artifact_id, policy_id, priority, category, action_code,
                            title, detail, evidence_key, status, first_observed_at, last_observed_at
-                      from ai_grid_setup_actions where coverage_epoch_id = :epochId and status = 'OPEN'
+                      from ai_grid_setup_actions where (coverage_epoch_id = :epochId or category='AGENT_DEPLOYMENT') and status = 'OPEN'
                      order by priority, category, policy_id nulls last, artifact_id nulls last
-                    """, Map.of("epochId", state.epochId()), (rs, n) -> new SetupActionView(
+                    """, new MapSqlParameterSource().addValue("epochId", state == null ? null : state.epochId(), java.sql.Types.OTHER), (rs, n) -> new SetupActionView(
                     rs.getObject("id", UUID.class), rs.getObject("run_id", UUID.class),
                     rs.getObject("artifact_id", UUID.class), rs.getString("policy_id"),
                     rs.getInt("priority"), rs.getString("category"), rs.getString("action_code"),

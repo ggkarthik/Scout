@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { PerformanceInstrumentation } from './lib/performanceMonitoring';
 import type { InventoryViewKey } from './features/inventory/types';
-import { AI_ARTIFACT_CATEGORIES, combinedNativeKindFilterValue } from './features/ai-security/categories';
+import { AI_ARTIFACT_CATEGORIES, legacyAgentRosterRedirect, combinedNativeKindFilterValue } from './features/ai-security/categories';
 import type { AdminRouteView, AppTab, ConfigurationsRouteView, ConnectRouteView, FixIntelligenceRouteView, VulnerabilityIntelRouteView } from './app/routes';
 import {
   activeTabForPath,
@@ -23,6 +23,7 @@ import {
   pathForConnectView,
   pathForFixIntelligenceView,
   pathForInventoryView,
+  pathForInventoryAiAgents,
   pathForPlatformView,
   pathForTab,
   pathForVulnRepoView,
@@ -87,9 +88,6 @@ const AiKnowledgeMcpInventoryPage = React.lazy(async () => ({
 }));
 const AiAssetDetailPage = React.lazy(async () => ({
   default: (await import('./pages/AiAssetDetailPage')).AiAssetDetailPage
-}));
-const AiAgentExecutionsPage = React.lazy(async () => ({
-  default: (await import('./pages/AiAgentExecutionsPage')).AiAgentExecutionsPage
 }));
 const AiBomDeclaredResourcesPage = React.lazy(async () => ({
   default: (await import('./pages/AiBomDeclaredResourcesPage')).AiBomDeclaredResourcesPage
@@ -383,9 +381,15 @@ function FixIntelligenceRoute() {
 
 function AiSecurityRoute({ children }: { children: React.ReactNode }) {
   const actor = useActor();
+  const location = useLocation();
+  const legacyPath = location.pathname === '/inventory/ai/agent-versions'
+    ? legacyAgentRosterRedirect(location.search + (location.search ? '&' : '?') + 'view=agent-versions')
+    : ['/inventory/ai', '/inventory/ai/assets', '/inventory/ai/overview'].includes(location.pathname)
+      ? legacyAgentRosterRedirect(location.search) : null;
   if (!canUseEntitlement(actor, 'ai.security') || actor?.platformScope) {
     return <Navigate to="/exposure" replace />;
   }
+  if (legacyPath) return <Navigate to={legacyPath} replace />;
   return <>{children}</>;
 }
 
@@ -1103,6 +1107,7 @@ function AppShell() {
                 if (key === 'overview') return location.pathname === '/inventory/ai' || location.pathname === '/inventory/ai/overview';
                 if (key === 'mcp-servers') return location.pathname === '/inventory/ai/mcp' && params.get('artifactRole') === 'MCP_SERVER';
                 if (key === 'data-stores') return location.pathname === '/inventory/ai/knowledge-data' && params.get('artifactRole') === 'DATA_STORE';
+                if (key === 'AGENTS') return location.pathname === '/inventory/ai/agents';
                 if (key === 'others') return location.pathname === '/inventory/ai/assets' && params.get('view') === 'others';
                 const item = AI_INVENTORY_NAV_ITEMS.find((candidate) => candidate.key === key);
                 return location.pathname === '/inventory/ai/assets' && params.get('nativeKind') === item?.nativeKind;
@@ -1111,6 +1116,7 @@ function AppShell() {
                 if (key === 'overview') return navigate(pathForAiInventoryOverview());
                 if (key === 'mcp-servers') return navigate('/inventory/ai/mcp?artifactRole=MCP_SERVER');
                 if (key === 'data-stores') return navigate('/inventory/ai/knowledge-data?artifactRole=DATA_STORE');
+                if (key === 'AGENTS') return navigate(pathForInventoryAiAgents());
                 if (key === 'others') return navigate('/inventory/ai/assets?view=others');
                 const item = AI_INVENTORY_NAV_ITEMS.find((candidate) => candidate.key === key);
                 return navigate(`/inventory/ai/assets?nativeKind=${encodeURIComponent(item?.nativeKind ?? '')}`);
@@ -1294,10 +1300,12 @@ function AppShell() {
               <Route path="/vuln-repo/org-cves/:cveId?" element={<VulnRepoWorkbenchRoute />} />
               <Route path="/inventory/hosts/:assetId" element={<InventoryHostAssetRoute />} />
               <Route path="/inventory/ai/overview" element={<AiSecurityRoute><AiInventoryPage /></AiSecurityRoute>} />
+              <Route path="/inventory/ai/agent-versions" element={<AiSecurityRoute><AiInventoryAssetsPage /></AiSecurityRoute>} />
+              <Route path="/inventory/ai/agents" element={<AiSecurityRoute><AiInventoryAssetsPage /></AiSecurityRoute>} />
               <Route path="/inventory/ai/assets" element={<AiSecurityRoute><AiInventoryAssetsPage /></AiSecurityRoute>} />
               <Route path="/inventory/ai/knowledge-data" element={<AiSecurityRoute><AiKnowledgeMcpInventoryPage kind="knowledge-data" /></AiSecurityRoute>} />
               <Route path="/inventory/ai/mcp" element={<AiSecurityRoute><AiKnowledgeMcpInventoryPage kind="mcp" /></AiSecurityRoute>} />
-              <Route path="/inventory/ai/executions" element={<AiSecurityRoute><AiAgentExecutionsPage /></AiSecurityRoute>} />
+              <Route path="/inventory/ai/executions" element={<Navigate to="/inventory/ai" replace />} />
               <Route path="/inventory/ai/declared-resources" element={<AiSecurityRoute><AiBomDeclaredResourcesPage /></AiSecurityRoute>} />
               <Route path="/inventory/ai/declared-resources/:resourceId" element={<AiBomDeclaredResourceDetailRoute />} />
               <Route path="/connect/copilot-studio" element={<AiSecurityRoute><CopilotStudioConnectorPage /></AiSecurityRoute>} />

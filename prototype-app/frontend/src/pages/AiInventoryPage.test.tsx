@@ -58,7 +58,7 @@ describe('AiInventoryPage', () => {
     mockBaseline();
     vi.spyOn(api, 'getAiSeverityGrid').mockResolvedValue({
       rows: [
-        // 8 uncategorized kinds; 8 explicit category rows leave one individual and one Other row.
+        // 8 uncategorized kinds; 7 explicit category rows leave two individual rows and one Other row.
         { nativeKind: 'AWS_KIND_A', critical: 0, high: 5, medium: 0, low: 0, total: 5 },
         { nativeKind: 'AWS_KIND_B', critical: 0, high: 4, medium: 0, low: 0, total: 4 },
         { nativeKind: 'AWS_KIND_C', critical: 0, high: 3, medium: 0, low: 0, total: 3 },
@@ -72,7 +72,7 @@ describe('AiInventoryPage', () => {
 
     renderWithProviders(<AiInventoryPage />);
 
-    await screen.findByText('Other (7)');
+    await screen.findByText('Other (6)');
     const rows = document.querySelectorAll('.grid-exposure-table tbody tr');
     expect(rows.length).toBeLessThanOrEqual(10);
   });

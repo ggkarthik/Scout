@@ -27,6 +27,7 @@ public class AiGridHostContextService {
     }
 
     public HostFact attest(Tenant tenant, UUID artifactId, AnalystFactInput input) {
+        if (input.factKey().startsWith("activity.")) AiRuntimeScope.requireInScope();
         if (isValidating(input.factKey())) {
             throw new IllegalArgumentException("Analyst attestations cannot satisfy validating evidence");
         }
@@ -36,6 +37,7 @@ public class AiGridHostContextService {
     }
 
     public HostFact ingestTrusted(Tenant tenant, UUID artifactId, String producerId, TrustedFactInput input) {
+        if ("SCOUT_AWS_ACTIVITY".equals(producerId) || input.factKey().startsWith("activity.")) AiRuntimeScope.requireInScope();
         Producer producer = PRODUCERS.get(producerId);
         if (producer == null || !producer.factKeys().contains(input.factKey()))
             throw new IllegalArgumentException("Producer is not authorized for this host-context fact");
@@ -70,6 +72,7 @@ public class AiGridHostContextService {
                 .addValue("evidence", jsonArray(input.evidenceClass())), Integer.class);
         if (governed == null || governed == 0)
             throw new IllegalArgumentException("Host-context fact or evidence class is not governed for this value type");
+        if (input.factKey().startsWith("activity.")) AiRuntimeScope.requireInScope();
         if (isValidating(input.factKey())) {
             if (input.validUntil() == null) throw new IllegalArgumentException("Validating host-context evidence requires validUntil");
             if ("CONFIGURATION".equals(input.evidenceClass()))

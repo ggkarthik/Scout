@@ -216,6 +216,19 @@ public class AiGridSnapshotService {
                 }
             }
         }
+        // Safe comparison state only. Approval values and normalized snapshots remain internal.
+        jdbc.query("""
+                select comparison_outcome from ai_security_artifact_digest_observations
+                 where artifact_id=:artifactId and digest_kind='GUARDRAIL_CONFIGURATION' and source_run_id=:runId
+                   and observed_at=:observedAt
+                """, new MapSqlParameterSource().addValue("artifactId", row.id()).addValue("runId", envelope.runId())
+                        .addValue("observedAt", envelope.observedAt() == null ? null : Timestamp.from(envelope.observedAt())), (rs, index) -> rs.getString(1)).forEach(outcome -> {
+            boolean known = Set.of("UNCHANGED", "CONTROL_WEAKENED", "CONTROL_CONFIGURATION_CHANGED_REVIEW_REQUIRED").contains(outcome);
+            facts.put("guardrail.baseline_comparison_outcome", new AiGridFactProducer.ProducedFact(
+                    "guardrail.baseline_comparison_outcome", canonicalMapper.getNodeFactory().textNode(outcome),
+                    known ? "KNOWN" : "UNKNOWN", "DERIVED", "CONFIGURATION", "approved-control-baseline", known ? 1.0 : null,
+                    "APPROVED_BASELINE_COMPARISON", "1.0.0", List.of("stored-control-observation", "approved-control-baseline"), "1.0.0"));
+        });
         return facts;
     }
 

@@ -20,6 +20,15 @@ import org.springframework.jdbc.core.namedparam.SqlParameterSource;
 class AiAgentExecutionRetentionServiceTest {
 
     @Test
+    void schedulerDoesNotMaintainRetiredRuntimeHistory() {
+        var tenants = mock(TenantService.class);
+        var jdbc = mock(NamedParameterJdbcTemplate.class);
+        var service = new AiAgentExecutionRetentionService(tenants, mock(TenantSchemaExecutionService.class), jdbc, 90, 250);
+        service.purgeExpired();
+        org.mockito.Mockito.verifyNoInteractions(tenants,jdbc);
+    }
+
+    @Test
     @SuppressWarnings("unchecked")
     void drainsBoundedParentBatchesAndReportsRemainingEligibleRows() {
         TenantService tenants = mock(TenantService.class);

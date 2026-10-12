@@ -63,7 +63,8 @@ public class AiGridPolicyPortfolioService {
                         select distinct on (p.policy_id) p.*
                           from platform.ai_grid_policy_versions p
                           left join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id
-                         where p.release_family in ('AGCF_PHASE_1','AGCF_PHASE_2')
+                         where p.evaluation_mode not like 'RUNTIME_%' and p.policy_id not like 'AGCF-RT-%'
+                           and p.release_family in ('AGCF_PHASE_1','AGCF_PHASE_2')
                            and p.lifecycle in ('VALIDATED','APPROVED','CANARY','PUBLISHED')
                          order by p.policy_id,(p.version=d.pinned_version) desc,
                                   p.published_at desc nulls last,p.created_at desc,p.version desc

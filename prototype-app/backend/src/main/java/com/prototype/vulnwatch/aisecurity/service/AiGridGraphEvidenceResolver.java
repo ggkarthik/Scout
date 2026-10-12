@@ -83,23 +83,6 @@ public class AiGridGraphEvidenceResolver {
                         rs.getTimestamp(6) == null ? null : rs.getTimestamp(6).toInstant()));
     }
 
-    /** Latest-evidence profile for impact preview; it intentionally cannot claim an immutable run. */
-    public DirectEvidence resolveLatest(UUID sourceArtifactId, List<String> requiredTypes, Instant asOf) {
-        if (requiredTypes == null || requiredTypes.isEmpty()) return DirectEvidence.ready(List.of());
-        List<Relationship> relationships = jdbc.query("""
-                select distinct on (r.relationship_type,r.target_artifact_id)
-                       r.id,r.source_artifact_id,r.target_artifact_id,r.relationship_type,r.observed_at,r.valid_until
-                  from ai_grid_relationship_snapshots r
-                 where r.source_artifact_id=:sourceId and r.relationship_type in (:types) and r.observed_at<=:asOf
-                   and (r.valid_until is null or r.valid_until>=:asOf)
-                 order by r.relationship_type,r.target_artifact_id,r.observed_at desc,r.id desc
-                """, new MapSqlParameterSource().addValue("sourceId", sourceArtifactId).addValue("types", requiredTypes)
-                .addValue("asOf", Timestamp.from(asOf)), (rs, n) -> new Relationship(rs.getObject(1, UUID.class),
-                rs.getObject(2, UUID.class), rs.getObject(3, UUID.class), rs.getString(4), rs.getTimestamp(5).toInstant(),
-                rs.getTimestamp(6) == null ? null : rs.getTimestamp(6).toInstant()));
-        return evaluate(requiredTypes, relationships, asOf, DEFAULT_MAX_AGE);
-    }
-
     static DirectEvidence evaluate(List<String> requiredTypes, List<Relationship> relationships,
                                    Instant asOf, Duration maxAge) {
         Map<String, Relationship> latest = new LinkedHashMap<>();

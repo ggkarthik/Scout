@@ -337,6 +337,10 @@ export function pathForInventoryHostAsset(assetId: string, returnTo?: string): s
   return `/inventory/hosts/${encodedAssetId}?${searchParams.toString()}`;
 }
 
+export function pathForInventoryAiAgents(values?: Record<string, RouteSearchValue>): string {
+  return appendSearchToPath('/inventory/ai/agents', values);
+}
+
 export function pathForInventoryAiAssets(values?: Record<string, RouteSearchValue>): string {
   return appendSearchToPath('/inventory/ai/assets', values);
 }

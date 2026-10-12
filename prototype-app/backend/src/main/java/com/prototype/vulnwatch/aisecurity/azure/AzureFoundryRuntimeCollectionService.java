@@ -24,6 +24,7 @@ public class AzureFoundryRuntimeCollectionService {
         this.featureFlags=featureFlags; this.capabilities=capabilities; this.enabled = enabled;
     }
     public Result run(Tenant tenant) {
+        com.prototype.vulnwatch.aisecurity.service.AiRuntimeScope.requireInScope();
         featureFlags.assertEnabled(tenant, AiSecurityConnectorFeatureFlagService.Feature.AZURE_FOUNDRY_RUNTIME, enabled);
         var setup = config.get(tenant); if (!setup.configured() || setup.connectorId() == null || setup.foundryEndpointUrl() == null) throw new IllegalStateException("Foundry runtime is not configured");
         var cursor = ingestion.cursor(

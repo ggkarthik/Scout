@@ -28,7 +28,7 @@ export function AiInventoryOverviewStrip() {
         <span className="ai-security-kicker">AI inventory</span>
         <h3>Cloud AI estate coverage</h3>
       </div>
-      <button type="button" onClick={() => navigate('/inventory/ai')}><strong>{summary?.artifactCounts.AI_AGENT ?? 0}</strong><span>Agents</span></button>
+      <button type="button" onClick={() => navigate('/inventory/ai/agents')}><strong>{summary?.logicalAgentCount ?? 0}</strong><span>Agents</span></button>
       <button type="button" onClick={() => navigate('/inventory/ai')}><strong>{summary?.artifactCounts.AI_MODEL ?? 0}</strong><span>Models</span></button>
       <button type="button" onClick={() => navigate('/inventory/ai')}><strong>{other}</strong><span>Other artifacts</span></button>
       <button type="button" onClick={() => navigate('/findings/ai')} className="risk"><strong>{summary?.openFindings ?? 0}</strong><span>Open findings</span></button>

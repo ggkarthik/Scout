@@ -1,0 +1,71 @@
+{
+  "projectEndpoint": "https://ravikanukollu-1991-resource.services.ai.azure.com/api/projects/ravikanukollu-1991",
+  "subscriptionId": "85de82e7-db21-4879-ace4-e5e4093ac0f0",
+  "resourceGroup": "ai-discovery-rg",
+  "agents": [
+    {
+      "name": "noscan-test-prompt-20261005",
+      "version": "1",
+      "kind": "prompt",
+      "model": "gpt-5-mini",
+      "toolTypes": []
+    },
+    {
+      "name": "noscan-test-retrieval-20261005",
+      "version": "1",
+      "kind": "prompt",
+      "model": "gpt-5-mini",
+      "toolTypes": [
+        "file_search"
+      ]
+    },
+    {
+      "name": "noscan-test-analytics-20261005",
+      "version": "1",
+      "kind": "prompt",
+      "model": "gpt-5-mini",
+      "toolTypes": [
+        "code_interpreter"
+      ]
+    },
+    {
+      "name": "noscan-test-function-20261005",
+      "version": "1",
+      "kind": "prompt",
+      "model": "gpt-5-mini",
+      "toolTypes": [
+        "function"
+      ]
+    }
+  ],
+  "vectorStore": {
+    "id": "vs_tz3ZFRTNexNWb1qpvndBC9z5",
+    "name": "noscan-test-product-handbook-20261005",
+    "status": "completed",
+    "sourceFile": "product-handbook.md",
+    "expiresAfterInactiveDays": 7
+  },
+  "ordersFile": {
+    "id": "assistant-Saw2JZAiJU1pvKyWhWaWB6",
+    "sourceFile": "orders.csv"
+  },
+  "blobContainer": {
+    "account": "mcpagentstorage2",
+    "container": "noscan-test-agents-20261005",
+    "publicAccess": "None",
+    "populated": false,
+    "uploadFailure": "Storage Blob data-plane permission denied"
+  },
+  "invoked": false,
+  "localVerification": {
+    "branch": "codex/unified-agents-roster",
+    "workspace": "bbb",
+    "discoveredAzureLogicalAgents": 9,
+    "newTestAgentsVisible": 4,
+    "tenantMigrationVersion": 14,
+    "deploymentStatus": "Deployment unverified",
+    "invocationTested": false,
+    "finalDiscoveryStatus": "partial",
+    "finalDiscoveryCompletedAt": "2026-10-05T21:13:57+05:30"
+  }
+}
