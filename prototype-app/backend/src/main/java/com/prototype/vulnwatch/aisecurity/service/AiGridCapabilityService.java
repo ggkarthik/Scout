@@ -290,6 +290,7 @@ public class AiGridCapabilityService {
                 case "LINKED_DATA_STORES", "AWS_LINKED_DATA_STORES" -> List.of("AWS_LINKED_DATA_STORES");
                 case "CONSUMPTION_TELEMETRY", "AWS_CONSUMPTION_TELEMETRY" -> List.of("AWS_CONSUMPTION_TELEMETRY");
                 case "MODEL_DATA_PROVENANCE", "AWS_MODEL_DATA_PROVENANCE" -> List.of("AWS_MODEL_DATA_PROVENANCE");
+                case "BEDROCK_AGENT_ROUTES" -> List.of("BEDROCK_AGENT_ROUTING");
                 case "BEDROCK_AGENT_VERSIONS" -> List.of("BEDROCK_AGENT_VERSIONS_ALIASES");
                 case "BEDROCK_AGENTS" -> List.of("BEDROCK_AGENTS");
                 case "BEDROCK_GUARDRAILS" -> List.of("BEDROCK_GUARDRAILS");
