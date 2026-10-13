@@ -42,18 +42,16 @@ public class AiGridRuntimeEvaluationService {
 
     private final NamedParameterJdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
-    private final AiGridFindingService findings;
     private final AiGridSnapshotService snapshots;
     private final AiGridCapabilityService capabilities;
     private final int lookbackDays;
 
     public AiGridRuntimeEvaluationService(NamedParameterJdbcTemplate jdbc, ObjectMapper objectMapper,
-                                           AiGridFindingService findings, AiGridSnapshotService snapshots,
+                                           AiGridSnapshotService snapshots,
                                            AiGridCapabilityService capabilities,
                                            @Value("${app.ai-security.runtime.evaluation-lookback-days:14}") int lookbackDays) {
         this.jdbc = jdbc;
         this.objectMapper = objectMapper;
-        this.findings = findings;
         this.snapshots = snapshots;
         this.capabilities = capabilities;
         this.lookbackDays = Math.max(1, lookbackDays);
@@ -122,7 +120,7 @@ public class AiGridRuntimeEvaluationService {
                 }
             }
         }
-        if (findingChanged) findings.refreshProjectionAfterCommit(tenant);
+
         return evaluated;
     }
 
@@ -822,10 +820,8 @@ public class AiGridRuntimeEvaluationService {
                 .addValue("decisionFingerprint", decisionFingerprint), UUID.class);
         snapshots.outbox(tenant, "ASSESSMENT_COMPLETED", "ASSESSMENT", persisted, decisionFingerprint,
                 Map.of("decision", decision, "subjectId", subjectId, "decisionFingerprint", decisionFingerprint));
-        if (!reconcileFinding) return false;
-        return findings.reconcile(tenant, new AiGridFindingService.AssessmentResult(persisted, runId,
-                policy.id(), policy.version(), policy.name(), policy.severity(), selection, decision, reason,
-                subjectId, findingFingerprint, evidence, subjectType));
+        // Runtime finding creation is retired. Re-enabling requires an explicit reconciliation hook.
+        return false;
     }
 
     private static String readiness(String decision) {
