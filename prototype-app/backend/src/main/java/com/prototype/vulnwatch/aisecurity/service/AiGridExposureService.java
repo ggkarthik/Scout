@@ -50,6 +50,7 @@ public class AiGridExposureService {
         this.graphEvidence = graphEvidence;
     }
 
+    @org.springframework.transaction.annotation.Transactional
     public CorrelationResult correlateCompleteRun(Tenant tenant, UUID runId) {
         Instant asOf = jdbc.query("select max(observed_at) from ai_grid_snapshot_manifests where run_id=:id",
                 Map.of("id", runId), rs -> rs.next() && rs.getTimestamp(1) != null ? rs.getTimestamp(1).toInstant() : null);
@@ -63,11 +64,13 @@ public class AiGridExposureService {
     }
 
     /** Correlates the authoritative union of all latest complete discovery scope heads. */
+    @org.springframework.transaction.annotation.Transactional
     public CorrelationResult correlateCurrentEpoch(Tenant tenant, UUID epochId, UUID triggerRunId) {
         return correlateCurrentEpoch(tenant, epochId, triggerRunId, Set.of());
     }
 
     /** Re-evaluates only systems containing changed artifacts; an empty set performs full reconciliation. */
+    @org.springframework.transaction.annotation.Transactional
     public CorrelationResult correlateCurrentEpoch(Tenant tenant, UUID epochId, UUID triggerRunId,
                                                     Set<UUID> changedArtifactIds) {
         Instant asOf = jdbc.query("select materialized_at from ai_grid_current_coverage_state where epoch_id=:id",
@@ -158,25 +161,42 @@ public class AiGridExposureService {
             }
             return new CorrelationResult(hypotheses, validated, 0, 0, 0);
         }
-        for (Candidate candidate : candidates.values()) {
-            String previous = previousState(candidate.fingerprint());
-            UUID exposureId = persist(tenant, candidate, epochId, materialDigest);
+        Map<String,UUID> persistedPaths=new LinkedHashMap<>();
+        for (Candidate candidate:candidates.values()) {
+            String previous=previousState(candidate.fingerprint());
+            UUID exposureId=persist(tenant,candidate,epochId,materialDigest);
+            persistedPaths.put(candidate.fingerprint(),exposureId);
             observed.add(candidate.fingerprint());
             if ("VALIDATED_EXPOSURE".equals(candidate.state())) {
                 validated++;
                 if ("EXPOSURE_HYPOTHESIS".equals(previous)) graduated++;
-                UUID findingId = findingService.reconcileValidated(tenant, candidate.finding(exposureId));
-                jdbc.update("update ai_grid_exposure_paths set finding_id=:findingId where id=:id",
-                        Map.of("findingId", findingId, "id", exposureId));
             } else {
                 hypotheses++;
-                if ("VALIDATED_EXPOSURE".equals(previous)) {
-                    demoted++;
-                    findingService.markNeedsEvidence(exposureId, runId);
-                }
+                if ("VALIDATED_EXPOSURE".equals(previous)) demoted++;
             }
         }
-        int closed = closeAbsentFromCompleteRun(tenant, runId, epochId, asOf, observed, authoritative);
+        // One lifecycle reconciliation per shared root, independent of traversal order.
+        Map<String,UUID> sharedFindings=new LinkedHashMap<>();
+        List<Candidate> representatives=candidates.values().stream()
+                .filter(candidate -> "VALIDATED_EXPOSURE".equals(candidate.state()))
+                .sorted(java.util.Comparator.comparing(Candidate::fingerprint)).toList();
+        for (Candidate candidate:representatives) {
+            String group=candidate.template().id()+"|"+candidate.rootCause();
+            if (!sharedFindings.containsKey(group)) sharedFindings.put(group,findingService.reconcileValidated(tenant,
+                    candidate.finding(persistedPaths.get(candidate.fingerprint()))));
+        }
+        for (Candidate candidate:candidates.values()) {
+            String group=candidate.template().id()+"|"+candidate.rootCause();
+            UUID findingId=sharedFindings.get(group);
+            if (findingId==null) findingId=jdbc.query("select f.id from findings f join finding_subjects fs on fs.finding_id=f.id "
+                    + "where f.finding_kind='AI_EXPOSURE' and f.policy_id=:policyId and fs.subject_type='ARTIFACT' "
+                    + "and fs.subject_role='ROOT_CAUSE' and fs.subject_id=:root order by f.created_at,f.id limit 1",
+                    Map.of("policyId",candidate.template().id(),"root",candidate.rootCause()),rs -> rs.next() ? rs.getObject(1,UUID.class) : null);
+            if (findingId!=null) findingService.attachPath(tenant,findingId,candidate.finding(persistedPaths.get(candidate.fingerprint())));
+        }
+        int closed=closeAbsentFromCompleteRun(tenant,runId,epochId,asOf,observed,authoritative);
+        findingService.reconcileAggregate(tenant,runId);
+        findingService.refreshProjection(tenant);
         recordOutbox(tenant, runId, epochId, candidates.size(), traversed);
         recordMetrics(tenant, runId, artifacts.size(), graph.values().stream().mapToInt(List::size).sum(),
                 traversed, candidates.size(), java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
@@ -216,7 +236,7 @@ public class AiGridExposureService {
                        and src.source_run_id=rel.run_id and src.epoch_id=:epochId
                   join ai_grid_current_coverage_artifacts dst on dst.artifact_id=rel.target_artifact_id
                        and dst.epoch_id=:epochId
-                 where rel.valid_from<=:asOf and (rel.valid_until is null or rel.valid_until>=:asOf)
+                 where rel.valid_from<=:asOf
                  order by rel.source_artifact_id,rel.relationship_type,rel.target_artifact_id
                 """, new MapSqlParameterSource().addValue("epochId", epochId).addValue("asOf", Timestamp.from(asOf)), rs -> {
             Edge edge = new Edge(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class), rs.getObject(3, UUID.class),
@@ -234,7 +254,7 @@ public class AiGridExposureService {
                        f.observed_at,f.observed_at valid_from,f.valid_until,f.confidence,
                        f.confidence_method,f.confidence_method_version,f.id
                   from ai_grid_current_coverage_artifacts c join ai_grid_facts f
-                    on f.artifact_id=c.artifact_id and f.run_id=c.source_run_id
+                    on f.artifact_id=c.artifact_id and f.snapshot_manifest_id=c.snapshot_manifest_id
                  where c.epoch_id=:epochId
                 union all
                 select h.artifact_id,h.fact_key,h.value_json::text,h.state,h.provenance,h.evidence_class,
@@ -568,7 +588,8 @@ public class AiGridExposureService {
         List<Fact> validatingEvidence = validatingEvidence(path, facts, template.id());
         boolean signalsPresent = validatingEvidence.size() == requiredEvidenceCount(template.id())
                 && validatingEvidence.stream().allMatch(f -> truthy(f.value()));
-        if (validated && !meetsConfidenceRequirements(template.id(), validatingEvidence)) {
+        if (validated && (path.edges().stream().anyMatch(edge -> edge.validUntil()!=null && edge.validUntil().isBefore(asOf))
+                || !meetsConfidenceRequirements(template.id(), validatingEvidence))) {
             validated = false;
             hypothesis = true;
         } else if (!validated && signalsPresent) {
@@ -672,6 +693,11 @@ public class AiGridExposureService {
         int closed = 0;
         for (OpenExposure exposure : open) {
             if (observed.contains(exposure.fingerprint())) continue;
+            if (!authoritative || !absenceIsQualified(exposure.id(),epochId,asOf)) {
+                jdbc.update("update ai_grid_exposure_paths set state='EXPOSURE_HYPOTHESIS',updated_at=now() where id=:id",
+                        Map.of("id",exposure.id()));
+                continue;
+            }
             jdbc.update("""
                     update ai_grid_exposure_paths set state='CLOSED',status='CLOSED',closed_at=:asOf,
                         last_complete_run_id=:runId,last_complete_epoch_id=:epochId,updated_at=now() where id=:id
@@ -689,15 +715,38 @@ public class AiGridExposureService {
                     .addValue("exposureId", exposure.id()).addValue("runId", runId)
                     .addValue("epochId", epochId)
                     .addValue("asOf", Timestamp.from(asOf)));
-            Integer remaining = exposure.findingId() == null ? 0 : jdbc.queryForObject("""
-                    select count(*) from ai_grid_exposure_paths
-                     where finding_id=:findingId and status='OPEN' and id<>:id
-                    """, Map.of("findingId", exposure.findingId(), "id", exposure.id()), Integer.class);
-            if (remaining == null || remaining == 0)
-                findingService.closeVerified(tenant, exposure.findingId(), runId, exposure.id());
             closed++;
         }
         return closed;
+    }
+
+    private boolean absenceIsQualified(UUID pathId,UUID epochId,Instant asOf) {
+        // Absence must be established by fresh complete heads for every previously associated artifact.
+        Integer uncertain=jdbc.queryForObject("""
+                select count(*) from ai_grid_exposure_associations association
+                  left join ai_grid_current_coverage_artifacts current on current.artifact_id=association.artifact_id
+                       and current.epoch_id=:epochId
+                 where association.exposure_path_id=:pathId and association.artifact_id is not null
+                   and ((current.artifact_id is not null and current.observed_at<:freshAfter)
+                        or (current.artifact_id is null and not exists (
+                            select 1 from ai_security_artifacts a join ai_security_snapshot_scopes scope
+                              on scope.provider=a.provider and scope.account_id=a.account_id
+                             and scope.region=a.region and scope.resource_family=a.native_kind
+                            where a.id=association.artifact_id and scope.status='COMPLETE'
+                              and scope.completed_at>=:freshAfter)))
+                """,new MapSqlParameterSource().addValue("pathId",pathId).addValue("epochId",epochId)
+                .addValue("freshAfter",Timestamp.from(asOf.minusSeconds(86400))),Integer.class);
+        if (uncertain!=null && uncertain>0) return false;
+        Integer stale=jdbc.queryForObject("""
+                select count(*) from ai_grid_exposure_associations association
+                  join ai_grid_current_coverage_artifacts current on current.artifact_id=association.artifact_id
+                  join ai_grid_facts fact on fact.snapshot_manifest_id=current.snapshot_manifest_id
+                 where association.exposure_path_id=:pathId and current.epoch_id=:epochId
+                   and (fact.state in ('UNKNOWN','STALE','ERROR') or fact.observed_at<:freshAfter
+                        or fact.valid_until<:asOf)
+                """,new MapSqlParameterSource().addValue("pathId",pathId).addValue("epochId",epochId)
+                .addValue("freshAfter",Timestamp.from(asOf.minusSeconds(86400))).addValue("asOf",Timestamp.from(asOf)),Integer.class);
+        return stale==null || stale==0;
     }
 
     private void associate(Tenant tenant, UUID exposureId, SystemContext system, UUID artifactId, String role) {

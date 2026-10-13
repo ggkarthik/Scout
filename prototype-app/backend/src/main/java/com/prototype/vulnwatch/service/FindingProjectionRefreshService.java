@@ -136,10 +136,13 @@ public class FindingProjectionRefreshService {
                     LEFT JOIN vulnerabilities vulnerability ON vulnerability.id = finding.vulnerability_id
                     LEFT JOIN inventory_components component ON component.id = finding.component_id
                     LEFT JOIN assets asset ON asset.id = finding.asset_id
-                    LEFT JOIN finding_subjects ai_subject
-                      ON ai_subject.finding_id = finding.id
-                     AND ai_subject.subject_type = 'ARTIFACT'
-                     AND ai_subject.subject_role = 'PRIMARY'
+                    LEFT JOIN LATERAL (
+                        SELECT subject_id FROM finding_subjects subject
+                         WHERE subject.finding_id=finding.id AND subject.subject_type='ARTIFACT'
+                           AND subject.subject_role IN ('PRIMARY','ROOT_CAUSE')
+                         ORDER BY CASE subject.subject_role WHEN 'ROOT_CAUSE' THEN 0 ELSE 1 END,subject.subject_id
+                         LIMIT 1
+                    ) ai_subject ON true
                     LEFT JOIN ai_security_artifacts ai_artifact ON ai_artifact.id = ai_subject.subject_id
                     LEFT JOIN (
                         SELECT DISTINCT upper(fix_record.cve_id) AS external_id_upper
