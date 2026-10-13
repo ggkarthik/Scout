@@ -31,7 +31,7 @@ class AiGridRuntimeTelemetryReadinessPostgresIntegrationTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void executesOperationalDashboardQueryOnV3Schema() throws Exception {
+    void executesOperationalDashboardQueryOnBaselineAndExplicitTestSources() throws Exception {
         migrate();
         try (Connection connection = DriverManager.getConnection(
                 DATABASE.url(), DATABASE.username(), DATABASE.password())) {
@@ -67,10 +67,23 @@ class AiGridRuntimeTelemetryReadinessPostgresIntegrationTest {
             tenant.setId(TENANT_ID);
             tenant.setSchemaName("tenant_default");
 
-            var readiness = new AiGridRuntimeTelemetryReadinessService(
-                    jdbc, execution, new PackagedMigrationCatalog()).readiness(tenant);
+            var service = new AiGridRuntimeTelemetryReadinessService(
+                    jdbc, execution, new PackagedMigrationCatalog());
+            var readiness = service.readiness(tenant);
 
             assertEquals(true, readiness.available());
+            assertFalse(readiness.program2EntryGateMet());
+            assertEquals(0, readiness.providers().size(),
+                    "the V1 baseline must not activate runtime telemetry sources");
+
+            // Keep exercising the populated dashboard query without enabling production seeds.
+            jdbc.update("""
+                    insert into ai_runtime_source_configurations
+                        (source_id,tenant_id,provider,source_kind,required_for_program_gate,status)
+                    values ('AZURE_FOUNDRY_RUNTIME',:tenantId,'AZURE','PROVIDER_CONNECTOR',true,'ACTIVE'),
+                           ('COPILOT_STUDIO_RUNTIME',:tenantId,'MICROSOFT_COPILOT','PROVIDER_CONNECTOR',true,'ACTIVE')
+                    """, Map.of("tenantId", TENANT_ID));
+            readiness = service.readiness(tenant);
             assertFalse(readiness.program2EntryGateMet());
             assertEquals(2, readiness.providers().size());
             assertEquals(java.util.List.of("AZURE_FOUNDRY_RUNTIME", "COPILOT_STUDIO_RUNTIME"),

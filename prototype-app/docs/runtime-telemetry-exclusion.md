@@ -16,3 +16,5 @@ The development histories are consolidated into platform V1 and tenant V1. Platf
 4. Keep runtime disabled during rollback. Do not restore old tenant overrides or distributions as part of an application rollback.
 
 Azure pilot shutdown is a separate operational change described in [azure-runtime-pilot-shutdown.md](azure-runtime-pilot-shutdown.md).
+
+Legacy posture policies with a null `evaluation_mode` remain visible and configurable through the compatibility API. Runtime exclusion filters treat that legacy null as a non-runtime mode while still excluding explicit `RUNTIME_*` modes and `AGCF-RT-*` policy IDs. The readiness integration test verifies the baseline has zero active sources and uses explicit disposable fixtures to exercise populated dashboard queries.

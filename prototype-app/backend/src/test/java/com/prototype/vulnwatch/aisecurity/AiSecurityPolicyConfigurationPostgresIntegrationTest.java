@@ -66,6 +66,8 @@ class AiSecurityPolicyConfigurationPostgresIntegrationTest {
     @Test
     void excludingAnArtifactSuppressesItsOpenFindingAndReincludingReopensIt() {
         Tenant tenant = provision("Scope Exceptions Co", "scope-exceptions-co");
+        assertEquals(WILDCARD_POLICY, apiService.policy(tenant, WILDCARD_POLICY).id(),
+                "legacy posture policies with a null evaluation mode remain visible in the catalog");
         UUID connectorId = connector(tenant);
         UUID runId = syncRunFacade.start(tenant).getId();
 

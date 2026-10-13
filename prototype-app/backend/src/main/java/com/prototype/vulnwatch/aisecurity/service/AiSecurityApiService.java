@@ -1250,7 +1250,7 @@ public class AiSecurityApiService {
                   from platform.ai_grid_policy_versions p
                   join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id
                    and (p.version=d.pinned_version or (d.pinned_version is null and p.package_digest is null))
-                 where p.evaluation_mode not like 'RUNTIME_%' and p.policy_id not like 'AGCF-RT-%'
+                 where coalesce(p.evaluation_mode, '') not like 'RUNTIME_%' and p.policy_id not like 'AGCF-RT-%'
                    and p.lifecycle in ('VALIDATED', 'PUBLISHED', 'CANARY', 'DEPRECATED')
                    and platform.ai_grid_policy_visible_to_tenant(
                            d.available or p.lifecycle='DEPRECATED', d.rollout_stage,
@@ -1266,7 +1266,7 @@ public class AiSecurityApiService {
                   from platform.ai_grid_policy_versions p
                   join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id
                    and (p.version=d.pinned_version or (d.pinned_version is null and p.package_digest is null))
-                 where p.policy_id=:id and p.evaluation_mode not like 'RUNTIME_%' and p.policy_id not like 'AGCF-RT-%'
+                 where p.policy_id=:id and coalesce(p.evaluation_mode, '') not like 'RUNTIME_%' and p.policy_id not like 'AGCF-RT-%'
                    and p.lifecycle in ('VALIDATED', 'PUBLISHED', 'CANARY', 'DEPRECATED')
                    and platform.ai_grid_policy_visible_to_tenant(
                            d.available or p.lifecycle='DEPRECATED', d.rollout_stage,
