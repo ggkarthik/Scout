@@ -3,7 +3,7 @@ import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { PageFreshnessStatus } from '../components/PageFreshnessStatus';
-import { AI_ARTIFACT_CATEGORIES, combinedNativeKindFilterValue, stripProviderPrefix } from '../features/ai-security/categories';
+import { AI_ARTIFACT_CATEGORIES, isAgentVersionKind, combinedNativeKindFilterValue, stripProviderPrefix } from '../features/ai-security/categories';
 import type { AiSeverityGridRow } from '../features/ai-security/types';
 import { InventoryShell } from '../features/inventory/InventoryShell';
 import { pathForAiBomDeclaredResources, pathForConnectView, pathForInventoryAiAsset, pathForInventoryAiAssets } from '../app/routes';
@@ -57,7 +57,7 @@ function buildDisplayGridRows(rows: AiSeverityGridRow[], maxRows: number): Displ
   });
 
   const remaining = rows
-    .filter((row) => !CATEGORIZED_NATIVE_KINDS.has(row.nativeKind))
+    .filter((row) => !CATEGORIZED_NATIVE_KINDS.has(row.nativeKind) && !isAgentVersionKind(row.nativeKind))
     .sort((a, b) => b.total - a.total);
   const remainingBudget = Math.max(0, maxRows - categoryRows.length);
   const hasOverflow = remaining.length > remainingBudget;
@@ -263,10 +263,7 @@ export function AiInventoryPage() {
               </div>
             </div>
           </button>
-          <button type="button" className="fpl-widget" onClick={() => navigate('/inventory/ai/executions')}>
-            <div className="fpl-widget-title">Runtime metadata</div>
-            <p>Review execution status, policy state, and timing without exposing prompts or transcripts.</p>
-          </button>
+
           <button type="button" className="fpl-widget" onClick={() => navigate(pathForAiBomDeclaredResources())}>
             <div className="fpl-widget-title">AI-BOM Declared Resources</div>
             <p>Models and datasets declared by an uploaded AI-BOM, their deployment-linking coverage, and setup actions.</p>

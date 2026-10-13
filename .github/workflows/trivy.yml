@@ -20,6 +20,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify Spring advisory applicability
+        run: |
+          python3 .github/scripts/test-spring-advisory-applicability.py
+          python3 .github/scripts/check-spring-advisory-applicability.py
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -39,6 +44,7 @@ jobs:
           output: trivy-fs.sarif
           scanners: vuln
           severity: CRITICAL
+          trivyignores: .trivyignore.yaml
           exit-code: '0'
 
       - name: Upload filesystem scan results
@@ -49,13 +55,18 @@ jobs:
           category: trivy-filesystem
 
       - name: Enforce filesystem vulnerability gate
-        run: trivy fs --scanners vuln --severity CRITICAL --exit-code 1 .
+        run: trivy fs --scanners vuln --severity CRITICAL --ignorefile .trivyignore.yaml --exit-code 1 .
 
   images:
     name: Docker image scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify Spring advisory applicability
+        run: |
+          python3 .github/scripts/test-spring-advisory-applicability.py
+          python3 .github/scripts/check-spring-advisory-applicability.py
 
       - name: Build backend image
         run: docker build -f prototype-app/backend/Dockerfile -t vulnwatch-backend:${{ github.sha }} prototype-app/backend
@@ -67,6 +78,7 @@ jobs:
           image-ref: vulnwatch-backend:${{ github.sha }}
           format: sarif
           output: trivy-backend.sarif
+          trivyignores: .trivyignore.yaml
           scanners: vuln
           severity: CRITICAL
           exit-code: '0'
@@ -88,6 +100,7 @@ jobs:
           image-ref: vulnwatch-frontend:${{ github.sha }}
           format: sarif
           output: trivy-frontend.sarif
+          trivyignores: .trivyignore.yaml
           scanners: vuln
           severity: CRITICAL
           exit-code: '0'
@@ -101,5 +114,5 @@ jobs:
 
       - name: Enforce image vulnerability gate
         run: |
-          trivy image --scanners vuln --severity CRITICAL --exit-code 1 vulnwatch-backend:${{ github.sha }}
-          trivy image --scanners vuln --severity CRITICAL --exit-code 1 vulnwatch-frontend:${{ github.sha }}
+          trivy image --scanners vuln --severity CRITICAL --ignorefile .trivyignore.yaml --exit-code 1 vulnwatch-backend:${{ github.sha }}
+          trivy image --scanners vuln --severity CRITICAL --ignorefile .trivyignore.yaml --exit-code 1 vulnwatch-frontend:${{ github.sha }}

@@ -16,7 +16,7 @@ LINES = (
     "prototype-app/backend/src/main/resources/db/migration/tenant",
 )
 VERSION = re.compile(r"^V(\d+)__.+\.sql$")
-RESET_RECORD = "prototype-app/docs/migration-reset.md"
+RESET_RECORD = "prototype-app/docs/development-v1-baseline-reset.md"
 RETIRED_COLLISIONS = {
     "prototype-app/backend/src/main/resources/db/migration/postgres_reset/V4__github_security_advisories_platform.sql",
     "prototype-app/backend/src/main/resources/db/migration/postgres_reset/V4__osv_supplement.sql",

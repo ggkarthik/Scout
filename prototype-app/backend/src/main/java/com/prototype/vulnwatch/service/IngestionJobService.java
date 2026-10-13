@@ -327,6 +327,24 @@ public class IngestionJobService {
         }));
     }
 
+    public void cancelRuntimeJob(UUID tenantId, UUID jobId) {
+        tenantSchemaExecutionService.run(tenantId, () -> transactionTemplate.execute(status -> {
+            IngestionJob job = ingestionJobRepository.findById(jobId)
+                    .orElseThrow(() -> new IllegalArgumentException("Ingestion job not found: " + jobId));
+            if (!JOB_TYPE_AI_GRID_RUNTIME_ADAPTER.equals(job.getJobType())
+                    || !List.of(STATUS_QUEUED, STATUS_RUNNING).contains(job.getStatus())) return null;
+            job.setStatus(STATUS_CANCELLED);
+            job.setFailureCode("RUNTIME_OUT_OF_SCOPE");
+            job.setFailureMessage("Runtime telemetry is outside the current release scope");
+            job.setCompletedAt(Instant.now());
+            ingestionJobRepository.save(job);
+            auditEventService.recordExplicitActor(tenantId, "runtime-scope-release", "SYSTEM",
+                    "ingestion.job.cancelled", "ingestion_job", jobId.toString(),
+                    "{\"reason\":\"RUNTIME_OUT_OF_SCOPE\"}", "SUCCESS");
+            return null;
+        }));
+    }
+
     public void markFailed(UUID tenantId, UUID jobId, String failureCode, String failureMessage) {
         tenantSchemaExecutionService.run(tenantId, () -> transactionTemplate.execute(status -> {
             IngestionJob job = ingestionJobRepository.findById(jobId)

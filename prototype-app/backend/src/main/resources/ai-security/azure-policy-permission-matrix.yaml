@@ -31,6 +31,19 @@ family_permissions:
     api_version: "2026-01-15-preview"
     role: Azure AI Developer
     actions: [Microsoft.CognitiveServices/accounts/projects/read]
+  AZURE_FOUNDRY_AGENT_ROUTES:
+    api_version: "v1"
+    role: Custom metadata reader
+    actions: [Microsoft.CognitiveServices/accounts/projects/read]
+    data_actions: [Microsoft.CognitiveServices/accounts/AIServices/agents/read]
+  AZURE_FOUNDRY_AGENT_APPLICATIONS:
+    api_version: "2026-07-01"
+    role: Reader
+    actions: [Microsoft.CognitiveServices/accounts/projects/applications/read]
+  AZURE_FOUNDRY_AGENT_DEPLOYMENTS:
+    api_version: "2026-07-01"
+    role: Reader
+    actions: [Microsoft.CognitiveServices/accounts/projects/applications/agentdeployments/read]
   AZURE_FOUNDRY_AGENT_VERSIONS:
     api_version: "v1"
     role: Azure AI Developer
@@ -71,14 +84,6 @@ family_permissions:
     api_version: "2024-10-01"
     role: Reader
     actions: [Microsoft.MachineLearningServices/workspaces/computes/read]
-  AZURE_ML_JOBS:
-    api_version: "2024-10-01"
-    role: Reader
-    actions: [Microsoft.MachineLearningServices/workspaces/jobs/read]
-  AZURE_ML_PIPELINES:
-    api_version: "2024-10-01"
-    role: Reader
-    actions: [Microsoft.MachineLearningServices/workspaces/jobs/read]
   AZURE_SEARCH_SERVICES:
     api_version: "2024-03-01-preview"
     role: Reader

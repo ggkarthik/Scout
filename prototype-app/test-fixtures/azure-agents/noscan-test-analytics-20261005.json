@@ -1,0 +1,35 @@
+{
+  "intent": "Create the requested synthetic orders analytics test agent",
+  "command": "agent_update",
+  "parameters": {
+    "projectEndpoint": "https://ravikanukollu-1991-resource.services.ai.azure.com/api/projects/ravikanukollu-1991",
+    "agentName": "noscan-test-analytics-20261005",
+    "agentDefinition": {
+      "kind": "prompt",
+      "model": "gpt-5-mini",
+      "reasoning": {
+        "effort": "low"
+      },
+      "instructions": "You are Northwind Demo Orders Analyst. Use the attached synthetic orders CSV and code interpreter to calculate totals, quantities, and status summaries. Show the calculation and label all results synthetic. Only analyze the provided file; do not access external networks, secrets, or production systems. Never modify orders or issue refunds.",
+      "tools": [
+        {
+          "type": "code_interpreter",
+          "container": {
+            "type": "auto",
+            "file_ids": [
+              "assistant-Saw2JZAiJU1pvKyWhWaWB6"
+            ]
+          }
+        }
+      ]
+    },
+    "creationOptions": {
+      "description": "Synthetic orders CSV analytics fixture. No invocation performed.",
+      "metadata": {
+        "purpose": "noscan-test-fixture",
+        "created_on": "2026-10-05",
+        "data": "synthetic"
+      }
+    }
+  }
+}

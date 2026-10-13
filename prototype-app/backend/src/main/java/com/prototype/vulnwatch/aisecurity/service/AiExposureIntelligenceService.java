@@ -100,15 +100,7 @@ public class AiExposureIntelligenceService {
                 select p.id,p.title,p.severity,p.confidence,p.root_cause_artifact_id,p.breakpoint,p.last_observed_at,
                        coalesce(a.owner_name,'UNOWNED'),coalesce(a.provider,'UNKNOWN'),coalesce(a.account_id,'UNKNOWN'),
                        coalesce(a.business_criticality,''),coalesce(a.attributes_json::text,'{}'),
-                       exists(select 1 from ai_grid_host_context_facts h
-                               where h.artifact_id=a.id and h.fact_key like 'activity.%'
-                                 and h.state='KNOWN' and h.valid_until > now()
-                                 and (h.value_json = 'true'::jsonb
-                                      or (h.fact_key='activity.invocation_count_observed'
-                                          and jsonb_typeof(h.value_json)='number'
-                                          and (h.value_json #>> '{}')::numeric > 0)
-                                      or (h.fact_key='activity.agent_last_observed_at'
-                                          and h.value_json <> 'null'::jsonb))) activity_observed
+                       false activity_observed
                   from ai_grid_exposure_paths p
                   join ai_security_artifacts a on a.id=p.root_cause_artifact_id
                  where p.status='OPEN' and p.state='VALIDATED_EXPOSURE'
@@ -152,7 +144,7 @@ public class AiExposureIntelligenceService {
         };
         long ageDays = Math.max(0, Duration.between(lastObservedAt, now).toDays());
         int recencyPoints = ageDays <= 7 ? 10 : ageDays <= 30 ? 6 : 2;
-        int activityPoints = activityObserved ? 10 : 0;
+        int activityPoints = 0; // Runtime activity evidence is deferred in this release.
         int total = severityPoints + confidencePoints + exposurePoints + criticalityPoints + recencyPoints
                 + activityPoints;
         return new ExposurePriority(id, title, severity, Math.min(100, total), severityPoints, confidencePoints,

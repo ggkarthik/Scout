@@ -52,7 +52,14 @@ public class AzurePolicyPermissionMatrix {
     }
 
     public List<String> requiredPermissions(String resourceFamily) {
-        return family(resourceFamily).actions();
+        if ("AZURE_BOT_IDENTITIES".equals(resourceFamily)) {
+            List<String> permissions = new ArrayList<>(family(resourceFamily).actions());
+            permissions.add("Microsoft Graph: AgentIdentity.Read.All (application)");
+            return List.copyOf(permissions);
+        }
+        List<String> permissions = new ArrayList<>(family(resourceFamily).actions());
+        permissions.addAll(family(resourceFamily).dataActions());
+        return List.copyOf(permissions);
     }
 
     public RequirementsReport requirementsReport() {
@@ -68,13 +75,15 @@ public class AzurePolicyPermissionMatrix {
     public AzureCustomRoleTemplate roleTemplate() {
         TreeSet<String> actions = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
         families.values().forEach(family -> actions.addAll(family.actions()));
+        TreeSet<String> dataActions = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        families.values().forEach(family -> dataActions.addAll(family.dataActions()));
         return new AzureCustomRoleTemplate(
                 "NoScan AI Security Discovery",
                 true,
                 "Read-only Azure AI inventory and configuration evidence required by shipped policies.",
                 List.copyOf(actions),
                 prohibitedActions,
-                List.of(),
+                List.copyOf(dataActions),
                 List.of(),
                 List.of("/subscriptions/<subscription-id>"));
     }
@@ -121,7 +130,8 @@ public class AzurePolicyPermissionMatrix {
                     family,
                     text(config.get("api_version")),
                     text(config.get("role")),
-                    List.copyOf(strings(config.get("actions")))));
+                    List.copyOf(strings(config.get("actions"))),
+                    List.copyOf(strings(config.get("data_actions")))));
         });
         return Map.copyOf(result);
     }
@@ -179,7 +189,8 @@ public class AzurePolicyPermissionMatrix {
             String resourceFamily,
             String apiVersion,
             String role,
-            List<String> actions
+            List<String> actions,
+            List<String> dataActions
     ) {
     }
 

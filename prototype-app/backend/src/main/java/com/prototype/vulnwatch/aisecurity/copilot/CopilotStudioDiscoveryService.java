@@ -135,8 +135,8 @@ public class CopilotStudioDiscoveryService {
                 gap.status() == 429 || gap.status() >= 500, List.of(), null)).toList();
         ScopeStatus status = diagnostics.isEmpty() ? ScopeStatus.COMPLETE : ScopeStatus.PARTIAL;
         String scopeKey = "MICROSOFT_COPILOT:" + config.organizationUrl() + ":GLOBAL:COPILOT_STUDIO";
-        observations.ingest(tenant, new ObservationEnvelopeV1("OBSERVATION_V1", runId, connectorId, tenant.getId(), "MICROSOFT_COPILOT", null,
-                config.organizationUrl(), "GLOBAL", "COPILOT_STUDIO", scopeKey, 1, 1, hash(runId + "|" + artifacts.size()), hash("copilot|" + artifacts.size() + "|" + relationships.size()), Instant.now(), status, artifacts, relationships, diagnostics));
+        observations.ingest(tenant, new ObservationEnvelopeV1(AiSecurityObservationService.CONTRACT_VERSION, runId, connectorId, tenant.getId(), "MICROSOFT_COPILOT", null,
+                config.organizationUrl(), "GLOBAL", "COPILOT_STUDIO", scopeKey, 0, 1, hash(runId + "|" + artifacts.size()), hash("copilot|" + artifacts.size() + "|" + relationships.size()), Instant.now(), status, artifacts, relationships, diagnostics));
         return new Result(runId, artifacts.size(), diagnostics.size(), status);
     }
     public CopilotStudioDataverseClient.PermissionTest test(Tenant tenant, UUID connectorId) {

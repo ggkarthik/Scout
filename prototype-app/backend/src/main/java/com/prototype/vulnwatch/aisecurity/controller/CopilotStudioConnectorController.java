@@ -42,6 +42,7 @@ public class CopilotStudioConnectorController {
     @PostMapping("/{connectorId}/test") @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
     public com.prototype.vulnwatch.aisecurity.copilot.CopilotStudioDataverseClient.PermissionTest test(@PathVariable UUID connectorId) { return discovery.test(tenant(), connectorId); }
     @PostMapping("/{connectorId}/runtime-run") @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','INVENTORY_ADMIN')")
-    public CopilotStudioRuntimeCollectionService.Result runtimeRun(@PathVariable UUID connectorId) { return runtime.run(tenant(), connectorId); }
+    public CopilotStudioRuntimeCollectionService.Result runtimeRun(@PathVariable UUID connectorId) {
+        com.prototype.vulnwatch.aisecurity.service.AiRuntimeScope.requireInScope(); return runtime.run(tenant(), connectorId); }
     private Tenant tenant() { Tenant tenant = workspace.getWorkspace(); access.assertEntitled(tenant); return tenant; }
 }

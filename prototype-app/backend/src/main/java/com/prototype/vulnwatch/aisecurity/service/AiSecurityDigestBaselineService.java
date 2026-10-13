@@ -15,10 +15,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.server.ResponseStatusException;
 
-/** Approval boundary for HMACed prompt and tool-definition content. Plaintext never enters this API. */
+/** Approval boundary for internal definition digests and bounded control metadata. Raw definitions never enter this API. */
 @Service
 public class AiSecurityDigestBaselineService {
-    private static final java.util.Set<String> KINDS = java.util.Set.of("PROMPT", "TOOL_DEFINITION");
+    private static final java.util.Set<String> KINDS = java.util.Set.of("PROMPT", "TOOL_DEFINITION", "GUARDRAIL_CONFIGURATION");
     private final NamedParameterJdbcTemplate jdbc;
     private final TenantSchemaExecutionService tenantExecution;
     private final TransactionTemplate transactions;
@@ -55,6 +55,14 @@ public class AiSecurityDigestBaselineService {
         validate(request);
         Response response = tenantExecution.run(tenant, () -> transactions.execute(status -> {
             assertArtifact(tenant, artifactId);
+            Observation observation = currentObservation(tenant, artifactId, request.digestKind());
+            if (!java.util.Objects.equals(request.sourceRunId(), observation.runId())
+                    || !request.algorithm().equals(observation.algorithm())
+                    || !request.keyVersion().equals(observation.keyVersion())
+                    || !request.digest().equals(observation.digest())) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Approval must reference the current stored observation");
+            }
+            assertFresh(observation);
             int existing = jdbc.queryForObject("""
                     select count(*) from ai_security_artifact_digest_baselines
                      where artifact_id=:artifactId and digest_kind=:kind
@@ -68,16 +76,18 @@ public class AiSecurityDigestBaselineService {
             jdbc.update("""
                     insert into ai_security_artifact_digest_baselines
                         (id,tenant_id,artifact_id,digest_kind,algorithm,key_version,approved_digest,
-                         approval_status,approved_by,approved_at,source_run_id)
+                         approval_status,approved_by,approved_at,source_run_id,approval_reference_verified)
                     values (:id,:tenantId,:artifactId,:kind,:algorithm,:keyVersion,:digest,
-                            'APPROVED',:actor,now(),:sourceRunId)
+                            'APPROVED',:actor,now(),:sourceRunId,true)
                     on conflict (tenant_id,artifact_id,digest_kind) do update set
                         algorithm=excluded.algorithm,key_version=excluded.key_version,
                         approved_digest=excluded.approved_digest,approval_status='APPROVED',
                         approved_by=excluded.approved_by,approved_at=now(),revoked_by=null,revoked_at=null,
-                        source_run_id=excluded.source_run_id,updated_at=now()
+                        source_run_id=excluded.source_run_id,approval_reference_verified=true,updated_at=now()
                     """, params(tenant, artifactId, request, actor));
-            resolveSetupActions(artifactId, request.digestKind());
+            recordHistory(tenant, artifactId, request.digestKind(), reapproval ? "REAPPROVED" : "APPROVED", actor, request.sourceRunId());
+            observeCurrentTenant(tenant, artifactId, request.digestKind(), observation.algorithm(),
+                    observation.keyVersion(), observation.digest(), observation.runId(), observation.observedAt());
             return required(artifactId, request.digestKind());
         }));
         audit.record(reapproval ? "ai_security.digest_baseline.reapproved" : "ai_security.digest_baseline.approved",
@@ -88,6 +98,7 @@ public class AiSecurityDigestBaselineService {
     public Response revoke(Tenant tenant, UUID artifactId, String digestKind, String actor) {
         requireKind(digestKind);
         Response response = tenantExecution.run(tenant, () -> transactions.execute(status -> {
+            assertArtifact(tenant, artifactId);
             int changed = jdbc.update("""
                     update ai_security_artifact_digest_baselines
                        set approval_status='REVOKED',revoked_by=:actor,revoked_at=now(),updated_at=now()
@@ -95,6 +106,19 @@ public class AiSecurityDigestBaselineService {
                     """, new MapSqlParameterSource().addValue("actor", actor).addValue("artifactId", artifactId)
                     .addValue("kind", digestKind));
             if (changed != 1) throw new ResponseStatusException(HttpStatus.CONFLICT, "Active digest baseline was not found");
+            Observation observation = findObservation(tenant, artifactId, digestKind);
+            UUID sourceRun = observation == null ? required(artifactId, digestKind).sourceRunId() : observation.runId();
+            recordHistory(tenant, artifactId, digestKind, "REVOKED", actor, sourceRun);
+            if (observation != null) {
+                observeCurrentTenant(tenant, artifactId, digestKind, observation.algorithm(), observation.keyVersion(),
+                        observation.digest(), observation.runId(), observation.observedAt());
+            } else {
+                String policyId = "GUARDRAIL_CONFIGURATION".equals(digestKind)
+                        ? "AI_GUARDRAIL_CONFIGURATION_CHANGED_AFTER_APPROVAL" : "AI_ARTIFACT_DIGEST_CHANGED_AFTER_APPROVAL";
+                findings.withdrawBaselineComparison(tenant, new AiGridFindingService.AssessmentResult(UUID.randomUUID(), sourceRun,
+                        policyId, "1.0.0", "Approval withdrawn", "HIGH", "DISABLED", "UNKNOWN", "UNAPPROVED", artifactId,
+                        sha256(policyId + "|" + artifactId + "|" + digestKind), Map.of("digestKind", digestKind)));
+            }
             return required(artifactId, digestKind);
         }));
         audit.record("ai_security.digest_baseline.revoked", "ai_security_artifact", artifactId.toString(),
@@ -107,16 +131,28 @@ public class AiSecurityDigestBaselineService {
                                         String keyVersion, String digest, UUID sourceRunId, Instant observedAt) {
         if (digest == null || digest.isBlank()) return null;
         requireKind(digestKind);
+        assertArtifact(tenant, artifactId);
+        Instant latest = jdbc.query("select observed_at from ai_security_artifact_digest_observations where artifact_id=:artifactId and digest_kind=:kind",
+                Map.of("artifactId", artifactId, "kind", digestKind), rs -> rs.next() ? rs.getTimestamp(1).toInstant() : null);
+        if (latest != null && latest.isAfter(observedAt)) return null;
         Baseline baseline = jdbc.query("""
-                select algorithm,key_version,approved_digest,approval_status
+                select algorithm,key_version,approved_digest,approval_status,approval_reference_verified
                   from ai_security_artifact_digest_baselines
                  where artifact_id=:artifactId and digest_kind=:kind
                 """, Map.of("artifactId", artifactId, "kind", digestKind),
-                rs -> rs.next() ? new Baseline(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4)) : null);
+                rs -> rs.next() ? new Baseline(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getBoolean(5)) : null);
         Outcome outcome = comparison(baseline == null ? null : baseline.status(),
                 baseline == null ? null : baseline.algorithm(), baseline == null ? null : baseline.keyVersion(),
                 baseline == null ? null : baseline.digest(), algorithm, keyVersion, digest);
 
+        if (baseline != null && "APPROVED".equals(baseline.status()) && !baseline.referenceVerified()) {
+            outcome = Outcome.BASELINE_UNKNOWN_REAPPROVAL_REQUIRED;
+        }
+        if ("GUARDRAIL_CONFIGURATION".equals(digestKind) && outcome != Outcome.UNAPPROVED
+                && outcome != Outcome.BASELINE_UNKNOWN_REAPPROVAL_REQUIRED) {
+            outcome = AiGuardrailBaselineComparison.compare(baseline.digest(), digest);
+        }
+        if (observedAt.isBefore(Instant.now().minusSeconds(86400))) outcome = Outcome.CONFIGURATION_UNKNOWN;
         jdbc.update("""
                 insert into ai_security_artifact_digest_observations
                     (tenant_id,artifact_id,digest_kind,algorithm,key_version,observed_digest,
@@ -130,22 +166,158 @@ public class AiSecurityDigestBaselineService {
                 .addValue("kind", digestKind).addValue("algorithm", algorithm).addValue("keyVersion", keyVersion)
                 .addValue("digest", digest).addValue("outcome", outcome.name()).addValue("runId", sourceRunId)
                 .addValue("observedAt", Timestamp.from(observedAt)));
-        if (outcome == Outcome.CHANGED_AFTER_APPROVAL || outcome == Outcome.BASELINE_UNKNOWN_REAPPROVAL_REQUIRED) {
+        if (outcome != Outcome.UNCHANGED) {
             upsertSetupAction(tenant, artifactId, digestKind, sourceRunId, outcome);
         } else if (outcome == Outcome.UNCHANGED) {
             resolveSetupActions(artifactId, digestKind);
         }
-        // Only a same-key digest change is policy drift. Key rotation and missing approval are
-        // setup/coverage states and deliberately cannot create this finding.
-        if (outcome == Outcome.CHANGED_AFTER_APPROVAL || outcome == Outcome.UNCHANGED) {
-            String fingerprint = sha256("AI_ARTIFACT_DIGEST_CHANGED_AFTER_APPROVAL|" + artifactId + "|" + digestKind);
-            findings.reconcile(tenant, new AiGridFindingService.AssessmentResult(UUID.randomUUID(), sourceRunId,
-                    "AI_ARTIFACT_DIGEST_CHANGED_AFTER_APPROVAL", "1.0.0", "Approved AI definition changed",
-                    "HIGH", "ENABLED", outcome == Outcome.CHANGED_AFTER_APPROVAL ? "FAIL" : "PASS",
-                    outcome.name(), artifactId, fingerprint, Map.of("digestKind", digestKind,
-                    "changedAfterApproval", outcome == Outcome.CHANGED_AFTER_APPROVAL)));
-        }
+        boolean guardrail = "GUARDRAIL_CONFIGURATION".equals(digestKind);
+        boolean changed = outcome == Outcome.CHANGED_AFTER_APPROVAL || outcome == Outcome.CONTROL_WEAKENED
+                || outcome == Outcome.CONTROL_CONFIGURATION_CHANGED_REVIEW_REQUIRED;
+        String policyId = guardrail ? "AI_GUARDRAIL_CONFIGURATION_CHANGED_AFTER_APPROVAL" : "AI_ARTIFACT_DIGEST_CHANGED_AFTER_APPROVAL";
+        String fingerprint = sha256(policyId + "|" + artifactId + "|" + digestKind);
+        // Withdrawal/incompatibility removes the basis for an existing drift finding. It is
+        // still a setup/uncertainty state; this lifecycle reconciliation is not a policy pass.
+        String selection = workflowSelection(tenant, policyId, guardrail);
+        UUID assessmentId = persistComparison(tenant, artifactId, digestKind, outcome, sourceRunId, observedAt, policyId, selection, fingerprint);
+        var assessment = new AiGridFindingService.AssessmentResult(assessmentId, sourceRunId,
+                policyId, "1.0.0", guardrail ? "Approved control configuration changed; review required" : "Approved AI definition changed",
+                guardrail && outcome != Outcome.CONTROL_WEAKENED ? "MEDIUM" : "HIGH", selection,
+                changed ? "FAIL" : outcome == Outcome.UNCHANGED ? "PASS" : "UNKNOWN", outcome.name(), artifactId, fingerprint,
+                Map.of("digestKind", digestKind, "comparisonOutcome", outcome.name(), "changedAfterApproval", changed));
+        boolean findingChanged = changed || outcome == Outcome.UNCHANGED ? findings.reconcile(tenant, assessment)
+                : findings.withdrawBaselineComparison(tenant, assessment);
+        if (findingChanged) findings.refreshProjectionAfterCommit(tenant);
         return outcome;
+    }
+
+    private UUID persistComparison(Tenant tenant, UUID artifactId, String kind, Outcome outcome, UUID runId,
+                                   Instant observedAt, String policyId, String selection, String fingerprint) {
+        boolean known = outcome == Outcome.UNCHANGED || outcome == Outcome.CHANGED_AFTER_APPROVAL
+                || outcome == Outcome.CONTROL_WEAKENED || outcome == Outcome.CONTROL_CONFIGURATION_CHANGED_REVIEW_REQUIRED;
+        String decision = outcome == Outcome.UNCHANGED ? "PASS" : known ? "FAIL" : "NO_DECISION";
+        String factKey = "GUARDRAIL_CONFIGURATION".equals(kind) ? "guardrail.baseline_comparison_outcome" : "artifact.digest_comparison_outcome";
+        var evidence = com.fasterxml.jackson.databind.node.JsonNodeFactory.instance.objectNode();
+        evidence.putObject(factKey).put("value", outcome.name()).put("state", known ? "KNOWN" : "UNKNOWN")
+                .put("evidenceClass", "CONFIGURATION").put("observedAt", observedAt.toString());
+        evidence.put("digestKind", kind);
+        return jdbc.queryForObject("""
+                insert into ai_grid_assessments (id,tenant_id,run_id,policy_id,policy_version,subject_type,subject_id,
+                    selection,applicability,evidence_readiness,decision,reason_code,input_facts_json,fingerprint,evaluation_as_of,decision_fingerprint)
+                values (:id,:tenantId,:runId,:policyId,'1.0.0','ARTIFACT',:artifactId,:selection,'APPLICABLE',:readiness,
+                    :decision,:reason,cast(:evidence as jsonb),:fingerprint,:asOf,:decisionFingerprint)
+                on conflict (tenant_id,run_id,policy_id,subject_type,subject_id,fingerprint) do update set
+                    selection=excluded.selection,evidence_readiness=excluded.evidence_readiness,decision=excluded.decision,
+                    reason_code=excluded.reason_code,input_facts_json=excluded.input_facts_json,
+                    evaluation_as_of=excluded.evaluation_as_of,decision_fingerprint=excluded.decision_fingerprint,evaluated_at=now()
+                returning id
+                """, new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("tenantId", tenant.getId())
+                .addValue("runId", runId).addValue("policyId", policyId).addValue("artifactId", artifactId)
+                .addValue("selection", selection).addValue("readiness", known ? "READY" : "INCOMPLETE")
+                .addValue("decision", decision).addValue("reason", outcome.name()).addValue("evidence", evidence.toString())
+                .addValue("fingerprint", fingerprint).addValue("asOf", Timestamp.from(Instant.now()))
+                .addValue("decisionFingerprint", sha256(kind + "|" + outcome + "|" + runId + "|" + observedAt)), UUID.class);
+    }
+
+    private String workflowSelection(Tenant tenant, String policyId, boolean guardrail) {
+        List<String> selected = jdbc.query("select selection from ai_grid_policy_selections where policy_id=:policyId",
+                Map.of("policyId", policyId), (rs, row) -> rs.getString(1));
+        if (!guardrail) return selected.isEmpty() ? "ENABLED" : selected.get(0);
+        // New control-regression findings must pass the existing distribution/canary boundary.
+        List<String> distributed = jdbc.query("""
+                select d.default_selection from platform.ai_grid_policy_distribution d
+                 join platform.ai_grid_policy_versions p on p.policy_id=d.policy_id and p.version=d.pinned_version
+                where d.policy_id=:policyId and p.version='1.0.0'
+                  and d.approved_package_digest=p.package_digest
+                  and exists (select 1 from platform.ai_grid_policy_release_decisions r
+                      where r.id=d.release_decision_id and r.policy_id=p.policy_id and r.policy_version=p.version
+                        and r.package_digest=p.package_digest and r.decision='APPROVED')
+                  and p.lifecycle in ('APPROVED','PUBLISHED','CANARY')
+                  and platform.ai_grid_policy_visible_to_tenant(d.available,d.rollout_stage,d.canary_tenant_ids_json,cast(:tenantId as uuid))
+                """, Map.of("policyId", policyId, "tenantId", tenant.getId().toString()), (rs, row) -> rs.getString(1));
+        if (distributed.isEmpty()) return "DISABLED";
+        return selected.isEmpty() ? distributed.get(0) : selected.get(0);
+    }
+
+    public Response approveObservation(Tenant tenant, UUID artifactId, ObservationRequest request, String actor, boolean reapproval) {
+        if (request == null || request.sourceRunId() == null || request.observedAt() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Observation reference is required");
+        }
+        requireKind(request.digestKind());
+        return tenantExecution.run(tenant, () -> transactions.execute(status -> {
+            assertArtifact(tenant, artifactId);
+            Observation current = currentObservation(tenant, artifactId, request.digestKind());
+            if (!current.runId().equals(request.sourceRunId()) || !current.observedAt().equals(request.observedAt())) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Observation changed; reload before approving");
+            }
+            return approve(tenant, artifactId, new Request(request.digestKind(), current.algorithm(), current.keyVersion(),
+                    current.digest(), current.runId()), actor, reapproval);
+        }));
+    }
+
+    public List<ObservationResponse> observations(Tenant tenant, UUID artifactId) {
+        return tenantExecution.run(tenant, () -> jdbc.query("""
+                select o.digest_kind,o.comparison_outcome,o.source_run_id,o.observed_at,o.observed_digest,b.approved_digest,
+                       (select coalesce(body.content_json->'attributes'->>'version',body.content_json->'attributes'->>'modelVersion',
+                                        body.content_json->'attributes'->>'guardrailVersion')
+                          from ai_grid_snapshot_manifests m join ai_grid_snapshot_bodies body on body.id=m.body_id
+                         where m.tenant_id=o.tenant_id and m.artifact_id=o.artifact_id and m.run_id=o.source_run_id
+                           and m.observed_at=o.observed_at order by m.id desc limit 1) observation_version
+                  from ai_security_artifact_digest_observations o
+                  left join ai_security_artifact_digest_baselines b
+                    on b.tenant_id=o.tenant_id and b.artifact_id=o.artifact_id and b.digest_kind=o.digest_kind
+                 where o.tenant_id=:tenantId and o.artifact_id=:artifactId order by o.digest_kind
+                """, Map.of("tenantId", tenant.getId(), "artifactId", artifactId), (rs, row) ->
+                new ObservationResponse(rs.getString(1), rs.getString(2), rs.getObject(3, UUID.class),
+                        rs.getTimestamp(4).toInstant(), rs.getTimestamp(4).toInstant().isBefore(Instant.now().minusSeconds(86400)),
+                        "GUARDRAIL_CONFIGURATION".equals(rs.getString(1))
+                                ? AiGuardrailBaselineComparison.changedFields(rs.getString(6), rs.getString(5)) : List.of(), rs.getString(7))));
+    }
+
+    public List<HistoryResponse> history(Tenant tenant, UUID artifactId) {
+        return tenantExecution.run(tenant, () -> jdbc.query("""
+                select id,digest_kind,action,actor,source_run_id,recorded_at from ai_security_baseline_history
+                 where tenant_id=:tenantId and artifact_id=:artifactId order by recorded_at desc,id
+                """, Map.of("tenantId", tenant.getId(), "artifactId", artifactId), (rs, row) ->
+                new HistoryResponse(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3), rs.getString(4),
+                        rs.getObject(5, UUID.class), rs.getTimestamp(6).toInstant())));
+    }
+
+    private Observation currentObservation(Tenant tenant, UUID artifactId, String kind) {
+        Observation observation = findObservation(tenant, artifactId, kind);
+        if (observation == null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Tenant-owned observation and source run were not found");
+        return observation;
+    }
+
+    private Observation findObservation(Tenant tenant, UUID artifactId, String kind) {
+        return jdbc.query("""
+                select algorithm,key_version,observed_digest,source_run_id,observed_at
+                  from ai_security_artifact_digest_observations o
+                 where o.tenant_id=:tenantId and o.artifact_id=:artifactId and o.digest_kind=:kind
+                   and exists (select 1 from ai_security_observation_receipts r
+                               where r.tenant_id=o.tenant_id and r.run_id=o.source_run_id)
+                """, Map.of("tenantId", tenant.getId(), "artifactId", artifactId, "kind", kind), rs -> {
+            if (!rs.next()) return null;
+            return new Observation(rs.getString(1), rs.getString(2), rs.getString(3), rs.getObject(4, UUID.class), rs.getTimestamp(5).toInstant());
+        });
+    }
+
+    private static void assertFresh(Observation observation) {
+        if (observation.observedAt().isBefore(Instant.now().minusSeconds(86400))
+                || observation.observedAt().isAfter(Instant.now().plusSeconds(300))) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "A fresh observation is required for approval");
+        }
+    }
+
+    private void recordHistory(Tenant tenant, UUID artifactId, String kind, String action, String actor, UUID runId) {
+        jdbc.update("""
+                insert into ai_security_baseline_history
+                    (id,tenant_id,artifact_id,digest_kind,action,actor,source_run_id,algorithm,key_version,approved_value,approval_reference_verified)
+                select :id,:tenantId,:artifactId,:kind,:action,:actor,:runId,algorithm,key_version,approved_digest,approval_reference_verified
+                  from ai_security_artifact_digest_baselines where artifact_id=:artifactId and digest_kind=:kind
+                """, new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("tenantId", tenant.getId())
+                .addValue("artifactId", artifactId).addValue("kind", kind).addValue("action", action)
+                .addValue("actor", actor).addValue("runId", runId));
     }
 
     private void upsertSetupAction(Tenant tenant, UUID artifactId, String kind, UUID runId, Outcome outcome) {
@@ -154,12 +326,13 @@ public class AiSecurityDigestBaselineService {
                 insert into ai_grid_setup_actions
                     (id,tenant_id,run_id,artifact_id,fingerprint,priority,category,action_code,title,detail,evidence_key)
                 values (:id,:tenantId,:runId,:artifactId,:fingerprint,90,'DIGEST_APPROVAL','REAPPROVE_DIGEST_BASELINE',
-                        'Reapprove artifact digest','The approved digest can no longer be used for this artifact.',:evidenceKey)
+                        :title,'Review the current observation and approve a compatible baseline.',:evidenceKey)
                 on conflict (tenant_id,fingerprint) do update set
                     run_id=excluded.run_id,status='OPEN',last_observed_at=now(),resolved_at=null,
-                    detail=excluded.detail
+                    detail=excluded.detail,title=excluded.title,evidence_key=excluded.evidence_key
                 """, new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("tenantId", tenant.getId())
                 .addValue("runId", runId).addValue("artifactId", artifactId).addValue("fingerprint", fingerprint)
+                .addValue("title", outcome == Outcome.UNAPPROVED ? "Approve current observation" : "Review baseline comparison")
                 .addValue("evidenceKey", "digest:" + kind + ":" + outcome.name()));
     }
 
@@ -185,9 +358,9 @@ public class AiSecurityDigestBaselineService {
     }
 
     private void assertArtifact(Tenant tenant, UUID artifactId) {
-        Integer count = jdbc.queryForObject("select count(*) from ai_security_artifacts where id=:id and tenant_id=:tenantId",
-                Map.of("id", artifactId, "tenantId", tenant.getId()), Integer.class);
-        if (count == null || count != 1) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "AI artifact was not found");
+        List<UUID> ids = jdbc.query("select id from ai_security_artifacts where id=:id and tenant_id=:tenantId for update",
+                Map.of("id", artifactId, "tenantId", tenant.getId()), (rs, row) -> rs.getObject(1, UUID.class));
+        if (ids.size() != 1) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "AI artifact was not found");
     }
 
     private static MapSqlParameterSource params(Tenant tenant, UUID artifactId, Request request, String actor) {
@@ -204,7 +377,7 @@ public class AiSecurityDigestBaselineService {
         requireKind(request.digestKind());
     }
     private static void requireKind(String kind) {
-        if (!KINDS.contains(kind)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported digest kind");
+        if (kind == null || !KINDS.contains(kind)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported digest kind");
     }
     private static boolean blank(String value) { return value == null || value.isBlank(); }
     static Outcome comparison(String status, String baselineAlgorithm, String baselineKeyVersion,
@@ -224,8 +397,13 @@ public class AiSecurityDigestBaselineService {
                 .digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
     } catch (java.security.GeneralSecurityException error) { throw new IllegalStateException(error); } }
 
-    private record Baseline(String algorithm, String keyVersion, String digest, String status) { }
-    public enum Outcome { UNAPPROVED, UNCHANGED, CHANGED_AFTER_APPROVAL, BASELINE_UNKNOWN_REAPPROVAL_REQUIRED }
+    private record Observation(String algorithm, String keyVersion, String digest, UUID runId, Instant observedAt) { }
+    public record ObservationRequest(String digestKind, UUID sourceRunId, Instant observedAt) { }
+    public record ObservationResponse(String digestKind, String comparisonOutcome, UUID sourceRunId, Instant observedAt, boolean stale, List<String> changedFields, String observationVersion) { }
+    public record HistoryResponse(UUID id, String digestKind, String action, String actor, UUID sourceRunId, Instant recordedAt) { }
+    private record Baseline(String algorithm, String keyVersion, String digest, String status, boolean referenceVerified) { }
+    public enum Outcome { UNAPPROVED, UNCHANGED, CHANGED_AFTER_APPROVAL, BASELINE_UNKNOWN_REAPPROVAL_REQUIRED,
+        CONTROL_WEAKENED, CONTROL_CONFIGURATION_CHANGED_REVIEW_REQUIRED, CONFIGURATION_UNKNOWN }
     public record Request(String digestKind, String algorithm, String keyVersion, String digest, UUID sourceRunId) { }
     public record Response(UUID artifactId, String digestKind, String algorithm, String keyVersion,
                            String approvalStatus, String approvedBy, Instant approvedAt, String revokedBy,

@@ -28,6 +28,7 @@ public class AiAgentExecutionRetentionService {
     }
     @Scheduled(cron = "${app.ai-security.runtime.retention-cron:0 17 2 * * *}")
     public void purgeExpired() {
+        if (AiRuntimeScope.excluded()) return;
         TenantContext.runAsPlatform(() -> tenants.listActiveTenants().forEach(tenant -> {
             PurgeResult result = purge(tenant);
             if (result.remainingEligible() > 0) {

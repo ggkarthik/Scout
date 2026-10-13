@@ -1,0 +1,45 @@
+{
+  "intent": "Create the requested synthetic NoScan test agent noscan-test-function-20261005",
+  "command": "agent_update",
+  "parameters": {
+    "projectEndpoint": "https://ravikanukollu-1991-resource.services.ai.azure.com/api/projects/ravikanukollu-1991",
+    "agentName": "noscan-test-function-20261005",
+    "agentDefinition": {
+      "kind": "prompt",
+      "model": "gpt-5-mini",
+      "reasoning": {
+        "effort": "low"
+      },
+      "instructions": "You are Northwind Demo Order Status Assistant. Use lookup_demo_order only for synthetic order IDs beginning DEMO-ORD-. Explain that the function requires a caller-provided implementation. Do not invent function results. You can only report status, never update orders, send messages, or issue refunds.",
+      "tools": [
+        {
+          "type": "function",
+          "name": "lookup_demo_order",
+          "description": "Read a synthetic demo order from the local orders.csv fixture. Caller must implement this read-only function.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "order_id": {
+                "type": "string",
+                "description": "Synthetic order reference beginning DEMO-ORD-"
+              }
+            },
+            "required": [
+              "order_id"
+            ],
+            "additionalProperties": false
+          },
+          "strict": true
+        }
+      ]
+    },
+    "creationOptions": {
+      "description": "Synthetic NoScan inventory test fixture; no production actions.",
+      "metadata": {
+        "purpose": "noscan-test-fixture",
+        "created_on": "2026-10-05",
+        "data": "synthetic"
+      }
+    }
+  }
+}

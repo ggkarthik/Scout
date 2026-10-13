@@ -2,6 +2,7 @@ export type AiArtifactType = 'AI_AGENT' | 'AI_AGENT_VERSION' | 'AI_PROMPT' | 'AI
 export type AiProvider = 'AWS' | 'AZURE' | 'MICROSOFT_COPILOT';
 
 export type AiSecuritySummary = {
+  logicalAgentCount?: number;
   artifactCounts: Record<string, number>;
   nativeKindCounts: Record<string, number>;
   providerCounts: Record<string, number>;
@@ -308,19 +309,6 @@ export type AiGridPlatformPolicyDetail = {
   applicabilityNotes?: string | null;
 };
 
-export type AiGridPolicyImpactPreview = {
-  policyId: string;
-  version: string;
-  tenantId: string;
-  applicableArtifacts: number;
-  expectedPass: number;
-  expectedFail: number;
-  expectedNoDecision: number;
-  expectedNotApplicable: number;
-  missingFacts: Record<string, number>;
-  generatedAt: string;
-};
-
 export type AiGridPolicyReleaseReadiness = {
   policyId: string;
   version: string;
@@ -486,6 +474,7 @@ export type AiGridPolicyExecutionResult = {
 };
 
 export type AiSecurityArtifact = {
+  deployment?: AiAgentDeployment | null;
   id: string;
   provider: string;
   providerResourceId: string;
@@ -516,6 +505,7 @@ export type AiSecurityArtifact = {
 };
 
 export type AiArtifactSummary = {
+  deployment?: AiAgentDeployment | null;
   id: string;
   name: string;
   nativeKind: string;
@@ -1031,4 +1021,19 @@ export type AiGridExposureDetail = {
     validUntil: string | null; confidence: number; observedAt: string;
   }>;
   associations: Array<{ systemId: string | null; artifactId: string | null; role: string }>;
+};
+
+export type AiAgentDeploymentReason = 'VERIFIED_SERVING_ROUTE' | 'NO_ALIAS_ROUTE' | 'NO_SERVING_ENDPOINT'
+  | 'NO_ACTIVE_DEPLOYMENT' | 'ZERO_TRAFFIC_ALLOCATION' | 'NOT_PUBLISHED' | 'NO_ENABLED_CHANNEL' | 'NO_SERVING_ROUTE'
+  | 'NO_EVIDENCE' | 'STALE_EVIDENCE' | 'INCOMPLETE_SCOPE' | 'PERMISSION_DENIED' | 'UNSUPPORTED_API'
+  | 'UNSUPPORTED_CHANNEL_EVIDENCE' | 'COLLECTION_DISABLED' | 'BUDGET_EXHAUSTED' | 'PROVIDER_ERROR'
+  | 'UNRESOLVED_IDENTITY' | 'UNRESOLVED_VERSION' | 'AMBIGUOUS_ROUTE_STATE';
+
+export type AiAgentDeployment = {
+  status: 'SERVED' | 'NOT_CURRENTLY_SERVED' | 'UNVERIFIED';
+  reasonCode: AiAgentDeploymentReason;
+  observedAt: string | null;
+  expiresAt: string | null;
+  evidenceReferences: Array<{ family: string; scopeId: string; runId: string; observedAt: string; collectionStatus: string; reasonCode: AiAgentDeploymentReason; routeIds: string[] }>;
+  lastVerifiedObservation: { status: string; reasonCode: AiAgentDeploymentReason; observedAt: string; expiresAt: string } | null;
 };

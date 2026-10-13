@@ -1,0 +1,107 @@
+{
+  "policyId": "AI_GUARDRAIL_CONFIGURATION_CHANGED_AFTER_APPROVAL",
+  "version": "1.0.0",
+  "name": "Approved control configuration changed; review required",
+  "description": "Approval-relative detachment, explicit weakening, or a comparable configuration/reference change. This does not establish exploitation or guardrail effectiveness.",
+  "securityIntent": "Identify configuration changes relative to a tenant-approved control snapshot.",
+  "remediationIntent": "Review fresh comparison evidence and restore the intended control or explicitly reapprove its configuration.",
+  "owner": "AI Grid Security",
+  "lifecycle": "DRAFT",
+  "releaseStatus": "PAUSED",
+  "controlObjectiveId": "AI-GRID-OBJ-CONTROL-BASELINE",
+  "provider": "MULTI_CLOUD",
+  "evaluationMode": "ARTIFACT_FACTS",
+  "evaluationDefinition": {
+    "mode": "ARTIFACT_FACTS",
+    "artifactFacts": {
+      "predicate": {
+        "any": [
+          {
+            "fact": "guardrail.baseline_comparison_outcome",
+            "eq": "CONTROL_WEAKENED"
+          },
+          {
+            "fact": "guardrail.baseline_comparison_outcome",
+            "eq": "CONTROL_CONFIGURATION_CHANGED_REVIEW_REQUIRED"
+          }
+        ]
+      }
+    }
+  },
+  "severity": "MEDIUM",
+  "workflowClass": "POSTURE_FINDING",
+  "defaultSelection": "DISABLED",
+  "baseEvidenceTiers": [
+    "E0"
+  ],
+  "conditionalCapabilities": [],
+  "releaseFamily": "AGCF_PHASE_2",
+  "wave": "HARM_METADATA",
+  "artifactTypes": [
+    "AI_AGENT",
+    "AI_GUARDRAIL",
+    "AI_MODEL"
+  ],
+  "nativeKinds": [
+    "AWS_BEDROCK_AGENT",
+    "AWS_BEDROCK_GUARDRAIL",
+    "AZURE_FOUNDRY_DEPLOYMENTS",
+    "AZURE_RAI_POLICIES"
+  ],
+  "requiredCapabilities": [],
+  "requiredRelationships": [],
+  "requiredResourceFamilies": [],
+  "requiredFacts": [
+    {
+      "factKey": "guardrail.baseline_comparison_outcome",
+      "valueType": "STRING",
+      "evidenceClasses": [
+        "CONFIGURATION"
+      ],
+      "maxAgeSeconds": 86400
+    }
+  ],
+  "predicate": {
+    "any": [
+      {
+        "fact": "guardrail.baseline_comparison_outcome",
+        "eq": "CONTROL_WEAKENED"
+      },
+      {
+        "fact": "guardrail.baseline_comparison_outcome",
+        "eq": "CONTROL_CONFIGURATION_CHANGED_REVIEW_REQUIRED"
+      }
+    ]
+  },
+  "reasonCode": "CONTROL_CONFIGURATION_CHANGED_AFTER_APPROVAL",
+  "remediation": "Review the approved and current version-bound configuration; reapprove only after reviewing the change. Missing or incomparable evidence remains UNKNOWN.",
+  "frameworkMappings": [
+    {
+      "framework": "CSA_AICM",
+      "frameworkVersion": "1.1",
+      "controlId": "AIS-09",
+      "mappingType": "PARTIAL",
+      "rationale": "Tracks approved control configuration integrity; it does not verify runtime protection effectiveness."
+    }
+  ],
+  "packageSourceRef": "policy-packages/AI_GUARDRAIL_CONFIGURATION_CHANGED_AFTER_APPROVAL/1.0.0.json",
+  "evaluationOwner": "AiSecurityDigestBaselineService",
+  "evidenceContract": {
+    "supportedProviderKinds": [
+      "AWS_BEDROCK_AGENT",
+      "AWS_BEDROCK_GUARDRAIL",
+      "AZURE_FOUNDRY_DEPLOYMENTS",
+      "AZURE_RAI_POLICIES"
+    ],
+    "collectorCapabilityRequirement": "A complete retained provider observation; no additional calls. Comparison completeness and control/version binding are mandatory.",
+    "relationshipRequirement": "Control/version binding is carried by the approved/current normalized snapshot; no graph proxy establishes regression.",
+    "unknownOutcomes": [
+      "UNAPPROVED",
+      "BASELINE_UNKNOWN_REAPPROVAL_REQUIRED",
+      "CONFIGURATION_UNKNOWN"
+    ],
+    "unsupportedMapping": "NOT_ASSESSED",
+    "findingIdentity": "AI_GUARDRAIL_CONFIGURATION_CHANGED_AFTER_APPROVAL|artifactId|GUARDRAIL_CONFIGURATION",
+    "weakeningSeverity": "HIGH"
+  }
+}

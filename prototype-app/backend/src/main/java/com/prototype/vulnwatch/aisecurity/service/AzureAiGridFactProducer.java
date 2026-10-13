@@ -42,6 +42,12 @@ public class AzureAiGridFactProducer implements AiGridFactProducer {
         AiGridFactProducerSupport.copy(input, "modelVersion", "model.version_configured", facts);
         AiGridFactProducerSupport.copy(input, "versionUpgradeOption", "model.version_upgrade_option_configured", facts);
         AiGridFactProducerSupport.copy(input, "endpointHost", "mcp.server_hostname_configured", facts);
+        if ("UNKNOWN".equalsIgnoreCase(input.attributes().path("configuredAuthType").asText())) {
+            facts.add(AiGridFactProducerSupport.unknown("mcp.configured_auth_type", "configuredAuthType"));
+        } else {
+            AiGridFactProducerSupport.copy(input, "configuredAuthType", "mcp.configured_auth_type", facts);
+        }
+
         AiGridFactProducerSupport.copy(input, "toolType", "agent.tool_type_configured", facts);
         AiGridFactProducerSupport.copy(input, "traffic", "ml.endpoint_traffic_configured", facts);
         AiGridFactProducerSupport.copy(input, "instanceType", "compute.instance_type_configured", facts);

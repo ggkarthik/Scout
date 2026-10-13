@@ -101,7 +101,7 @@ describe('layoutDependencyGraph', () => {
     expect(layoutDependencyGraph(graph)).toEqual({ nodes: [], edges: [] });
   });
 
-  it('adds namespaced aggregate nodes and directed runtime edges', () => {
+  it('ignores historical runtime overlays', () => {
     const graph: AiSecurityGraph = {
       nodes: [buildNode(), buildNode({ id: 'artifact-2', name: 'runtime-tool', artifactType: 'AI_TOOL' })],
       edges: [], truncated: false,
@@ -118,10 +118,8 @@ describe('layoutDependencyGraph', () => {
       },
     };
     const layout = layoutDependencyGraph(graph, 'artifact-1');
-    expect(layout.nodes.find(node => node.id === 'runtime-aggregate:abc')?.data.nodeKind).toBe('RUNTIME_AGGREGATE');
-    expect(layout.edges).toEqual(expect.arrayContaining([
-      expect.objectContaining({ source: 'runtime-aggregate:abc', target: 'artifact-1' }),
-      expect.objectContaining({ source: 'artifact-2', target: 'runtime-aggregate:abc' }),
-    ]));
+    expect(layout.nodes).toHaveLength(2);
+    expect(layout.nodes.every(node => node.data.nodeKind === 'ARTIFACT')).toBe(true);
+    expect(layout.edges).toEqual([]);
   });
 });

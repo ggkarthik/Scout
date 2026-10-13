@@ -52,13 +52,12 @@ public class CopilotStudioScheduleService {
     void pollTenant(Tenant tenant) {
         ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC).withNano(0);
         for (CopilotStudioConnectorService.Response config : configs.list(tenant)) {
-            if (config.killSwitch() || (!config.discoveryEnabled() && !config.executionEnabled())) continue;
+            if (config.killSwitch() || !config.discoveryEnabled()) continue;
             Instant due = dueTime(config.scheduleCron(), now);
             if (due == null || due.equals(lastFire.put(config.id(), due))) continue;
             if (config.discoveryEnabled()) runSafely("discovery", tenant, config.id(),
                     () -> configs.trigger(tenant, config.id(), "copilot-studio-schedule"));
-            if (config.executionEnabled()) runSafely("runtime", tenant, config.id(),
-                    () -> runtime.run(tenant, config.id()));
+
         }
         lastFire.entrySet().removeIf(entry -> entry.getValue().isBefore(now.minusDays(2).toInstant()));
     }

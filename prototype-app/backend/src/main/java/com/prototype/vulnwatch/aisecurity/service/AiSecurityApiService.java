@@ -99,6 +99,11 @@ public class AiSecurityApiService {
         this.runtimeRelationships = runtimeRelationships;
     }
 
+    private AiAgentDeploymentService deploymentService;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setDeploymentService(AiAgentDeploymentService service) { this.deploymentService = service; }
+
     public SummaryResponse summary(Tenant tenant) {
         return tenantExecution.run(tenant, () -> {
             Map<String, Long> counts = jdbc.query("""
@@ -151,7 +156,9 @@ public class AiSecurityApiService {
             Instant lastCompleted = jdbc.query("""
                     select max(completed_at) from ai_security_snapshot_scopes where status = 'COMPLETE'
                     """, rs -> rs.next() && rs.getTimestamp(1) != null ? rs.getTimestamp(1).toInstant() : null);
-            return new SummaryResponse(counts, nativeKindCounts, providerCounts, openFindings, incomplete, lastCompleted);
+            return new SummaryResponse(counts, nativeKindCounts, providerCounts, openFindings, incomplete, lastCompleted,
+                    count("select count(*) from ai_security_artifacts a where a.active = true and "
+                            + AiAgentInventoryClassification.agentSql("a"), Map.of()));
         });
     }
 
@@ -398,11 +405,33 @@ public class AiSecurityApiService {
             int page,
             int size
     ) {
+        return artifactSummaries(tenant, artifactType, nativeKind, provider, subscription, severity,
+                excludeNativeKinds, excludeArtifactTypes, null, null, page, size);
+    }
+
+    public PageResponse<ArtifactSummaryResponse> artifactSummaries(
+            Tenant tenant,
+            String artifactType,
+            String nativeKind,
+            String provider,
+            String subscription,
+            String severity,
+            String excludeNativeKinds,
+            String excludeArtifactTypes,
+            String inventoryView,
+            String search,
+            int page,
+            int size
+    ) {
         validateArtifactTypeFilter(artifactType);
+        if (inventoryView != null && !Set.of("AGENTS", "OTHERS").contains(inventoryView)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown AI inventory view");
+        }
         int safePage = Math.max(0, page);
         int safeSize = Math.max(1, Math.min(100, size));
         return tenantExecution.run(tenant, () -> {
             MapSqlParameterSource params = new MapSqlParameterSource()
+                    .addValue("search", blankToNull(search), Types.VARCHAR)
                     .addValue("artifactType", blankToNull(artifactType), Types.VARCHAR)
                     .addValue("otherArtifacts", "OTHER_AI_ARTIFACT".equalsIgnoreCase(artifactType), Types.BOOLEAN)
                     .addValue("nativeKind", blankToNull(nativeKind), Types.VARCHAR)
@@ -433,15 +462,21 @@ public class AiSecurityApiService {
                        and (:excludeArtifactTypes is null or not (a.artifact_type = any(string_to_array(:excludeArtifactTypes, ','))))
                        and (:provider is null or a.provider = :provider)
                        and (:subscription is null or a.account_id = :subscription)
-                    """ + severityFilter;
-            List<ArtifactSummaryResponse> items = jdbc.query("""
+                    """ + severityFilter
+                    + ("AGENTS".equals(inventoryView) ? " and a.active = true and " + AiAgentInventoryClassification.agentSql("a") : "")
+                    + ("OTHERS".equals(inventoryView) ? " and not " + AiAgentInventoryClassification.versionSql("a")
+                            + " and not " + AiAgentInventoryClassification.agentSql("a") : "")
+                    + " and (:search is null or position(lower(:search) in lower(a.name)) > 0)"
+                    + (artifactType == null && nativeKind == null ? " and not " + AiAgentInventoryClassification.versionSql("a") : "");
+            List<ArtifactSummaryResponse> items = jdbc.query("with roster_page as (select a.* from ai_security_artifacts a "
+                    + baseFilter + " order by a.active desc, a.last_observed_at desc, a.id limit :limit offset :offset) " + """
                     select a.id, a.name, a.native_kind, a.provider, a.account_id, a.region,
                            coalesce(cf.total, 0) as critical_findings,
                            coalesce(hf.total, 0) as high_findings,
                            coalesce(tf.total, 0) as total_findings,
                            coalesce(pt.total, 0) as policies_total,
                            coalesce(pf.total, 0) as policies_failed
-                      from ai_security_artifacts a
+                      from roster_page a
                       left join lateral (
                           select count(*) as total from findings f
                             join finding_subjects fs on fs.finding_id = f.id
@@ -471,13 +506,16 @@ public class AiSecurityApiService {
                           select count(*) as total from ai_grid_current_expected_candidates c
                            where c.artifact_id = a.id and c.decision = 'FAIL'
                       ) pf on true
-                    """ + baseFilter + """
                      order by a.active desc, a.last_observed_at desc, a.id
-                     limit :limit offset :offset
                     """, params, this::artifactSummary);
             long total = count("""
                     select count(*) from ai_security_artifacts a
                     """ + baseFilter, params);
+            if (deploymentService != null) {
+                Map<UUID, AiAgentDeploymentService.Metadata> metadata = deploymentService.resolve(items.stream()
+                        .map(a -> new AiAgentDeploymentService.Agent(a.id(), a.nativeKind())).toList(), Instant.now());
+                items = items.stream().map(a -> a.withDeployment(metadata.get(a.id()))).toList();
+            }
             return new PageResponse<>(items, safePage, safeSize, total);
         });
     }
@@ -494,7 +532,7 @@ public class AiSecurityApiService {
                 rs.getLong("high_findings"),
                 rs.getLong("total_findings"),
                 rs.getLong("policies_failed"),
-                rs.getLong("policies_total")
+                rs.getLong("policies_total"), null
         );
     }
 
@@ -505,11 +543,77 @@ public class AiSecurityApiService {
             if (rows.isEmpty()) {
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, "AI Security artifact not found");
             }
-            return rows.get(0);
+            ArtifactResponse row = rows.get(0);
+            return deploymentService == null ? row : row.withDeployment(deploymentService.resolve(
+                    List.of(new AiAgentDeploymentService.Agent(row.id(), row.nativeKind())), Instant.now()).get(row.id()));
+        });
+    }
+
+    public record AgentVersionResponse(UUID id, String name, String nativeKind, boolean definitionVersion,
+                                       boolean servedVersion, Instant lastObservedAt) { }
+
+    public PageResponse<AgentVersionResponse> agentVersions(Tenant tenant, UUID agentId, int page, int size) {
+        int safePage = Math.max(0, page);
+        int safeSize = Math.max(1, Math.min(100, size));
+        return tenantExecution.run(tenant, () -> {
+            ArtifactResponse agent = artifact(tenant, agentId);
+            MapSqlParameterSource params = new MapSqlParameterSource().addValue("agentId", agentId)
+                    .addValue("limit", safeSize).addValue("offset", safePage * safeSize)
+                    .addValue("runId", agent.deployment() == null || agent.deployment().status() != AiAgentDeploymentService.Status.SERVED
+                            || agent.deployment().evidenceReferences().isEmpty() ? null
+                            : agent.deployment().evidenceReferences().get(0).runId(), Types.OTHER);
+            String filter = """
+                    from ai_security_artifacts v
+                    where exists (select 1 from ai_security_relationships r
+                        where r.source_artifact_id = v.id and r.target_artifact_id = :agentId
+                          and r.relationship_type = 'VERSION_OF')
+                    """;
+            List<AgentVersionResponse> versions = jdbc.query("""
+                    select v.id, v.name, v.native_kind, v.last_observed_at,
+                        exists (select 1 from ai_security_relationships d where d.source_artifact_id=:agentId
+                            and d.target_artifact_id=v.id and d.relationship_type='ACTIVE_VERSION' and d.active)
+                        or (v.active and v.native_kind='AWS_BEDROCK_AGENT_VERSION' and v.attributes_json->>'version'='DRAFT')
+                        or (v.active and v.native_kind='AWS_AGENTCORE_RUNTIME_VERSION' and v.attributes_json->>'version'=
+                            (select attributes_json->>'version' from ai_security_artifacts where id=:agentId)) definition_version,
+                        exists (select 1 from ai_grid_relationship_snapshots r
+                            join ai_grid_relationship_snapshots parent on parent.run_id=r.run_id
+                                and parent.target_artifact_id=r.source_artifact_id
+                                and parent.source_artifact_id=:agentId
+                                and parent.relationship_type in ('HAS_COMPONENT','HAS_DEPLOYMENT','HAS_ENDPOINT')
+                            join ai_grid_snapshot_manifests m on m.artifact_id=r.source_artifact_id and m.run_id=r.run_id
+                            join ai_grid_snapshot_bodies b on b.id=m.body_id
+                            where r.run_id=:runId and r.target_artifact_id=v.id and r.relationship_type='SERVES_VERSION'
+                                and b.content_json->'attributes'->>'status' in ('PREPARED','READY')
+                                and coalesce(b.content_json->'attributes'->>'aliasId','') <> 'TSTALIASID'
+                                and (b.content_json->>'nativeKind' <> 'AWS_BEDROCK_AGENT_ALIAS'
+                                    or b.content_json->'attributes'->>'invocationState'='ACCEPT_INVOCATIONS')) served_version
+                    """ + filter + " order by v.last_observed_at desc, v.id limit :limit offset :offset", params,
+                    (rs, n) -> new AgentVersionResponse(rs.getObject(1, UUID.class), rs.getString(2), rs.getString(3),
+                            rs.getBoolean("definition_version"), rs.getBoolean("served_version"), rs.getTimestamp(4).toInstant()));
+            return new PageResponse<>(versions, safePage, safeSize, count("select count(*) " + filter, params));
+        });
+    }
+
+    public record DeploymentSettings(int freshnessHours) { }
+    public DeploymentSettings deploymentSettings(Tenant tenant) {
+        return tenantExecution.run(tenant, () -> new DeploymentSettings(jdbc.queryForObject(
+                "select coalesce(max(freshness_hours), 24) from ai_agent_deployment_settings", Map.of(), Integer.class)));
+    }
+    public DeploymentSettings updateDeploymentSettings(Tenant tenant, DeploymentSettings settings) {
+        if (settings == null || settings.freshnessHours() < 1 || settings.freshnessHours() > 8760) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Freshness hours must be between 1 and 8760");
+        }
+        return tenantExecution.run(tenant, () -> {
+            jdbc.update("""
+                    insert into ai_agent_deployment_settings (tenant_id, freshness_hours) values (:tenantId,:hours)
+                    on conflict (tenant_id) do update set freshness_hours=excluded.freshness_hours
+                    """, Map.of("tenantId", tenant.getId(), "hours", settings.freshnessHours()));
+            return settings;
         });
     }
 
     public List<ActivityEvidenceResponse> activityEvidence(Tenant tenant, UUID artifactId) {
+        AiRuntimeScope.requireInScope();
         return tenantExecution.run(tenant, () -> jdbc.query("""
                 select fact_key,value_json::text,state,evidence_reference,observed_at,valid_from,valid_until,
                        confidence,producer_id,(valid_until is not null and valid_until <= now()) expired
@@ -609,7 +713,8 @@ public class AiSecurityApiService {
 
     public GraphResponse graph(Tenant tenant, UUID rootArtifactId, int depth, boolean includeRuntime,
                                Instant runtimeFrom, Instant runtimeTo) {
-        RuntimeWindow runtimeWindow = runtimeWindow(rootArtifactId, includeRuntime, runtimeFrom, runtimeTo);
+        if (includeRuntime) AiRuntimeScope.requireInScope();
+        RuntimeWindow runtimeWindow = null;
         int boundedDepth = Math.max(1, Math.min(depth, MAX_GRAPH_DEPTH));
         return tenantExecution.run(tenant, () -> {
             List<ArtifactResponse> nodes;
@@ -791,14 +896,14 @@ public class AiSecurityApiService {
                           select disposition from finding_reviews r
                            where r.finding_id = f.id order by reviewed_at desc limit 1
                       ) review on true
-                    """ + filter + " and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE','AI_RUNTIME') order by f.last_observed_at desc, f.id limit :limit offset :offset",
+                    """ + filter + " and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE') order by f.last_observed_at desc, f.id limit :limit offset :offset",
                     params, this::finding);
             long total = count("""
                     select count(*) from findings f
                     join finding_subjects fs on fs.finding_id = f.id and fs.subject_role = 'PRIMARY'
                     left join ai_security_artifacts a on a.id = fs.subject_id and fs.subject_type='ARTIFACT'
                     left join ai_agent_executions x on x.id = fs.subject_id and fs.subject_type='EXECUTION'
-                    """ + filter + " and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE','AI_RUNTIME')", params);
+                    """ + filter + " and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE')", params);
             return new PageResponse<>(items, safePage, safeSize, total);
         });
     }
@@ -1145,7 +1250,8 @@ public class AiSecurityApiService {
                   from platform.ai_grid_policy_versions p
                   join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id
                    and (p.version=d.pinned_version or (d.pinned_version is null and p.package_digest is null))
-                 where p.lifecycle in ('VALIDATED', 'PUBLISHED', 'CANARY', 'DEPRECATED')
+                 where coalesce(p.evaluation_mode, '') not like 'RUNTIME_%' and p.policy_id not like 'AGCF-RT-%'
+                   and p.lifecycle in ('VALIDATED', 'PUBLISHED', 'CANARY', 'DEPRECATED')
                    and platform.ai_grid_policy_visible_to_tenant(
                            d.available or p.lifecycle='DEPRECATED', d.rollout_stage,
                            d.canary_tenant_ids_json, cast(:tenantId as uuid))
@@ -1160,7 +1266,8 @@ public class AiSecurityApiService {
                   from platform.ai_grid_policy_versions p
                   join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id
                    and (p.version=d.pinned_version or (d.pinned_version is null and p.package_digest is null))
-                 where p.policy_id=:id and p.lifecycle in ('VALIDATED', 'PUBLISHED', 'CANARY', 'DEPRECATED')
+                 where p.policy_id=:id and coalesce(p.evaluation_mode, '') not like 'RUNTIME_%' and p.policy_id not like 'AGCF-RT-%'
+                   and p.lifecycle in ('VALIDATED', 'PUBLISHED', 'CANARY', 'DEPRECATED')
                    and platform.ai_grid_policy_visible_to_tenant(
                            d.available or p.lifecycle='DEPRECATED', d.rollout_stage,
                            d.canary_tenant_ids_json, cast(:tenantId as uuid))
@@ -1473,7 +1580,7 @@ public class AiSecurityApiService {
                       select disposition from finding_reviews r
                        where r.finding_id = f.id order by reviewed_at desc limit 1
                   ) review on true
-                 where f.id = :id and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE','AI_RUNTIME')
+                 where f.id = :id and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE')
                 """, Map.of("id", findingId), this::finding);
     }
 
@@ -1542,7 +1649,7 @@ public class AiSecurityApiService {
                 rs.getInt("pii_finding_count"),
                 instant(rs, "pii_last_scanned_at"),
                 attachmentState,
-                systemIds);
+                systemIds, null);
     }
 
     private List<UUID> uuidArray(java.sql.Array array) throws SQLException {
@@ -1651,7 +1758,8 @@ public class AiSecurityApiService {
             Map<String, Long> providerCounts,
             long openFindings,
             long incompleteScopes,
-            Instant lastCompleteSnapshotAt
+            Instant lastCompleteSnapshotAt,
+            long logicalAgentCount
     ) {
     }
 
@@ -1681,15 +1789,26 @@ public class AiSecurityApiService {
             Instant firstObservedAt, Instant lastObservedAt,
             String piiScanStatus, String piiSource, List<String> piiInfoTypes,
             int piiFindingCount, Instant piiLastScannedAt,
-            String attachmentState, List<UUID> systemIds
+            String attachmentState, List<UUID> systemIds, AiAgentDeploymentService.Metadata deployment
     ) {
+        public ArtifactResponse withDeployment(AiAgentDeploymentService.Metadata value) {
+            return new ArtifactResponse(id, provider, providerResourceId, artifactType, nativeKind, name,
+                    accountId, region, active, attributes, ownerName, ownerState, ownerSource, ownerConfidence,
+                    ownerConfidenceMethod, ownerConfidenceMethodVersion, businessCriticality, environment,
+                    firstObservedAt, lastObservedAt, piiScanStatus, piiSource, piiInfoTypes, piiFindingCount,
+                    piiLastScannedAt, attachmentState, systemIds, value);
+        }
     }
 
     public record ArtifactSummaryResponse(
             UUID id, String name, String nativeKind, String provider, String accountId, String region,
             long criticalFindings, long highFindings, long totalFindings,
-            long policiesFailed, long policiesTotal
+            long policiesFailed, long policiesTotal, AiAgentDeploymentService.Metadata deployment
     ) {
+        public ArtifactSummaryResponse withDeployment(AiAgentDeploymentService.Metadata value) {
+            return new ArtifactSummaryResponse(id, name, nativeKind, provider, accountId, region,
+                    criticalFindings, highFindings, totalFindings, policiesFailed, policiesTotal, value);
+        }
     }
 
     public record ActivityEvidenceResponse(

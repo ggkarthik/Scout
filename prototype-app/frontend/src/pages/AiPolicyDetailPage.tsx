@@ -37,20 +37,6 @@ function parseFrameworkMappings(json: string | undefined): FrameworkMapping[] {
   }
 }
 
-function inferredNativeKinds(policy: AiGridPolicy | null): string[] {
-  if (!policy) return [];
-  const declared = parseJsonArray(policy.nativeKindsJson);
-  if (declared.length) return declared;
-  const material = `${policy.policyId} ${policy.name} ${policy.requiredResourceFamiliesJson}`.toUpperCase();
-  if (material.includes('BEDROCK') && material.includes('AGENT')) return ['AWS_BEDROCK_AGENT'];
-  if (material.includes('FOUNDRY') && material.includes('AGENT')) return ['AZURE_FOUNDRY_AGENT'];
-  if (material.includes('BOT')) return ['AZURE_BOT_SERVICE'];
-  if (material.includes('MCP') && material.includes('GATEWAY')) return ['MCP_GATEWAY'];
-  if (material.includes('MCP') && material.includes('TARGET')) return ['MCP_TARGET'];
-  if (material.includes('MCP')) return ['MCP_SERVER'];
-  return [];
-}
-
 const SCOPE_FIELD_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'ARTIFACT_TYPE', label: 'Artifact type' },
   { value: 'PROVIDER', label: 'Provider' },
@@ -265,7 +251,7 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
   });
 
   const policyMetadata: AiGridPolicy | null = policyMetadataQuery.data?.find((item) => item.policyId === policyId) ?? null;
-  const nativeKinds = inferredNativeKinds(policyMetadata);
+  const nativeKinds = parseJsonArray(policyMetadata?.nativeKindsJson);
   const legacyPolicy = policiesQuery.data ?? null;
   const policy: AiSecurityPolicy | null = legacyPolicy ?? (policyMetadata ? {
     id: policyMetadata.policyId,

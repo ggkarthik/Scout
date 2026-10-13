@@ -42,6 +42,33 @@ describe('AiInventoryAssetsPage', () => {
     navigateMock.mockReset();
   });
 
+  it('shows every deployment state together and sends roster search/provider/pagination filters', async () => {
+    mockBaseline();
+    const list = vi.spyOn(api, 'listAiArtifactSummaries').mockResolvedValue({ items: [
+      buildArtifact({ id: 'served', name: 'Served agent', nativeKind: 'AWS_BEDROCK_AGENT', deployment: {
+        status: 'SERVED', reasonCode: 'VERIFIED_SERVING_ROUTE', observedAt: null, expiresAt: null, evidenceReferences: [], lastVerifiedObservation: null,
+      } }),
+      buildArtifact({ id: 'unserved', name: 'Unserved agent', nativeKind: 'AWS_BEDROCK_AGENT', deployment: {
+        status: 'NOT_CURRENTLY_SERVED', reasonCode: 'NO_ALIAS_ROUTE', observedAt: null, expiresAt: null, evidenceReferences: [], lastVerifiedObservation: null,
+      } }),
+      buildArtifact({ id: 'unverified', name: 'Unverified agent', nativeKind: 'AWS_BEDROCK_AGENT', deployment: {
+        status: 'UNVERIFIED', reasonCode: 'PERMISSION_DENIED', observedAt: null, expiresAt: null, evidenceReferences: [], lastVerifiedObservation: null,
+      } }),
+    ], page: 0, size: 50, total: 101 });
+    vi.spyOn(api, 'getAiSecuritySummary').mockResolvedValue(emptySummary());
+    renderWithProviders(<AiInventoryAssetsPage />, { route: '/inventory/ai/agents?provider=AWS&subscription=account' });
+    expect(await screen.findByText('Served')).toBeInTheDocument();
+    expect(screen.getByText('Not currently served')).toBeInTheDocument();
+    expect(screen.getByText('Deployment unverified')).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Artifact kind' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search agents' }), { target: { value: 'Support' } });
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith(undefined, 0, 50, 'AWS', 'account', undefined, undefined, undefined, undefined, 'AGENTS', 'Support'));
+    const next = await screen.findByRole('button', { name: 'Next' });
+    await waitFor(() => expect(next).toBeEnabled());
+    fireEvent.click(next);
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith(undefined, 1, 50, 'AWS', 'account', undefined, undefined, undefined, undefined, 'AGENTS', 'Support'));
+  });
+
   it('opens with all discovered AI assets instead of hiding non-agent artifacts', async () => {
     mockBaseline();
     const listArtifacts = vi.spyOn(api, 'listAiArtifactSummaries').mockResolvedValue({
@@ -118,6 +145,7 @@ describe('AiInventoryAssetsPage', () => {
       undefined,
       expect.stringContaining('AZURE_IDENTITY'),
       'DATA_STORE,MCP_SERVER',
+      'OTHERS',
     ));
   });
 

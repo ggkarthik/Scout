@@ -58,6 +58,9 @@ public class AwsPolicyPermissionMatrix {
         add(result, "BEDROCK_AGENT_VERSIONS", "REGIONAL", "BEDROCK_AGENTS", List.of(
                 "bedrock:ListAgents", "bedrock:ListAgentVersions", "bedrock:GetAgentVersion", "bedrock:ListAgentAliases"),
                 List.of(), List.of("BEDROCK_AGENT_VERSIONS_ALIASES"));
+        add(result, "BEDROCK_AGENT_ROUTES", "REGIONAL", "BEDROCK_AGENTS", List.of(
+                "bedrock:ListAgents", "bedrock:ListAgentVersions", "bedrock:ListAgentAliases"),
+                List.of(), List.of("BEDROCK_AGENT_ROUTING"));
         add(result, "BEDROCK_AGENT_DEFINITIONS", "REGIONAL", "BEDROCK_AGENTS", List.of(
                 "bedrock:ListAgentActionGroups", "bedrock:GetAgentActionGroup", "bedrock:ListAgentKnowledgeBases"),
                 List.of(), List.of("BEDROCK_PROMPTS_TOOLS"));

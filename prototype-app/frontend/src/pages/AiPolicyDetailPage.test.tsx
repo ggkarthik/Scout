@@ -1,7 +1,7 @@
 import { screen, fireEvent } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../api/client';
-import type { AiSecurityFinding, AiSecurityPolicy } from '../features/ai-security/types';
+import type { AiGridPolicy, AiSecurityFinding, AiSecurityPolicy } from '../features/ai-security/types';
 import { renderWithProviders } from '../test/test-utils';
 import { AiPolicyDetailPage } from './AiPolicyDetailPage';
 
@@ -51,6 +51,31 @@ function buildFinding(overrides: Partial<AiSecurityFinding> = {}): AiSecurityFin
   };
 }
 
+function buildPolicyMetadata(nativeKindsJson: string, name = 'Bedrock agent policy'): AiGridPolicy {
+  return {
+    policyId: 'AWS_BEDROCK_PUBLIC_KB_S3',
+    version: '1.0.0',
+    name,
+    severity: 'CRITICAL',
+    lifecycle: 'PUBLISHED',
+    workflowClass: 'POSTURE_FINDING',
+    selection: 'ENABLED',
+    controlObjectiveId: 'AWS-CONTROL-1',
+    provider: 'AWS',
+    evaluationMode: 'ARTIFACT_FACTS',
+    artifactTypesJson: '["AI_AGENT"]',
+    nativeKindsJson,
+    requiredResourceFamiliesJson: '["BEDROCK_AGENTS"]',
+    baseEvidenceTiersJson: '[]',
+    conditionalCapabilitiesJson: '[]',
+    requiredCapabilitiesJson: '[]',
+    frameworkMappingsJson: '[]',
+    readiness: 'READY',
+    failedArtifacts: 0,
+    totalArtifacts: 1,
+  };
+}
+
 describe('AiPolicyDetailPage', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -67,6 +92,18 @@ describe('AiPolicyDetailPage', () => {
     expect(screen.getByText('S3 Exposure')).toBeInTheDocument();
     expect(screen.getByText('NIST_AI_RMF')).toBeInTheDocument();
     expect(screen.getByText('GOVERN-1.1')).toBeInTheDocument();
+  });
+
+  it.each([
+    { declared: '["AWS_BEDROCK_AGENT"]', expected: 'Aws Bedrock Agent' },
+    { declared: '[]', expected: 'Not specified' },
+  ])('displays declared native types without guessing from the policy name', async ({ declared, expected }) => {
+    vi.spyOn(api, 'getAiGridPolicyDetail').mockResolvedValue(buildPolicy());
+    vi.spyOn(api, 'listAiGridPolicies').mockResolvedValue([buildPolicyMetadata(declared)]);
+    vi.spyOn(api, 'listAiSecurityFindings').mockResolvedValue({ items: [], page: 0, size: 200, total: 0 });
+    renderWithProviders(<AiPolicyDetailPage policyId="AWS_BEDROCK_PUBLIC_KB_S3" />);
+
+    expect(await screen.findByText(expected)).toBeInTheDocument();
   });
 
   it('shows the impacted findings and AI artifacts in their own tabs', async () => {

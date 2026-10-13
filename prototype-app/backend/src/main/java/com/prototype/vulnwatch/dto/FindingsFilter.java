@@ -32,7 +32,7 @@ public record FindingsFilter(
         String groupField,
         String groupValue,
         /**
-         * Finding kinds to include. Null or empty means every kind, which keeps the All
+         * Finding kinds to include. Null or empty means every in-scope kind, which keeps the All
          * Findings view inclusive; the software-vulnerability view selects VULNERABILITY
          * explicitly. Cannot be inferred from vulnerabilityId, which the projection populates
          * with a CVE id or an AI policy id depending on the kind.

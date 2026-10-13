@@ -32,6 +32,9 @@ public class AiSecurityAzureConnectorService {
             "AZURE_RAI_POLICIES",
             "AZURE_FOUNDRY_AGENTS",
             "AZURE_FOUNDRY_AGENT_VERSIONS",
+            "AZURE_FOUNDRY_AGENT_ROUTES",
+            "AZURE_FOUNDRY_AGENT_APPLICATIONS",
+            "AZURE_FOUNDRY_AGENT_DEPLOYMENTS",
             "AZURE_FOUNDRY_AGENT_TOOLS",
             "AZURE_CLASSIC_FOUNDRY_AGENTS",
             "AZURE_CLASSIC_FOUNDRY_AGENT_VERSIONS",
@@ -41,8 +44,6 @@ public class AiSecurityAzureConnectorService {
             "AZURE_ML_ENDPOINTS",
             "AZURE_ML_DEPLOYMENTS",
             "AZURE_ML_COMPUTE",
-            "AZURE_ML_JOBS",
-            "AZURE_ML_PIPELINES",
             "AZURE_SEARCH_SERVICES",
             "AZURE_SEARCH_INDEXES",
             "AZURE_SEARCH_SKILLSETS",
@@ -70,8 +71,6 @@ public class AiSecurityAzureConnectorService {
             "AZURE_ML_ENDPOINTS",
             "AZURE_ML_DEPLOYMENTS",
             "AZURE_ML_COMPUTE",
-            "AZURE_ML_JOBS",
-            "AZURE_ML_PIPELINES",
             "AZURE_SEARCH_SERVICES",
             "AZURE_BOT_SERVICES",
             "AZURE_BOT_CHANNELS",
@@ -197,6 +196,7 @@ public class AiSecurityAzureConnectorService {
         }
         Map<String, AzureAiManagementClient.AzureApiFailure> probeFailures = failures;
         List<FamilyPermissionResult> families = connector.resourceFamilies().stream()
+                .filter(family -> !Set.of("AZURE_ML_JOBS", "AZURE_ML_PIPELINES").contains(family))
                 .map(family -> permissionResult(family, credential.success(), probeFailures.get(family)))
                 .toList();
         return new ConnectionTestResponse(
@@ -302,6 +302,7 @@ public class AiSecurityAzureConnectorService {
         LinkedHashSet<String> result = new LinkedHashSet<>();
         for (String family : values) {
             String normalized = family == null ? "" : family.trim().toUpperCase();
+            if (Set.of("AZURE_ML_JOBS", "AZURE_ML_PIPELINES").contains(normalized)) continue;
             if (!permissionMatrix.resourceFamilies().contains(normalized)) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported Azure resource family");
             }

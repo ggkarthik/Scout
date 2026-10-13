@@ -192,16 +192,7 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
                             }
                         }
                     }
-                    // Azure ML jobs are provider execution metadata. Failure here is deliberately
-                    // isolated: it must never invalidate a completed inventory sweep.
-                    if (featureFlags.enabled(tenant, AiSecurityConnectorFeatureFlagService.Feature.AZURE_ML_RUNTIME, runtimeEnabled)) {
-                        try {
-                            int unresolvedReferences = ingestAzureMlRuntime(tenant, connector, snapshot);
-                            metrics.recordScope("AZURE_ML_RUNTIME", unresolvedReferences == 0 ? "COMPLETE" : "PARTIAL");
-                            if (unresolvedReferences > 0) incomplete++;
-                        }
-                        catch (RuntimeException runtimeFailure) { metrics.recordScope("AZURE_ML_RUNTIME", "PARTIAL"); incomplete++; }
-                    }
+
                 }
                 int persistedArtifacts = observations.countPersistedArtifacts(tenant, run.getId());
                 capabilities.finalizeRun(tenant, run.getId());
@@ -229,35 +220,18 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         }
     }
 
-    private int ingestAzureMlRuntime(Tenant tenant, ConnectorSecret connector, AzureAiManagementClient.DiscoverySnapshot snapshot) {
-        int unresolvedReferences = 0;
-        for (AzureResource job : snapshot.resources().getOrDefault("AZURE_ML_JOBS", List.of())) {
-            String agentReference = firstText(job.properties(), "agentReference", "agent_reference", "agentId");
-            String versionReference = firstText(job.properties(), "agentVersion", "agent_version");
-            if (agentReference == null) continue;
-            var resolution = runtimeIngestion.resolveAgent(tenant, "AZURE", agentReference, versionReference);
-            if (resolution.agentArtifactId() == null) {
-                unresolvedReferences++;
-                continue;
-            }
-            String status = text(job.properties().path("status"));
-            runtimeIngestion.ingest(tenant, connector.id(), new AiAgentExecutionIngestionService.RuntimeExecution(
-                    "AZURE_ML", job.id(), resolution.agentArtifactId(), "AZURE_ML_RUNTIME", job.parentId() == null ? connector.subscriptionId() : job.parentId(),
-                    null, null, status == null ? "UNKNOWN" : status, null, null, null, null, "ARM", null, null, null, null,
-                    Instant.now(), List.of(), resolution.agentVersionArtifactId(), agentReference, versionReference,
-                    resolution.status(), resolution.diagnostic()));
-        }
-        return unresolvedReferences;
-    }
-
     /** Feature-gated families are opt-in at runtime; stored connector selections remain backward compatible. */
     private List<String> effectiveFamilies(Tenant tenant, ConnectorSecret connector) {
         LinkedHashSet<String> families = new LinkedHashSet<>(connector.resourceFamilies());
-        families.removeAll(Set.of("AZURE_FOUNDRY_AGENTS", "AZURE_FOUNDRY_AGENT_VERSIONS", "AZURE_FOUNDRY_AGENT_TOOLS"));
+        families.removeAll(Set.of("AZURE_ML_JOBS", "AZURE_ML_PIPELINES"));
+        families.removeAll(Set.of("AZURE_FOUNDRY_AGENTS", "AZURE_FOUNDRY_AGENT_VERSIONS", "AZURE_FOUNDRY_AGENT_ROUTES", "AZURE_FOUNDRY_AGENT_APPLICATIONS", "AZURE_FOUNDRY_AGENT_DEPLOYMENTS", "AZURE_FOUNDRY_AGENT_TOOLS"));
         families.removeAll(Set.of("AZURE_CLASSIC_FOUNDRY_AGENTS", "AZURE_CLASSIC_FOUNDRY_AGENT_VERSIONS", "AZURE_CLASSIC_FOUNDRY_AGENT_TOOLS"));
         if (featureFlags.enabled(tenant, AiSecurityConnectorFeatureFlagService.Feature.AZURE_NEW_FOUNDRY, foundryAgentsEnabled)) {
             families.add("AZURE_FOUNDRY_AGENTS");
             families.add("AZURE_FOUNDRY_AGENT_VERSIONS");
+            families.add("AZURE_FOUNDRY_AGENT_ROUTES");
+            families.add("AZURE_FOUNDRY_AGENT_APPLICATIONS");
+            families.add("AZURE_FOUNDRY_AGENT_DEPLOYMENTS");
             families.add("AZURE_FOUNDRY_AGENT_TOOLS");
         }
         if (featureFlags.enabled(tenant, AiSecurityConnectorFeatureFlagService.Feature.AZURE_CLASSIC_FOUNDRY, classicFoundryAgentsEnabled)) {
@@ -319,7 +293,7 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
             return unsupported(family, region, "DISABLED_BY_KILL_SWITCH",
                     "Azure AI Security discovery is disabled for this resource family");
         }
-        if (("AZURE_FOUNDRY_AGENTS".equals(family) || "AZURE_FOUNDRY_AGENT_TOOLS".equals(family))
+        if (("AZURE_FOUNDRY_AGENTS".equals(family) || "AZURE_FOUNDRY_AGENT_TOOLS".equals(family) || "AZURE_FOUNDRY_AGENT_ROUTES".equals(family))
                 && !foundryAgentsEnabled) {
             return unsupported(family, region, "UNSUPPORTED_API_VERSION",
                     "Foundry agent preview discovery is disabled");
@@ -333,8 +307,9 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
                     "Azure AI Search definition-only discovery is disabled pending certification");
         }
         AzureApiFailure failure = snapshot.failures().get(family);
-        if (("AZURE_FOUNDRY_AGENTS".equals(family) || "AZURE_FOUNDRY_AGENT_TOOLS".equals(family))
-                && failure != null && failure.statusCode() == 404) {
+        if (("AZURE_FOUNDRY_AGENTS".equals(family) || "AZURE_FOUNDRY_AGENT_TOOLS".equals(family) || "AZURE_FOUNDRY_AGENT_ROUTES".equals(family))
+                && failure != null && failure.statusCode() == 404
+                && snapshot.resources().getOrDefault(family, List.of()).isEmpty()) {
             return unsupported(family, region, "UNSUPPORTED_API_VERSION",
                     "Foundry agent preview endpoint is unavailable for this project or API version");
         }
@@ -355,7 +330,8 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         for (AzureResource resource : resources) {
             // Storage is inventory only when a provider definition directly references it.
             if ("AZURE_STORAGE_ACCOUNTS".equals(family) || "AZURE_FABRIC_CAPACITIES".equals(family)) continue;
-            addArtifact(artifacts, included, resource, family, snapshot);
+            addArtifact(artifacts, included, resource,
+                    "AgentIdentity".equals(resource.kind()) ? "AZURE_IDENTITY" : family, snapshot);
             if (resource.parentId() != null) {
                 AzureResource parent = allResources.get(resource.parentId().toLowerCase(Locale.ROOT));
                 if (parent != null) {
@@ -367,14 +343,26 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         }
 
         if ("AZURE_BOT_IDENTITIES".equals(family)) {
-            for (AzureResource bot : snapshot.resources().getOrDefault("AZURE_BOT_SERVICES", List.of())) {
-                String principalId = text(bot.identity().path("principalId"));
-                if (principalId != null) {
-                    AzureResource identity = syntheticIdentity(bot, principalId);
-                    addArtifact(artifacts, included, bot, "AZURE_BOT_SERVICES", snapshot);
-                    addArtifact(artifacts, included, identity, family, snapshot);
-                    relationships.add(direct(bot.id(), identity.id(), "USES_MANAGED_IDENTITY",
-                            "Azure Resource Manager", "identity.principalId"));
+            for (String resourceFamily : List.of("AZURE_AI_ACCOUNTS", "AZURE_FOUNDRY_PROJECTS",
+                    "AZURE_ML_WORKSPACES", "AZURE_ML_ENDPOINTS", "AZURE_BOT_SERVICES")) {
+                for (AzureResource resource : snapshot.resources().getOrDefault(resourceFamily, List.of())) {
+                    String principalId = text(resource.identity().path("principalId"));
+                    if (principalId != null) {
+                        addManagedIdentity(artifacts, relationships, included, resource, resourceFamily,
+                                principalId, "identity.principalId", snapshot);
+                    }
+                    JsonNode userAssigned = resource.identity().path("userAssignedIdentities");
+                    if (userAssigned.isObject()) {
+                        var identities = userAssigned.fields();
+                        while (identities.hasNext()) {
+                            var entry = identities.next();
+                            String assignedPrincipalId = text(entry.getValue().path("principalId"));
+                            if (assignedPrincipalId != null) {
+                                addManagedIdentity(artifacts, relationships, included, resource, resourceFamily,
+                                        assignedPrincipalId, "identity.userAssignedIdentities.principalId", snapshot);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -399,6 +387,24 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         }
         if ("AZURE_SEARCH_KNOWLEDGE_SOURCES".equals(family)) {
             addSearchKnowledgeSourceRelationships(artifacts, relationships, included, resources, snapshot);
+        }
+        if ("AZURE_FOUNDRY_AGENT_ROUTES".equals(family)) {
+            for (AzureResource route : resources) {
+                AzureResource agent = snapshot.resources().getOrDefault("AZURE_FOUNDRY_AGENTS", List.of()).stream()
+                        .filter(candidate -> candidate.id().equals(route.parentId())).findFirst().orElse(null);
+                if (agent == null) continue;
+                addArtifact(artifacts, included, agent, "AZURE_FOUNDRY_AGENTS", snapshot);
+                relationships.add(direct(agent.id(), route.id(), "HAS_DEPLOYMENT", "Foundry ListAgents", "agent_endpoint"));
+                for (AzureResource version : snapshot.resources().getOrDefault("AZURE_FOUNDRY_AGENT_VERSIONS", List.of())) {
+                    if (!agent.id().equals(version.parentId())) continue;
+                    addArtifact(artifacts, included, version, "AZURE_FOUNDRY_AGENT_VERSIONS", snapshot);
+                    relationships.add(direct(version.id(), agent.id(), "VERSION_OF", "Foundry ListAgentVersions", "version"));
+                }
+                for (JsonNode target : route.properties().path("routedVersions")) {
+                    relationships.add(direct(route.id(), agent.id() + "/versions/" + target.asText(),
+                            "SERVES_VERSION", "Foundry ListAgents", "agent_endpoint.version_selector"));
+                }
+            }
         }
         if ("AZURE_FOUNDRY_AGENTS".equals(family)) {
             addFoundryVersionProjection(artifacts, relationships, included, resources, snapshot);
@@ -631,7 +637,22 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
         values.put("tags", resource.tags());
         values.put("provisioningState", nullToEmpty(text(resource.properties().path("provisioningState"))));
         values.put("identityType", nullToEmpty(text(resource.identity().path("type"))));
+        if ("AZURE_IDENTITY".equals(family)) {
+            values.put("principalId", resource.id().replaceFirst("^azure-identity:", ""));
+            values.put("principalType", "AgentIdentity".equals(resource.kind())
+                    ? "AgentIdentity" : nullToEmpty(resource.kind()));
+            values.put("identityType", nullToEmpty(resource.kind()));
+            if (resource.properties().has("accountEnabled")) {
+                values.put("accountEnabled", resource.properties().path("accountEnabled").asBoolean());
+            }
+        }
 
+        if ("AZURE_FOUNDRY_AGENT_ROUTES".equals(family)) {
+            for (String field : List.of("status", "routedVersions", "deploymentEvidenceReason")) {
+                JsonNode value = resource.properties().path(field);
+                if (!value.isMissingNode()) values.put(field, objectMapper.convertValue(value, Object.class));
+            }
+        }
         if ("AZURE_AI_ACCOUNTS".equals(family) || "AZURE_SEARCH_SERVICES".equals(family)
                 || "AZURE_ML_WORKSPACES".equals(family)) {
             String publicAccess = text(resource.properties().path("publicNetworkAccess"));
@@ -1244,6 +1265,23 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
                 objectMapper.createObjectNode(), Map.of(), bot.id());
     }
 
+    private void addManagedIdentity(
+            List<ArtifactObservation> artifacts,
+            List<RelationshipObservation> relationships,
+            Set<String> included,
+            AzureResource resource,
+            String resourceFamily,
+            String principalId,
+            String evidenceField,
+            AzureAiManagementClient.DiscoverySnapshot snapshot
+    ) {
+        AzureResource identity = syntheticIdentity(resource, principalId);
+        addArtifact(artifacts, included, resource, resourceFamily, snapshot);
+        addArtifact(artifacts, included, identity, "AZURE_IDENTITY", snapshot);
+        relationships.add(direct(resource.id(), identity.id(), "USES_MANAGED_IDENTITY",
+                "Azure Resource Manager", evidenceField));
+    }
+
     private AzureResource syntheticPrincipal(AzureResource assignment, String principalId) {
         String id = "azure-identity:" + principalId.toLowerCase(Locale.ROOT);
         return new AzureResource(
@@ -1263,6 +1301,7 @@ public class AzureAiDiscoveryService implements AiSecurityDiscoveryProvider {
     }
 
     private String artifactType(String family) {
+        if (Set.of("AZURE_FOUNDRY_AGENT_ROUTES", "AZURE_FOUNDRY_AGENT_APPLICATIONS", "AZURE_FOUNDRY_AGENT_DEPLOYMENTS").contains(family)) return "SUPPORTING_RESOURCE";
         if ("AZURE_FOUNDRY_AGENT_VERSIONS".equals(family) || "AZURE_CLASSIC_FOUNDRY_AGENT_VERSIONS".equals(family)) return "AI_AGENT_VERSION";
         if ("AZURE_FOUNDRY_AGENT_TOOLS".equals(family) || "AZURE_CLASSIC_FOUNDRY_AGENT_TOOLS".equals(family)) return "AI_TOOL";
         if ("AZURE_FOUNDRY_DEPLOYMENTS".equals(family) || "AZURE_ML_MODELS".equals(family)) return "AI_MODEL";

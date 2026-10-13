@@ -46,6 +46,57 @@ class AwsBedrockDiscoveryServiceTest {
             false, 10_000);
 
     @Test
+    void routingPaginationRetainsDraftLineageWithoutTreatingItAsServing() {
+        assertEquals(List.of("bedrock:ListAgents","bedrock:ListAgentVersions","bedrock:ListAgentAliases"),
+                new AwsPolicyPermissionMatrix().family("BEDROCK_AGENT_ROUTES").requiredActions());
+        var client = org.mockito.Mockito.mock(software.amazon.awssdk.services.bedrockagent.BedrockAgentClient.class);
+        var routeService = org.mockito.Mockito.spy(service);
+        org.mockito.Mockito.doReturn(client).when(routeService).routingClient(org.mockito.ArgumentMatchers.any(),org.mockito.ArgumentMatchers.any());
+        org.mockito.Mockito.when(client.listAgents(org.mockito.ArgumentMatchers.any(software.amazon.awssdk.services.bedrockagent.model.ListAgentsRequest.class)))
+                .thenReturn(software.amazon.awssdk.services.bedrockagent.model.ListAgentsResponse.builder()
+                        .agentSummaries(software.amazon.awssdk.services.bedrockagent.model.AgentSummary.builder()
+                                .agentId("agent-1").agentName("Support").build()).nextToken("agents-page-2").build(),
+                        software.amazon.awssdk.services.bedrockagent.model.ListAgentsResponse.builder().build());
+        org.mockito.Mockito.when(client.listAgentVersions(org.mockito.ArgumentMatchers.any(software.amazon.awssdk.services.bedrockagent.model.ListAgentVersionsRequest.class)))
+                .thenReturn(software.amazon.awssdk.services.bedrockagent.model.ListAgentVersionsResponse.builder()
+                        .agentVersionSummaries(software.amazon.awssdk.services.bedrockagent.model.AgentVersionSummary.builder()
+                                .agentVersion("DRAFT").agentStatus("PREPARED").build()).nextToken("versions-page-2").build(),
+                        software.amazon.awssdk.services.bedrockagent.model.ListAgentVersionsResponse.builder()
+                        .agentVersionSummaries(software.amazon.awssdk.services.bedrockagent.model.AgentVersionSummary.builder()
+                                .agentVersion("1").agentStatus("PREPARED").build()).build());
+        org.mockito.Mockito.when(client.listAgentAliases(org.mockito.ArgumentMatchers.any(software.amazon.awssdk.services.bedrockagent.model.ListAgentAliasesRequest.class)))
+                .thenReturn(software.amazon.awssdk.services.bedrockagent.model.ListAgentAliasesResponse.builder().nextToken("aliases-page-2").build(),
+                        software.amazon.awssdk.services.bedrockagent.model.ListAgentAliasesResponse.builder()
+                        .agentAliasSummaries(software.amazon.awssdk.services.bedrockagent.model.AgentAliasSummary.builder()
+                                .agentAliasId("prod").agentAliasName("Production").agentAliasStatus("PREPARED")
+                                .aliasInvocationState("ACCEPT_INVOCATIONS")
+                                .routingConfiguration(software.amazon.awssdk.services.bedrockagent.model.AgentAliasRoutingConfigurationListItem.builder().agentVersion("1").build()).build()).build());
+        {
+            List<Object> scopes = new java.util.ArrayList<>();
+            org.springframework.test.util.ReflectionTestUtils.invokeMethod(routeService,"collectAgentRoutes",
+                    new com.prototype.vulnwatch.aisecurity.service.AiSecurityAwsConnectorService.ConnectorSecret(
+                            java.util.UUID.randomUUID(),"123456789012",null,null,List.of("us-east-1"),true),
+                    software.amazon.awssdk.auth.credentials.AnonymousCredentialsProvider.create(),
+                    software.amazon.awssdk.regions.Region.US_EAST_1,scopes);
+            assertEquals(1,scopes.size());
+            var scope = scopes.get(0);
+            assertEquals(com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ScopeStatus.COMPLETE,
+                    org.springframework.test.util.ReflectionTestUtils.invokeMethod(scope,"status"));
+            List<com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.ArtifactObservation> artifacts =
+                    org.springframework.test.util.ReflectionTestUtils.invokeMethod(scope,"artifacts");
+            List<com.prototype.vulnwatch.aisecurity.model.AiSecurityContracts.RelationshipObservation> relationships =
+                    org.springframework.test.util.ReflectionTestUtils.invokeMethod(scope,"relationships");
+            assertTrue(artifacts.stream().anyMatch(a -> a.providerResourceId().endsWith("/version/DRAFT")));
+            assertTrue(relationships.stream().anyMatch(r -> r.relationshipType().equals("VERSION_OF") && r.sourceProviderResourceId().endsWith("/version/DRAFT")));
+            assertTrue(relationships.stream().filter(r -> r.relationshipType().equals("SERVES_VERSION"))
+                    .allMatch(r -> r.targetProviderResourceId().endsWith("/version/1")));
+            org.mockito.Mockito.verify(client,org.mockito.Mockito.times(2)).listAgents(org.mockito.ArgumentMatchers.any(software.amazon.awssdk.services.bedrockagent.model.ListAgentsRequest.class));
+            org.mockito.Mockito.verify(client,org.mockito.Mockito.times(2)).listAgentVersions(org.mockito.ArgumentMatchers.any(software.amazon.awssdk.services.bedrockagent.model.ListAgentVersionsRequest.class));
+            org.mockito.Mockito.verify(client,org.mockito.Mockito.times(2)).listAgentAliases(org.mockito.ArgumentMatchers.any(software.amazon.awssdk.services.bedrockagent.model.ListAgentAliasesRequest.class));
+        }
+    }
+
+    @Test
     void capturesBoundedStructuralGuardrailConfigurationWithoutFreeFormMessages() {
         GetGuardrailResponse detail = GetGuardrailResponse.builder()
                 .name("search-rerank-guardrail-free-tier")

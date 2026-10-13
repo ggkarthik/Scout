@@ -19,8 +19,8 @@ class AiGridRuntimeIngestionServiceTest {
     private final Tenant tenant = mock(Tenant.class);
 
     @Test
-    void rejectsForbiddenRawContentBeforeAdmission() {
-        assertThrows(IllegalArgumentException.class, () -> service.accept(tenant, "producer", bytes("""
+    void rejectsRawContentWithoutAdmission() {
+        assertThrows(org.springframework.web.server.ResponseStatusException.class, () -> service.accept(tenant, "producer", bytes("""
                 {"schemaVersion":"1","provider":"CUSTOM","evidenceClass":"DECLARED",
                  "executions":[{"providerExecutionReference":"run-1","scopeKey":"scope","eventTime":"2026-01-01T00:00:00Z",
                  "status":"COMPLETED","evidenceClass":"DECLARED","events":[],"prompt":"do not persist"}]}
@@ -28,8 +28,8 @@ class AiGridRuntimeIngestionServiceTest {
     }
 
     @Test
-    void rejectsOmittedEventsButAcceptsEmptyEventsAtSchemaBoundary() {
-        assertThrows(IllegalArgumentException.class, () -> service.accept(tenant, "producer", bytes("""
+    void rejectsBatchesBeforeParsing() {
+        assertThrows(org.springframework.web.server.ResponseStatusException.class, () -> service.accept(tenant, "producer", bytes("""
                 {"schemaVersion":"1","provider":"CUSTOM","evidenceClass":"DECLARED",
                  "executions":[{"providerExecutionReference":"run-1","scopeKey":"scope","eventTime":"2026-01-01T00:00:00Z",
                  "status":"COMPLETED","evidenceClass":"DECLARED"}]}
@@ -37,8 +37,8 @@ class AiGridRuntimeIngestionServiceTest {
     }
 
     @Test
-    void enforcesTwoMebibyteProducerFacingLimitFirst() {
-        assertThrows(IllegalArgumentException.class,
+    void rejectsOversizedBatchesAsOutOfScope() {
+        assertThrows(org.springframework.web.server.ResponseStatusException.class,
                 () -> service.accept(tenant, "producer", new byte[(2 * 1024 * 1024) + 1]));
     }
 

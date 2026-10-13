@@ -52,12 +52,31 @@ public class AiGridFindingService {
     }
 
     public boolean reconcile(Tenant tenant, AssessmentResult assessment) {
+        if ("EXECUTION".equals(assessment.subjectType())
+                || AiRuntimeScope.runtimePolicy(assessment.policyId(), null)) return false;
         boolean workflowEnabled = "REQUIRED".equals(assessment.selection())
                 || "ENABLED".equals(assessment.selection());
         if (!workflowEnabled) return closeForPolicyDowngrade(tenant, assessment);
         if ("FAIL".equals(assessment.decision())) return openOrUpdate(tenant, assessment);
         if ("PASS".equals(assessment.decision())) return closeVerified(tenant, assessment);
         return false;
+    }
+
+    /** Withdraws a baseline-relative claim without asserting remediation or a passing control. */
+    public boolean withdrawBaselineComparison(Tenant tenant, AssessmentResult assessment) {
+        Finding finding = findings.findByTenantAndFingerprint(tenant, assessment.fingerprint()).orElse(null);
+        if (finding == null || finding.getStatus() == FindingStatus.AUTO_CLOSED) return false;
+        Map<String, Object> evidence = new java.util.LinkedHashMap<>();
+        evidence.put("policyId", assessment.policyId());
+        evidence.put("comparisonOutcome", assessment.reasonCode());
+        evidence.put("assessmentId", assessment.assessmentId());
+        if (assessment.runId() != null) evidence.put("runId", assessment.runId());
+        workflow.autoCloseFinding(finding, FindingCloseReason.AUTO_NOT_OBSERVED,
+                "Baseline comparison is unavailable; the previous change claim cannot be assessed", evidence, Instant.now());
+        finding.setAssessmentId(assessment.assessmentId());
+        finding.setReasonCode(assessment.reasonCode());
+        findings.save(finding);
+        return true;
     }
 
     /**

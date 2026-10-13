@@ -2,7 +2,7 @@
 
 Last updated: 2026-09-29
 
-The runtime database is PostgreSQL, with two independent Flyway lines. `postgres_reset/V1__platform_schema.sql` and `tenant/V1__tenant_schema.sql` are the reset baselines; the current heads are platform `postgres_reset/V5__ai_bom_provenance_fact.sql` and tenant `tenant/V11__ai_bom_resource_mapping_review.sql`. The AI Security/AI Grid module's own migrations stop at platform/tenant V3 (see "AI Security / AI Grid Tables" below), with platform V4 a separate AI Grid Phase 2 file also unrelated to AI-BOM; only platform V5 and tenant V4-V11 are the AI-BOM → AI Grid integration (see "AI-BOM Common Lifecycle" and "AI-BOM Declared Resources" below). Tenant migrations are applied once per tenant schema by `TenantSchemaMigrationService` / `ProductionBootstrapCli`.
+The runtime database is PostgreSQL with two independent Flyway lines, each consolidated into a complete V1 development baseline: `postgres_reset/V1__platform_schema.sql` and `tenant/V1__tenant_schema.sql`. They include current AI Grid, AI-BOM, GitHub advisory/OSV, deployment metadata, harm-baseline schema, and runtime exclusion. Tenant migrations are applied once per schema by `TenantSchemaMigrationService` / `ProductionBootstrapCli`. Historical version references below describe when features were introduced; their SQL is now incorporated in V1. Existing development databases must be recreated, and old packaged resources removed with `mvn clean`; `flyway:repair` cannot adopt this reset.
 
 ---
 
@@ -11,7 +11,7 @@ The runtime database is PostgreSQL, with two independent Flyway lines. `postgres
 - **Database name (local):** `vulnwatch`
 - **JDBC URL default:** `jdbc:postgresql://localhost:5432/vulnwatch`
 - **Migration directories:** `backend/src/main/resources/db/migration/postgres_reset/` (platform/`public` schema) and `backend/src/main/resources/db/migration/tenant/` (per-tenant schema, applied by the tenant schema control plane, not by the application's own startup Flyway run)
-- **Flyway baselines:** `postgres_reset/V1__platform_schema.sql` and `tenant/V1__tenant_schema.sql`; both lines currently have append-only migrations through platform V5 / tenant V11
+- **Flyway baselines:** `postgres_reset/V1__platform_schema.sql` and `tenant/V1__tenant_schema.sql`; both current targets are V1; future changes start at V2
 - **Replay rule:** the V1 reset baselines use defensive creation patterns for the documented bootstrap repair path; post-baseline migrations are Flyway-managed and must not be replayed manually
 - **`ddl-auto`:** `none` (Flyway owns all DDL; Hibernate never creates or alters tables)
 
@@ -710,7 +710,7 @@ Analyst-visible finding records. One row per `(component, vulnerability)` pair t
 
 Unique: `(component_id, vulnerability_id)`. Indexes: `idx_findings_tenant_status_updated`, `idx_findings_tenant_component_vuln`, `idx_findings_asset_id`, `idx_findings_vulnerability_id`, `idx_findings_vulnerability_status`.
 
-**`finding_kind`** (tenant `V5__finding_kind_projection.sql`, not shown above): `varchar`, defaulted/backfilled to `VULNERABILITY`, also `AI_POSTURE`/`AI_EXPOSURE`/`AI_RUNTIME` for the AI Security/AI Grid pipeline (see below). The uniqueness above is really `uk_findings_component_vulnerability` — one finding per resolved component/vulnerability pair regardless of how many documents or declared AI resources reference it. `finding_subjects` (added `V48`, see "AI Security / AI Grid Tables") gained a third `subject_type='AI_RESOURCE'`/`subject_role='AFFECTED_AI_RESOURCE'` combination with Milestone 3 part 5.1 — no migration needed, since `finding_subjects` carries no check constraint on those columns — recording that a `VULNERABILITY` finding transitively affects a declared AI-BOM resource. See "AI-BOM Declared Resources" below for the `ai_bom_resource_vulnerability_links` table that also records this, and `docs/business-logic-guide.md` for `FindingsFilter.findingKind`/`affectedAiResourceId`/`hasAffectedAiResource`.
+**`finding_kind`** (tenant `V1__tenant_schema.sql`, not shown above): `varchar`, defaulted/backfilled to `VULNERABILITY`, also `AI_POSTURE`/`AI_EXPOSURE`/`AI_RUNTIME` for the AI Security/AI Grid pipeline (see below). The uniqueness above is really `uk_findings_component_vulnerability` — one finding per resolved component/vulnerability pair regardless of how many documents or declared AI resources reference it. `finding_subjects` (added `V48`, see "AI Security / AI Grid Tables") gained a third `subject_type='AI_RESOURCE'`/`subject_role='AFFECTED_AI_RESOURCE'` combination with Milestone 3 part 5.1 — no migration needed, since `finding_subjects` carries no check constraint on those columns — recording that a `VULNERABILITY` finding transitively affects a declared AI-BOM resource. See "AI-BOM Declared Resources" below for the `ai_bom_resource_vulnerability_links` table that also records this, and `docs/business-logic-guide.md` for `FindingsFilter.findingKind`/`affectedAiResourceId`/`hasAffectedAiResource`.
 
 ---
 
@@ -1135,7 +1135,7 @@ Automatic linking (`AiBomDeploymentLinkingService`) only matches `MODEL` resourc
 
 **`ai_bom_resource_vulnerability_links`** (`V10`) — bridges a declared resource to the canonical `VULNERABILITY` finding of a real software component it transitively depends on (Milestone 3 part 5.1). Fields: `declared_resource_id`, `finding_id`, `via_component_id`, `correlation_method` (currently only `TRANSITIVE_DEPENDENCY`), `detected_at`. Written by `AiBomResourceVulnerabilityCorrelationService.reconcileAllForTenant`, walking `bom_component_relationships` `DEPENDS_ON` edges to a real `inventory_components` row and its open finding — never the component assessment path's own writer of applicability, only a reference to it. Each link also gets a mirrored `finding_subjects` row (`subject_type='AI_RESOURCE'`, `subject_role='AFFECTED_AI_RESOURCE'`) so a finding can report which declared resources it affects without a schema change to `finding_subjects` itself. Deliberately excluded: a model/dataset's own identity matching a CVE directly — models/datasets never get an `inventory_component_id` (by M1 design), so `bom_component_vulnerability_links` (pre-M3) already covers that case without needing a `Finding` bridge.
 
-**`ai_bom_provenance_facts`** (`V8`) — durable storage for the `provenance.ai_bom_present` fact (registered in the platform fact catalog by `postgres_reset/V5`), deliberately not `ai_grid_facts` (that table requires a connector-observed artifact/snapshot/run, which a BOM-only asset never has). Fields: `asset_id`, `source_id`, `bom_id` (the document version that produced the projection), `fact_key` (default `provenance.ai_bom_present`), `value_boolean`, `evidence_class` (default `BOM_DOCUMENT`, distinct from provider-configuration evidence classes — a document assertion must not satisfy a policy meaning to require observed configuration), `bom_format`, `spec_version`, `document_ingested_at`, `projected_at`, `projection_version`. Unique on `(tenant_id, asset_id, fact_key)`. The platform-side fact definition (`postgres_reset/V5__ai_bom_provenance_fact.sql`) registers `provenance.ai_bom_present` with `allowed_workflow_uses_json=["COVERAGE_CONTEXT"]` and deliberately *not* `POSTURE_FINDING` — a document's existence is not a posture claim, and allowing it as a finding input would enable the BOM coverage policies that are meant to stay disabled (see `business-logic-guide.md`).
+**`ai_bom_provenance_facts`** (`V8`) — durable storage for the `provenance.ai_bom_present` fact (registered in the platform fact catalog by `postgres_reset/V5`), deliberately not `ai_grid_facts` (that table requires a connector-observed artifact/snapshot/run, which a BOM-only asset never has). Fields: `asset_id`, `source_id`, `bom_id` (the document version that produced the projection), `fact_key` (default `provenance.ai_bom_present`), `value_boolean`, `evidence_class` (default `BOM_DOCUMENT`, distinct from provider-configuration evidence classes — a document assertion must not satisfy a policy meaning to require observed configuration), `bom_format`, `spec_version`, `document_ingested_at`, `projected_at`, `projection_version`. Unique on `(tenant_id, asset_id, fact_key)`. The platform-side fact definition (`postgres_reset/V1__platform_schema.sql`) registers `provenance.ai_bom_present` with `allowed_workflow_uses_json=["COVERAGE_CONTEXT"]` and deliberately *not* `POSTURE_FINDING` — a document's existence is not a posture claim, and allowing it as a finding input would enable the BOM coverage policies that are meant to stay disabled (see `business-logic-guide.md`).
 
 **`ai_bom_projection_receipts`** (`V8`) — durable completed-work receipt, since a job's queued/running dedupe only prevents duplicate *queued* work; a receipt is what stops a redelivered or re-claimed job from projecting the same source revision twice after the real work already finished. Fields: `source_id`, `source_revision`, `operation`, `projection_version`, `completed_at`. Unique on `(tenant_id, source_id, source_revision, operation, projection_version)`.
 
@@ -1186,9 +1186,9 @@ This module's own migration provenance stops at platform `postgres_reset/V3` and
 
 ### Tenant schema tables (pre-reset provenance: `V45`–`V64`)
 
-#### Runtime identity V4 → V5 upgrade
+#### Deferred runtime storage
 
-Before applying tenant V5, run `backend/scripts/preflight-ai-runtime-v5.sql`. V4 stored provider runtime identifiers in plaintext; V5 changes that boundary to tenant-scoped HMAC digests and therefore intentionally does not attempt an irreversible SQL-only conversion without the runtime key. If the preflight reports rows, pause the rollout and either export and re-ingest them through `AiAgentExecutionIngestionService` with the tenant runtime HMAC key, or—when runtime history is explicitly disposable—delete events, receipts, cursors, then executions for that tenant before rerunning the preflight. Inventory artifacts, findings, memberships, and discovery completeness must not be deleted as part of this cleanup.
+The fresh tenant V1 retains typed runtime tables but contains no runtime evidence or sources. Runtime admission, collection, evaluation, and customer surfaces are out of scope. Historical identity-upgrade/preflight instructions do not apply to the new development baseline; recreate old development databases instead of converting their runtime rows.
 
 **Shared AI inventory infrastructure** (`V45`, `V46`, `V62`–`V64`): `ai_security_connector_configs` (AWS Bedrock / Azure AI connector config, credentials encrypted), `ai_security_azure_credential_profiles` (client-secret/workload-federation/managed-identity, active + pending rotation), `ai_security_artifacts` (discovered AI resources — agents, models, guardrails, knowledge bases, MCP servers; carries PII scan status/source/info-types added in `V62`/`V64`), `ai_security_artifact_sources`, `ai_security_relationships`, `ai_security_snapshot_scopes`, and `ai_security_observation_receipts` (idempotency for ingested observation chunks). Tenant policy configuration and legacy findings were retired in `V65`; AI Grid and canonical findings are their sole owners.
 
@@ -1214,31 +1214,19 @@ Governance-only — no tenant data. `platform.ai_grid_policy_distribution` (`V67
 
 ### Known anomalies
 
-Both anomalies previously logged here (a pre-reset platform-only file missing its guard comment, and a `target_version`/actual-latest-file mismatch between `61` and `V64`) were artifacts of the pre-reset numbered migration line and no longer apply. All current head files carry their required migration guards, and `PackagedMigrationCatalog` resolves the platform line to version `5` and the tenant line to version `11` (`MigrationCatalogTest`).
+Both anomalies previously logged here (a pre-reset platform-only file missing its guard comment, and a `target_version`/actual-latest-file mismatch between `61` and `V64`) were artifacts of the pre-reset numbered migration line and no longer apply. All current head files carry their required migration guards, and `PackagedMigrationCatalog` resolves both lines to version `1` (`MigrationCatalogTest`).
 
-`app.tenancy.minimum-compatible-schema-version` defaults to `1`; it is a compatibility floor during the V2 rollout, not the packaged target.
+`app.tenancy.minimum-compatible-schema-version` defaults to `1`; it is a compatibility floor during tenant rollout, not the packaged target.
 
 ## Migration Conventions
 
 - File pattern: `V{next}__short_snake_case.sql` in `backend/src/main/resources/db/migration/postgres_reset/` (platform line) or `backend/src/main/resources/db/migration/tenant/` (per-tenant line — see below)
 - **Never edit an already-applied migration file.** Add a new migration instead. (Before the one-time migration-history reset, a narrow exception existed for two files needing a schema-qualification fix — that fix is now simply part of the `V1` baselines, so no live exception currently applies; don't treat historical precedent as license to edit an applied migration today.)
-- V1 baseline DDL uses defensive creation patterns; later migrations may contain one-time `ALTER TABLE` operations and are not assumed idempotent outside Flyway.
+- V1 baselines require an empty database/schema and are applied exactly once by Flyway. They must not be replayed as repair scripts. Future changes use V2 onward.
 - `flyway.validate-on-migrate: true` in all profiles; `out-of-order: false`.
 - `flyway.baseline-on-migrate: false` in all profiles (`application.yml`) — there is currently no local-profile override (only a gitignored `application-local.example.yml` template exists, and it has no Flyway section).
 
-To repair Flyway history after schema drift:
-```bash
-cd backend
-mvn -q \
-  -Dflyway.url=jdbc:postgresql://localhost:5432/vulnwatch \
-  -Dflyway.user="$USER" \
-  -Dflyway.password= \
-  -Dflyway.schemas=tenant_default \
-  -Dflyway.locations=filesystem:src/main/resources/db/migration/postgres_reset \
-  flyway:repair
-```
-
-`-Dflyway.schemas=tenant_default` is required — `flyway_schema_history` lives in `tenant_default`, not `public`. Omitting it silently repairs the wrong table.
+For this development reset, recreate the database and bootstrap both V1s. Do not use Flyway repair to adopt rewritten baselines.
 
 ---
 
@@ -1248,16 +1236,16 @@ There are **two independent Flyway migration lines**, never applied by the same 
 
 | Line | Location | Applies to | History table | Notes |
 |---|---|---|---|---|
-| Platform/reset | `postgres_reset/` | `public` schema only (plus the `tenant_default` template, which lives under `public` for baselining purposes) | `public.flyway_schema_history` | Each file must open with a `-- migration-guard: platform-only` comment; `PostgresResetMigrationGuardTest` enforces this so tenant-schema DDL can't leak into the shared line by accident. |
-| Tenant | `tenant/` | Every tenant schema (`tenant_default` and each `tenant_<id>`), one Flyway run per schema | `<schema>.tenant_schema_history` | Each file begins `-- migration-guard: tenant-only`; tenant V1 is the reset baseline, and later files, currently through V11, may use `${tenantId}` / `${tenantSchema}` placeholders. |
+| Platform/reset | `postgres_reset/` | `public` and `platform`, plus an empty `tenant_default` schema | `public.flyway_schema_history` | Each file must open with a `-- migration-guard: platform-only` comment; `PostgresResetMigrationGuardTest` enforces this so tenant-schema DDL can't leak into the shared line by accident. |
+| Tenant | `tenant/` | Every tenant schema (`tenant_default` and each `tenant_<id>`), one Flyway run per schema | `<schema>.tenant_schema_history` | Each file begins `-- migration-guard: tenant-only`; tenant V1 is the reset baseline, and the baseline and future files may use `${tenantId}` / `${tenantSchema}` placeholders. |
 
-Current latest: `postgres_reset/V5__ai_bom_provenance_fact.sql` and `tenant/V11__ai_bom_resource_mapping_review.sql`.
+Current latest: platform `V1__platform_schema.sql` and tenant `V1__tenant_schema.sql`; future migrations start at V2.
 
 **Rollout mechanics** (`TenantSchemaMigrationService.migrateAll()`, mirrored by `ProductionBootstrapCli` for the standalone production bootstrap path):
 1. Hold a Postgres advisory lock (`scout-tenant-schema-migrator` / `scout-production-bootstrap`, 30s timeout) so only one migration run proceeds at a time.
 2. Migrate the `tenant_default` template schema first and compute its **structural fingerprint** — a SHA-256 hash over a normalized, schema-name-and-tenant-id-scrubbed dump of every column, constraint, index, sequence, and RLS policy definition (`information_schema` + `pg_catalog` introspection).
 3. Migrate one canary tenant, then remaining tenants in batches of 10; each tenant's post-migration fingerprint is compared against the template's — any mismatch fails that tenant as `DRIFTED` and halts the batch rather than silently diverging.
-4. Every step (start, success, failure) is recorded to `platform.tenant_schema_versions` via `TenantSchemaStatusService`, which also serves `GET /api/platform/tenant-schema-status` (backing the Platform Console's tenant schema status view) and `TenantSchemaReadinessHealthIndicator` (an actuator health contributor gated behind `app.tenancy.enforce-schema-version=true`; `/actuator/health` reports `DOWN` if any `ACTIVE` tenant is below `app.tenancy.minimum-compatible-schema-version`, default **1**, while the packaged target is **11**).
+4. Every step (start, success, failure) is recorded to `platform.tenant_schema_versions` via `TenantSchemaStatusService`, which also serves `GET /api/platform/tenant-schema-status` (backing the Platform Console's tenant schema status view) and `TenantSchemaReadinessHealthIndicator` (an actuator health contributor gated behind `app.tenancy.enforce-schema-version=true`; `/actuator/health` reports `DOWN` if any `ACTIVE` tenant is below `app.tenancy.minimum-compatible-schema-version`, default **1**, while the packaged target is **1**).
 5. A `report-only` mode (`reportOnly=true` / `BOOTSTRAP_REPORT_ONLY=true`) runs the same fingerprint comparison read-only, for verifying a restored production clone before committing to a real migration.
 
 **RLS enforcement is driven from the tenant line, not the platform line.** The mechanism is now baked directly into `tenant/V1__tenant_schema.sql` and runs once per tenant schema (via the rollout above): for every table in that schema it adds a `tenant_id` column if missing (backfilled to the tenant's own id, `NOT NULL` with a per-tenant default), fails loudly if it finds rows with a *conflicting* `tenant_id`, and enables `FORCE ROW LEVEL SECURITY` with a `tenant_isolation` policy pinned to `app.current_tenant_id`. `demo_requests` and `demo_invites` are explicitly exempted from the row-conflict check (`ProductionSafetyValidator.isSharedLifecycleTable`) because they hold pre-tenant-existence rows; the RLS-*coverage* check (confirming every table actually has RLS enabled) separately excludes only `demo_requests` by name — `audit_events` is not exempted from either check (it has `FORCE ROW LEVEL SECURITY` enabled like any other tenant table). This is the mechanism referenced by "RLS rollout status" in `architecture.md` — `ProductionSafetyValidator.validateRuntimeRoleCannotBypassRls()` (platform line) remains the pre-flight gate confirming the runtime DB role is non-superuser/non-BYPASSRLS before this per-tenant enforcement is allowed to run in production.

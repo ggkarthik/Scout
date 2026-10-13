@@ -47,11 +47,11 @@ jobs:
         with:
           node-version: 20
       - name: Validate legacy example policy packages
-        run: node scripts/validate-policy-packages.mjs
+        run: node prototype-app/scripts/validate-policy-packages.mjs
       - name: Validate governed AI Grid Phase 1 catalog
-        run: node scripts/compile-ai-grid-phase1.mjs
+        run: node prototype-app/scripts/compile-ai-grid-phase1.mjs
       - name: Validate AI Grid Phase 1 permission contracts
-        run: node scripts/validate-ai-grid-phase1-permissions.mjs
+        run: node prototype-app/scripts/validate-ai-grid-phase1-permissions.mjs
 
   secrets:
     runs-on: ubuntu-latest

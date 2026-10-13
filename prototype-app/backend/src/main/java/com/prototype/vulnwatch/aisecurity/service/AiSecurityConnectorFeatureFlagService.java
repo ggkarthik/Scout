@@ -60,6 +60,7 @@ public class AiSecurityConnectorFeatureFlagService {
     }
 
     public Response update(Tenant tenant, Feature feature, Request request, String actor) {
+        if (feature.name().endsWith("_RUNTIME") && request.enabled()) AiRuntimeScope.requireInScope();
         Response response = tenantExecution.run(tenant, () -> {
             jdbc.update("""
                     insert into ai_security_connector_feature_flags

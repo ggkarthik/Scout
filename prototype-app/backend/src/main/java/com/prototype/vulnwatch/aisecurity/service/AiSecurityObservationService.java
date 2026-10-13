@@ -38,6 +38,7 @@ public class AiSecurityObservationService {
     private final AiSecurityMetadataSanitizer metadataSanitizer;
     private AiGridPipelineService aiGridPipelineService;
     private AiSecurityDigestBaselineService digestBaselines;
+    private AiAgentDeploymentService deploymentService;
 
     public AiSecurityObservationService(
             NamedParameterJdbcTemplate jdbc,
@@ -64,6 +65,9 @@ public class AiSecurityObservationService {
     public void setDigestBaselines(AiSecurityDigestBaselineService digestBaselines) {
         this.digestBaselines = digestBaselines;
     }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setDeploymentService(AiAgentDeploymentService service) { this.deploymentService = service; }
 
     public IngestionResult ingest(Tenant tenant, ObservationEnvelopeV1 envelope) {
         validate(tenant, envelope);
@@ -126,7 +130,7 @@ public class AiSecurityObservationService {
             UUID artifactId = upsertArtifact(tenant, envelope, artifact, sanitized.attributes());
             artifactIds.put(artifact.providerResourceId(), artifactId);
             upsertSource(tenant, envelope, artifact, artifactId);
-            compareApprovedDigests(tenant, envelope, artifactId, sanitized.attributes());
+            compareApprovedDigests(tenant, envelope, artifactId, artifact.nativeKind(), sanitized.attributes(), sanitized.rejectedFieldNames().isEmpty());
         }
 
         List<Diagnostic> combinedDiagnostics = new ArrayList<>(diagnostics(envelope));
@@ -165,6 +169,7 @@ public class AiSecurityObservationService {
                     aiGridPipelineService.processCompleteScope(tenant, envelope);
                 }
             }
+            if (deploymentService != null) deploymentService.reconcileScope(tenant, envelope);
         } else {
             updateAcceptedChunks(envelope, accepted);
         }
@@ -172,8 +177,16 @@ public class AiSecurityObservationService {
     }
 
     private void compareApprovedDigests(Tenant tenant, ObservationEnvelopeV1 envelope, UUID artifactId,
-                                        Map<String, Object> attributes) {
-        if (digestBaselines == null) return;
+                                        String nativeKind, Map<String, Object> attributes, boolean metadataComplete) {
+        if (digestBaselines == null || envelope.observedAt() == null) return;
+        // The guardrail family enriches root agents with aggregate strength metadata, not
+        // a complete GetAgent attachment binding. Keep that enrichment out of approvals.
+        String control = "AWS_BEDROCK_AGENT".equals(nativeKind) && !"BEDROCK_AGENTS".equals(envelope.resourceFamily())
+                ? null : AiGuardrailBaselineComparison.snapshot(envelope.provider(),
+                nativeKind,
+                attributes, metadataComplete && envelope.completionStatus() == ScopeStatus.COMPLETE);
+        if (control != null) digestBaselines.observeCurrentTenant(tenant, artifactId, "GUARDRAIL_CONFIGURATION",
+                "NORMALIZED-CONTROL-JSON", "schema-v1", control, envelope.runId(), envelope.observedAt());
         String algorithm = string(attributes.get("digestAlgorithm"));
         String keyVersion = string(attributes.get("digestKeyVersion"));
         if (algorithm == null || keyVersion == null) return;
@@ -467,11 +480,19 @@ public class AiSecurityObservationService {
     }
 
     private void reconcileCompleteScope(ObservationEnvelopeV1 envelope) {
-        Map<String, Object> params = Map.of("runId", envelope.runId(), "scopeKey", envelope.scopeKey());
+        Map<String, Object> params = Map.of("runId", envelope.runId(), "scopeKey", envelope.scopeKey(),
+                "family", envelope.resourceFamily(), "observedAt", timestamp(envelope.observedAt()));
         jdbc.update("""
                 update ai_security_artifacts a
                    set active = false, deactivated_at = now()
-                 where a.active = true
+                 where a.active = true and a.last_observed_at <= :observedAt
+                   and (not (""" + AiAgentInventoryClassification.agentSql("a") + """
+                   ) or :family = case a.native_kind
+                       when 'AWS_BEDROCK_AGENT' then 'BEDROCK_AGENTS'
+                       when 'AWS_AGENTCORE_RUNTIME' then 'AWS_AGENTCORE_RUNTIMES'
+                       when 'AZURE_FOUNDRY_AGENTS' then 'AZURE_FOUNDRY_AGENTS'
+                       when 'AZURE_CLASSIC_FOUNDRY_AGENTS' then 'AZURE_CLASSIC_FOUNDRY_AGENTS'
+                       when 'MICROSOFT_COPILOT' then 'COPILOT_STUDIO' end)
                    and exists (
                        select 1 from ai_security_artifact_sources s
                         where s.artifact_id = a.id

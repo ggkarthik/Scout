@@ -82,6 +82,25 @@ class IngestionJobServiceTest {
     }
 
     @Test
+    void cancelsRuntimeJobsOnceWithoutTouchingOtherJobTypes() {
+        UUID tenantId = UUID.randomUUID();
+        UUID jobId = UUID.randomUUID();
+        IngestionJob job = new IngestionJob();
+        org.springframework.test.util.ReflectionTestUtils.setField(job, "id", jobId);
+        job.setJobType(IngestionJobService.JOB_TYPE_AI_GRID_RUNTIME_ADAPTER);
+        job.setStatus(IngestionJobService.STATUS_QUEUED);
+        when(ingestionJobRepository.findById(jobId)).thenReturn(Optional.of(job));
+        service.cancelRuntimeJob(tenantId, jobId);
+        service.cancelRuntimeJob(tenantId, jobId);
+        assertEquals(IngestionJobService.STATUS_CANCELLED, job.getStatus());
+        assertEquals("RUNTIME_OUT_OF_SCOPE", job.getFailureCode());
+        assertNotNull(job.getCompletedAt());
+        verify(ingestionJobRepository).save(job);
+        verify(auditEventService).recordExplicitActor(eq(tenantId), eq("runtime-scope-release"), eq("SYSTEM"),
+                eq("ingestion.job.cancelled"), eq("ingestion_job"), eq(jobId.toString()), anyString(), eq("SUCCESS"));
+    }
+
+    @Test
     void enqueueEndpointJobPersistsEncryptedPayloadAndEmitsCreatedEvent() throws Exception {
         Tenant tenant = tenant();
         SbomEndpointIngestionRequest request = new SbomEndpointIngestionRequest(

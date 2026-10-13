@@ -30,7 +30,9 @@ import org.springframework.stereotype.Component;
 public class AzureAiManagementClient {
 
     private static final String MANAGEMENT_HOST = "management.azure.com";
+    private static final String GRAPH_HOST = "graph.microsoft.com";
     private static final String MANAGEMENT_SCOPE = "https://management.azure.com/.default";
+    private static final String GRAPH_SCOPE = "https://graph.microsoft.com/.default";
     private static final String SEARCH_SCOPE = "https://search.azure.com/.default";
     private static final String FOUNDRY_SCOPE = "https://ai.azure.com/.default";
     private static final int MAX_PAGES = 100;
@@ -80,7 +82,9 @@ public class AzureAiManagementClient {
 
     public DiscoverySnapshot discover(TokenCredential credential, String subscriptionId, Set<String> requestedFamilies,
                                       boolean previewAgentsEnabled, Tenant tenant) {
-        Set<String> requested = requestedFamilies == null ? Set.of() : Set.copyOf(requestedFamilies);
+        Set<String> requested = requestedFamilies == null ? Set.of() : requestedFamilies.stream()
+                .filter(family -> !Set.of("AZURE_ML_JOBS", "AZURE_ML_PIPELINES").contains(family))
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
         Map<String, List<AzureResource>> resources = new LinkedHashMap<>();
         Map<String, AzureApiFailure> failures = new LinkedHashMap<>();
         for (String family : AiSecurityAzureConnectorService.RESOURCE_FAMILIES) {
@@ -116,6 +120,15 @@ public class AzureAiManagementClient {
                 "deployments", "AZURE_FOUNDRY_DEPLOYMENTS", resources, failures);
         collectRequestedChild(credential, requested, resources.get("AZURE_AI_ACCOUNTS"),
                 "raiPolicies", "AZURE_RAI_POLICIES", resources, failures);
+        if (previewAgentsEnabled && requested.contains("AZURE_FOUNDRY_AGENT_ROUTES")) {
+            collectChildren(credential, resources.get("AZURE_FOUNDRY_PROJECTS"), "applications",
+                    "AZURE_FOUNDRY_AGENT_APPLICATIONS", resources, failures);
+            collectChildren(credential, resources.get("AZURE_FOUNDRY_AGENT_APPLICATIONS"), "agentdeployments",
+                    "AZURE_FOUNDRY_AGENT_DEPLOYMENTS", resources, failures);
+            if (failures.containsKey("AZURE_FOUNDRY_AGENT_APPLICATIONS")) {
+                failures.putIfAbsent("AZURE_FOUNDRY_AGENT_DEPLOYMENTS", failures.get("AZURE_FOUNDRY_AGENT_APPLICATIONS"));
+            }
+        }
         if (previewAgentsEnabled && requested.stream().anyMatch(family -> family.startsWith("AZURE_FOUNDRY_AGENT"))) {
             collectFoundryAgents(credential, resources.get("AZURE_FOUNDRY_PROJECTS"), resources, failures, tenant);
         }
@@ -130,11 +143,7 @@ public class AzureAiManagementClient {
                 "deployments", "AZURE_ML_DEPLOYMENTS", resources, failures);
         collectRequestedChild(credential, requested, resources.get("AZURE_ML_WORKSPACES"),
                 "computes", "AZURE_ML_COMPUTE", resources, failures);
-        if (requested.contains("AZURE_ML_JOBS") || requested.contains("AZURE_ML_PIPELINES")) {
-            collectChildren(credential, resources.get("AZURE_ML_WORKSPACES"),
-                    "jobs", "AZURE_ML_JOBS", resources, failures);
-            partitionPipelineJobs(resources);
-        }
+
         if (requested.stream().anyMatch(AzureAiManagementClient::isSearchDefinitionFamily)) {
             collectSearchDefinitions(credential, requested, resources.get("AZURE_SEARCH_SERVICES"), resources, failures);
         }
@@ -147,7 +156,32 @@ public class AzureAiManagementClient {
         if (requested.contains("AZURE_RBAC_GLOBAL")) {
             collectSubscriptionRbac(credential, subscriptionId, resources, failures);
         }
+        if (requested.contains("AZURE_BOT_IDENTITIES")) {
+            collectAgentIdentities(credential, subscriptionId, resources, failures);
+        }
         return new DiscoverySnapshot(resources, failures);
+    }
+
+    private void collectAgentIdentities(
+            TokenCredential credential,
+            String subscriptionId,
+            Map<String, List<AzureResource>> resources,
+            Map<String, AzureApiFailure> failures
+    ) {
+        try {
+            for (JsonNode node : list(credential,
+                    "https://" + GRAPH_HOST + "/v1.0/servicePrincipals/microsoft.graph.agentIdentity")) {
+                String principalId = text(node.path("id"));
+                if (principalId == null) continue;
+                String id = "azure-identity:" + principalId.toLowerCase(Locale.ROOT);
+                resources.get("AZURE_BOT_IDENTITIES").add(new AzureResource(
+                        id, id, text(node.path("displayName")), "Microsoft.Entra/agentIdentities",
+                        "AgentIdentity", "GLOBAL", subscriptionId, null,
+                        objectMapper.createObjectNode(), node, objectMapper.createObjectNode(), Map.of(), null));
+            }
+        } catch (AzureApiException exception) {
+            failures.putIfAbsent("AZURE_BOT_IDENTITIES", exception.failure());
+        }
     }
 
     /**
@@ -211,6 +245,11 @@ public class AzureAiManagementClient {
                 for (JsonNode agent : foundryList(credential, endpoint + "/agents?api-version=v1")) {
                     AzureResource agentResource = foundryAgentResource(agent, project, tenant);
                     resources.get("AZURE_FOUNDRY_AGENTS").add(agentResource);
+                    AzureResource route = agent.path("agent_endpoint").isObject()
+                            ? foundryRouteResource(agent, agentResource)
+                            : legacyFoundryRouteResource(agentResource, resources.get("AZURE_FOUNDRY_AGENT_APPLICATIONS"),
+                                    resources.get("AZURE_FOUNDRY_AGENT_DEPLOYMENTS"), failures);
+                    resources.get("AZURE_FOUNDRY_AGENT_ROUTES").add(route);
                     String name = text(agent.path("name"));
                     if (name == null) continue;
                     try {
@@ -222,11 +261,13 @@ public class AzureAiManagementClient {
                     } catch (AzureApiException exception) {
                         // A single agent can be unavailable or use an unsupported version API;
                         // retain all other agents and make the enclosing inventory scope partial.
-                        failures.putIfAbsent("AZURE_FOUNDRY_AGENTS", exception.failure());
+                        failures.putIfAbsent("AZURE_FOUNDRY_AGENT_VERSIONS", exception.failure());
+                        failures.putIfAbsent("AZURE_FOUNDRY_AGENT_ROUTES", exception.failure());
                     }
                 }
             } catch (AzureApiException exception) {
                 failures.putIfAbsent("AZURE_FOUNDRY_AGENTS", exception.failure());
+                failures.putIfAbsent("AZURE_FOUNDRY_AGENT_ROUTES", exception.failure());
             }
         }
     }
@@ -331,6 +372,8 @@ public class AzureAiManagementClient {
             JsonNode response = get(credential, next);
             JsonNode data = response.path("data");
             if (data.isArray()) data.forEach(values::add);
+            else throw new AzureApiException(new AzureApiFailure("INVALID_PROVIDER_RESPONSE",
+                    "Azure Foundry collection response did not contain an agent list", false, 0));
             next = nextFoundryPageUrl(url, response);
             if (next != null) validateFoundryUri(URI.create(next));
         }
@@ -364,6 +407,134 @@ public class AzureAiManagementClient {
                 "Microsoft.Foundry/projects/agents", "FoundryPromptAgent", project.location(),
                 project.subscriptionId(), project.resourceGroup(), objectMapper.createObjectNode(), properties,
                 objectMapper.createObjectNode(), Map.of(), project.id());
+    }
+
+    AzureResource foundryRouteResource(JsonNode agent, AzureResource parent) {
+        var properties = objectMapper.createObjectNode();
+        var versions = objectMapper.createArrayNode();
+        JsonNode endpoint = agent.path("agent_endpoint");
+        String gap = null;
+        String status = "READY";
+        if (!endpoint.isObject()) gap = "UNSUPPORTED_API";
+        else if (!endpoint.path("protocol_configuration").isObject()
+                || endpoint.path("protocol_configuration").isEmpty()) gap = "AMBIGUOUS_ROUTE_STATE";
+        JsonNode rules = endpoint.path("version_selector").path("version_selection_rules");
+        if (gap == null && endpoint.hasNonNull("version_selector") && (!rules.isArray() || rules.isEmpty())) {
+            gap = "AMBIGUOUS_ROUTE_STATE";
+        }
+        if (gap == null && rules.isArray() && !rules.isEmpty()) {
+            double total = 0;
+            for (JsonNode rule : rules) {
+                if (!"FixedRatio".equals(rule.path("type").asText())
+                        || !rule.path("traffic_percentage").isNumber()) { gap = "AMBIGUOUS_ROUTE_STATE"; break; }
+                double traffic = rule.path("traffic_percentage").asDouble();
+                if (traffic < 0 || traffic > 100) { gap = "AMBIGUOUS_ROUTE_STATE"; break; }
+                total += traffic;
+                if (traffic > 0) {
+                    String version = text(rule.path("agent_version"));
+                    if (version == null) { gap = "UNRESOLVED_VERSION"; break; }
+                    versions.add(version);
+                }
+            }
+            if (gap == null && total == 0) status = "ZERO_TRAFFIC_ALLOCATION";
+            else if (gap == null && Math.abs(total - 100) > 0.0001) gap = "AMBIGUOUS_ROUTE_STATE";
+        } else if (gap == null) {
+            // Provider default routes latest, but an exact observed target is still required.
+            String version = text(agent.path("versions").path("latest").path("version"));
+            if (version == null) gap = "UNRESOLVED_VERSION";
+            else versions.add(version);
+        }
+        JsonNode definition = agent.path("versions").path("latest").path("definition");
+        String definitionType = definition.path("kind").asText(definition.path("type").asText());
+        if (gap == null && !definitionType.isEmpty() && !definitionType.equals("prompt")) {
+            gap = "AMBIGUOUS_ROUTE_STATE";
+        }
+        properties.put("status", gap == null ? status : "UNKNOWN");
+        properties.put("deploymentEvidenceReason", gap == null ? "" : gap);
+        properties.set("routedVersions", versions);
+        String id = parent.id() + "/endpoint";
+        return new AzureResource(id, id, parent.name() + " endpoint", "Microsoft.Foundry/projects/agents/endpoint",
+                "FoundryAgentEndpoint", parent.location(), parent.subscriptionId(), parent.resourceGroup(),
+                objectMapper.createObjectNode(), properties, objectMapper.createObjectNode(), Map.of(), parent.id());
+    }
+
+    AzureResource legacyFoundryRouteResource(AzureResource agent, List<AzureResource> applications,
+                                             List<AzureResource> deployments, Map<String, AzureApiFailure> failures) {
+        Set<String> gaps = new java.util.TreeSet<>();
+        for (String family : List.of("AZURE_FOUNDRY_AGENT_APPLICATIONS", "AZURE_FOUNDRY_AGENT_DEPLOYMENTS")) {
+            AzureApiFailure failure = failures.get(family);
+            if (failure != null) gaps.add(failure.statusCode() == 403 ? "PERMISSION_DENIED"
+                    : failure.code().contains("BUDGET") ? "BUDGET_EXHAUSTED"
+                    : failure.statusCode() == 404 ? "UNSUPPORTED_API" : "PROVIDER_ERROR");
+        }
+        var versions = objectMapper.createArrayNode();
+        boolean zeroTraffic = false;
+        int routingMechanisms = 0;
+        for (AzureResource app : applications == null ? List.<AzureResource>of() : applications) {
+            if (!java.util.Objects.equals(app.parentId(), agent.parentId())) continue;
+            boolean related = false;
+            for (JsonNode reference : app.properties().path("agents")) {
+                related |= agent.name().equals(reference.path("agentName").asText()) || agent.id().equals(reference.path("agentId").asText());
+            }
+            List<AzureResource> children = (deployments == null ? List.<AzureResource>of() : deployments).stream()
+                    .filter(d -> app.id().equals(d.parentId())).toList();
+            for (AzureResource deployment : children) {
+                for (JsonNode reference : deployment.properties().path("agents")) {
+                    related |= agent.name().equals(reference.path("agentName").asText()) || agent.id().equals(reference.path("agentId").asText());
+                }
+            }
+            if (!related) continue;
+            routingMechanisms++;
+            JsonNode rules = app.properties().path("trafficRoutingPolicy").path("rules");
+            if (rules.isArray()) {
+                if (!app.properties().path("trafficRoutingPolicy").path("protocol").asText().equals("FixedRatio")) {
+                    gaps.add("AMBIGUOUS_ROUTE_STATE"); continue;
+                }
+                double allocation = 0;
+                for (JsonNode rule : rules) {
+                    if (!rule.path("trafficPercentage").isNumber() || rule.path("trafficPercentage").asDouble() < 0
+                            || rule.path("trafficPercentage").asDouble() > 100) { gaps.add("AMBIGUOUS_ROUTE_STATE"); continue; }
+                    allocation += rule.path("trafficPercentage").asDouble();
+                    String target = rule.path("deploymentId").asText();
+                    AzureResource deployment = children.stream().filter(d -> d.id().equalsIgnoreCase(target)
+                            || d.properties().path("deploymentId").asText().equals(target)).findFirst().orElse(null);
+                    if (deployment == null) { gaps.add("UNRESOLVED_IDENTITY"); continue; }
+                    if (rule.path("trafficPercentage").asDouble() == 0) { zeroTraffic = true; continue; }
+                    appendLegacyServingVersions(agent, deployment, versions, gaps);
+                }
+                if (allocation == 0) zeroTraffic = true;
+                else if (Math.abs(allocation - 100) > 0.0001) gaps.add("AMBIGUOUS_ROUTE_STATE");
+            } else if (children.size() == 1) {
+                // The documented default directs all traffic to the first deployment. With one
+                // completely enumerated child, that target is unambiguous.
+                appendLegacyServingVersions(agent, children.get(0), versions, gaps);
+            } else if (!children.isEmpty()) gaps.add("AMBIGUOUS_ROUTE_STATE");
+        }
+        String gap = gaps.size() > 1 ? "INCOMPLETE_SCOPE" : gaps.stream().findFirst().orElse("");
+        var properties = objectMapper.createObjectNode();
+        properties.put("status", !gap.isEmpty() ? "UNKNOWN" : !versions.isEmpty() ? "READY"
+                : routingMechanisms > 1 ? "NO_SERVING_ROUTE" : zeroTraffic ? "ZERO_TRAFFIC_ALLOCATION" : "NO_ACTIVE_DEPLOYMENT");
+        properties.put("deploymentEvidenceReason", gap);
+        properties.set("routedVersions", versions);
+        String id = agent.id() + "/legacy-routing";
+        return new AzureResource(id,id,agent.name() + " application routing", "Microsoft.Foundry/projects/agents/endpoint",
+                "LegacyFoundryApplicationRouting", agent.location(), agent.subscriptionId(), agent.resourceGroup(),
+                objectMapper.createObjectNode(), properties, objectMapper.createObjectNode(), Map.of(), agent.id());
+    }
+
+    private void appendLegacyServingVersions(AzureResource agent, AzureResource deployment,
+            com.fasterxml.jackson.databind.node.ArrayNode versions, Set<String> gaps) {
+        String state = deployment.properties().path("state").asText();
+        if (Set.of("Stopped", "Deleted", "Failed").contains(state)) return;
+        if (!state.equals("Running")) { gaps.add("AMBIGUOUS_ROUTE_STATE"); return; }
+        if (!deployment.properties().path("protocols").isArray() || deployment.properties().path("protocols").isEmpty()) {
+            gaps.add("AMBIGUOUS_ROUTE_STATE"); return;
+        }
+        for (JsonNode reference : deployment.properties().path("agents")) {
+            if (!agent.name().equals(reference.path("agentName").asText()) && !agent.id().equals(reference.path("agentId").asText())) continue;
+            String version = text(reference.path("agentVersion"));
+            if (version == null) gaps.add("UNRESOLVED_VERSION"); else versions.add(version);
+        }
     }
 
     private com.fasterxml.jackson.databind.node.ArrayNode safeTools(JsonNode definitions, Tenant tenant) {
@@ -601,8 +772,9 @@ public class AzureAiManagementClient {
                 values.add(response);
             }
             String candidate = text(response.path("nextLink"));
+            if (candidate == null) candidate = text(response.path("@odata.nextLink"));
             if (candidate != null) {
-                validateManagementUri(URI.create(candidate));
+                validateAllowedUri(URI.create(candidate));
             }
             next = candidate;
         }
@@ -635,6 +807,9 @@ public class AzureAiManagementClient {
                     throw new AzureApiException(failure(response.statusCode(), body));
                 }
                 return body.isBlank() ? objectMapper.createObjectNode() : objectMapper.readTree(body);
+            } catch (AiGridProviderCallCounter.ProviderCallBudgetExceededException exception) {
+                throw new AzureApiException(new AzureApiFailure("PROVIDER_CALL_BUDGET_EXHAUSTED",
+                        "Azure metadata collection exhausted its provider call budget", false, 0));
             } catch (AzureApiException exception) {
                 terminal = exception;
             } catch (java.net.http.HttpTimeoutException exception) {
@@ -740,7 +915,8 @@ public class AzureAiManagementClient {
         if (normalized.equals("microsoft.cognitiveservices/accounts/projects/connections")) return "AZURE_FOUNDRY_CONNECTIONS";
         if (normalized.equals("microsoft.storage/storageaccounts")) return "AZURE_STORAGE_ACCOUNTS";
         if (normalized.equals("microsoft.fabric/capacities")) return "AZURE_FABRIC_CAPACITIES";
-        if (normalized.contains("/agentdeployments")) return "AZURE_FOUNDRY_AGENTS";
+        if (normalized.contains("/agentdeployments")) return "AZURE_FOUNDRY_AGENT_DEPLOYMENTS";
+        if (normalized.equals("microsoft.cognitiveservices/accounts/projects/applications")) return "AZURE_FOUNDRY_AGENT_APPLICATIONS";
         if (normalized.equals("microsoft.foundry/projects/agents")) return "AZURE_FOUNDRY_AGENTS";
         if (normalized.equals("microsoft.machinelearningservices/workspaces")) return "AZURE_ML_WORKSPACES";
         if (normalized.contains("/models")) return "AZURE_ML_MODELS";
@@ -781,10 +957,21 @@ public class AzureAiManagementClient {
     private void validateAllowedUri(URI uri) {
         if (MANAGEMENT_HOST.equalsIgnoreCase(uri.getHost())) {
             validateManagementUri(uri);
+        } else if (GRAPH_HOST.equalsIgnoreCase(uri.getHost())) {
+            validateGraphUri(uri);
         } else if (isFoundryHost(uri.getHost())) {
             validateFoundryUri(uri);
         } else {
             validateSearchUri(uri);
+        }
+    }
+
+    void validateGraphUri(URI uri) {
+        if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getUserInfo() != null
+                || !GRAPH_HOST.equalsIgnoreCase(uri.getHost())
+                || !"/v1.0/servicePrincipals/microsoft.graph.agentIdentity".equals(uri.getPath())) {
+            throw new AzureApiException(new AzureApiFailure(
+                    "INVALID_CONFIGURATION", "Microsoft Graph continuation URL is not allowed", false, 0));
         }
     }
 
@@ -809,7 +996,8 @@ public class AzureAiManagementClient {
     }
 
     private String bearerToken(TokenCredential credential, String host) {
-        String scope = host != null && (host.endsWith(".search.windows.net") || host.endsWith(".search.azure.com"))
+        String scope = GRAPH_HOST.equalsIgnoreCase(host) ? GRAPH_SCOPE
+                : host != null && (host.endsWith(".search.windows.net") || host.endsWith(".search.azure.com"))
                 ? SEARCH_SCOPE : isFoundryHost(host) ? FOUNDRY_SCOPE : MANAGEMENT_SCOPE;
         AccessToken token = credential.getToken(new TokenRequestContext().addScopes(scope))
                 .block(Duration.ofSeconds(30));

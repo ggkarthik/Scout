@@ -12,7 +12,7 @@ import org.springframework.stereotype.Service;
 
 /**
  * Durable worker for {@code AI_GRID_BOM_PROJECTION} jobs. Mirrors
- * {@code com.prototype.vulnwatch.aisecurity.service.AiGridRuntimeIngestionWorker}'s
+ * {@code com.prototype.vulnwatch.aisecurity.service.AiGridRuntimeIngestionWorker}'s legacy
  * poll/claim/process/mark shape, with one deliberate difference: {@code recordStarted}/
  * {@code recordCompleted}/{@code recordFailed} write an audit event through
  * {@code RequestActorService.currentActor()}, which resolves the actor's tenant via

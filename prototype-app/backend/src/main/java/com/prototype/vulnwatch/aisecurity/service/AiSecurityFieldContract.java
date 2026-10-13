@@ -37,8 +37,8 @@ public final class AiSecurityFieldContract {
      * public extension point.
      */
     private static final Set<String> PUBLIC_METADATA = Set.of(
-            "actionGroupId", "agentCoreRootQualified", "agentId", "aliasId", "aliasName", "architecture", "assignmentScope", "authMode", "authoritativeWorkloadBoundaryObserved", "azureResourceType", "backingStore", "baseModelArn",
-            "botPasswordAuthWithoutManagedIdentity", "capacity", "codeInterpreterEnabled", "classification", "componentType",
+            "deploymentEvidenceReason", "liveVersion", "targetVersion", "actionGroupId", "agentCoreRootQualified", "agentId", "aliasId", "aliasName", "architecture", "assignmentScope", "authMode", "authoritativeWorkloadBoundaryObserved", "azureResourceType", "backingStore", "baseModelArn",
+            "accountEnabled", "botPasswordAuthWithoutManagedIdentity", "capacity", "codeInterpreterEnabled", "classification", "componentType",
             "commitmentDuration", "commitmentExpirationTime", "conditionVersion", "configurationSubtype",
             "bodyStored", "browserId", "codeInterpreterId", "configuredAuthType", "confidence", "contentFilterCount", "contentFilters", "creationMode",
             "contextualGroundingFilterCount", "contextualGroundingFilters", "createdAt", "customWordFilterCount",
@@ -46,7 +46,7 @@ public final class AiSecurityFieldContract {
             "dataSourceCount", "datastoreId", "deletionPolicy", "deniedTopicCount", "deniedTopics",
             "deployedArtifact", "definitionBodyStored", "diagnosticLoggingEnabled", "disableLocalAuth", "domainId", "endpointComputeType", "endpointExposure",
             "endpointHost", "environment", "evidence", "evidenceSource", "executionRoleArn", "experimentName", "foundationModel",
-            "functionUrlAuthType", "guardrailAttached", "guardrailId", "guardrailMinimumStrength", "hasDestination",
+            "functionUrlAuthType", "guardrailAttached", "guardrailId", "guardrailVersion", "guardrailMinimumStrength", "hasDestination",
             "crossAccountTrust", "iamEvidenceAvailable", "iamNotAction", "iamNotResource", "iamPassRole",
             "iamWildcardActions", "iamWildcardResources", "identityType", "inboundAuthType", "inferenceTypesSupported",
             "ingestionConfigurationPresent", "inputModalities", "instanceType", "instructSupported",

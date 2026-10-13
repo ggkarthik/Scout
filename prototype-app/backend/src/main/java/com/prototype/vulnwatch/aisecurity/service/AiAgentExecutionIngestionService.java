@@ -48,6 +48,7 @@ public class AiAgentExecutionIngestionService {
     }
 
     public Result ingest(Tenant tenant, UUID connectorId, RuntimeExecution observation) {
+        com.prototype.vulnwatch.aisecurity.service.AiRuntimeScope.requireInScope();
         validate(observation);
         return tenantExecution.run(tenant, () -> transactions.execute(status -> persist(tenant, connectorId, observation)));
     }

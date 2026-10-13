@@ -40,6 +40,22 @@ class FindingQueryServiceTest {
     private AiBomAffectedResourceSummaryService affectedResourceSummaryService;
 
     @Test
+    void historicalRuntimeFindingDoesNotResolveThroughCustomerDetailLookup() {
+        Tenant tenant = new Tenant();
+        UUID id = UUID.randomUUID();
+        Finding runtime = new Finding();
+        runtime.setFindingKind("AI_RUNTIME");
+        when(findingRepository.findAllById(List.of(id))).thenReturn(List.of(runtime));
+        doAnswer(call -> call.getArgument(1, java.util.function.Supplier.class).get())
+                .when(tenantSchemaExecutionService).run(any(Tenant.class),
+                        org.mockito.ArgumentMatchers.<java.util.function.Supplier<Object>>any());
+        FindingQueryService service = new FindingQueryService(findingRepository, new ObjectMapper(),
+                findingsScoreService, riskPolicyService, tenantSchemaExecutionService,
+                findingListProjectionService, affectedResourceSummaryService);
+        assertTrue(service.listEntitiesByTenantAndIds(tenant, List.of(id)).isEmpty());
+    }
+
+    @Test
     void listAvailableFiltersNormalizesRepositoryValuesAndAppliesPreferredOrdering() {
         Tenant tenant = new Tenant();
         tenant.setId(UUID.randomUUID());

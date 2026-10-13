@@ -79,6 +79,7 @@ public class CopilotStudioDataverseClient {
 
     /** Transcript rows are used only as execution metadata; transcript content is never selected. */
     public List<Execution> executions(TokenCredential credential, String organizationUrl, Instant after) {
+        com.prototype.vulnwatch.aisecurity.service.AiRuntimeScope.requireInScope();
         URI base = organization(organizationUrl); List<Execution> result = new ArrayList<>();
         String filter = "conversationtranscripts?$select=conversationtranscriptid,conversationstarttime,createdon,_bot_conversationtranscriptid_value"
                 + "&$filter=createdon%20ge%20" + java.net.URLEncoder.encode(after.toString(), java.nio.charset.StandardCharsets.UTF_8);
@@ -98,7 +99,7 @@ public class CopilotStudioDataverseClient {
         URI base = organization(organizationUrl);
         Probe discovery = probe(credential, base.resolve("api/data/v9.2/bots?$select=botid&$top=1"));
         Probe components = probe(credential, base.resolve("api/data/v9.2/botcomponents?$select=botcomponentid&$top=1"));
-        Probe executions = probe(credential, base.resolve("api/data/v9.2/conversationtranscripts?$select=conversationtranscriptid&$top=1"));
+        Probe executions = new Probe(false, 410, "RUNTIME_OUT_OF_SCOPE");
         return new PermissionTest(discovery, components, executions);
     }
 

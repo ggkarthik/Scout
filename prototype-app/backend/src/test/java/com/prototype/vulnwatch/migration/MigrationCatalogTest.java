@@ -28,8 +28,8 @@ class MigrationCatalogTest {
     void packagedCatalogResolvesPlatformAndTenantTargetsIndependently() {
         PackagedMigrationCatalog.Targets targets = PackagedMigrationCatalog.resolve();
 
-        assertEquals(7, targets.platformTarget());
-        assertEquals(13, targets.tenantTarget());
+        assertEquals(1, targets.platformTarget());
+        assertEquals(1, targets.tenantTarget());
     }
 
     @Test
@@ -86,25 +86,20 @@ class MigrationCatalogTest {
     }
 
     @Test
-    void platformV2DoesNotRewriteExistingPolicyOrDistributionRows() throws IOException {
-        String migration = Files.readString(MIGRATION_DIR.resolve("V2__ai_grid_framework_coverage.sql"), StandardCharsets.UTF_8)
-                .toLowerCase(java.util.Locale.ROOT);
-        assertTrue(!migration.contains("update platform.ai_grid_policy_versions"));
-        assertTrue(!migration.contains("delete from platform.ai_grid_policy_versions"));
-        assertTrue(!migration.contains("update platform.ai_grid_policy_distribution"));
-        assertTrue(!migration.contains("delete from platform.ai_grid_policy_distribution"));
-    }
-
-    @Test
-    void platformV4AddsVersionedCertificationMappingsWithoutEnablingPolicies() throws IOException {
-        String migration = Files.readString(MIGRATION_DIR.resolve("V4__ai_grid_phase_2_evidence_certification_wave.sql"), StandardCharsets.UTF_8)
-                .toLowerCase(java.util.Locale.ROOT);
-        assertTrue(migration.contains("insert into platform.ai_grid_policy_versions"));
-        assertTrue(migration.contains("where p.version='1.0.0'"));
-        assertTrue(!migration.contains("update platform.ai_grid_policy_versions"));
-        assertTrue(!migration.contains("update platform.ai_grid_policy_distribution"));
-        assertTrue(!migration.contains("general_availability"));
-        assertTrue(!migration.contains("canary"));
+    void developmentCatalogsContainOnlyTheirCompleteV1Baseline() throws IOException {
+        try (var platform = Files.list(MIGRATION_DIR); var tenant = Files.list(TENANT_MIGRATION_DIR)) {
+            assertEquals(List.of("V1__platform_schema.sql"), platform
+                    .filter(path -> path.toString().endsWith(".sql"))
+                    .map(path -> path.getFileName().toString()).sorted().toList());
+            assertEquals(List.of("V1__tenant_schema.sql"), tenant
+                    .filter(path -> path.toString().endsWith(".sql"))
+                    .map(path -> path.getFileName().toString()).sorted().toList());
+        }
+        String tenant = Files.readString(TENANT_MIGRATION_DIR.resolve("V1__tenant_schema.sql"));
+        assertTrue(tenant.contains("${tenantSchema}"));
+        assertTrue(tenant.contains("${tenantId}"));
+        assertTrue(!tenant.contains("tenant_default"));
+        assertTrue(!tenant.contains("e5fe0d29-1d64-4175-8ce6-c34f42b214cc"));
     }
 
     private static void assertCatalogIsValid(Path directory) throws IOException {

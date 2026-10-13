@@ -18,12 +18,12 @@ class AiGridFrameworkCoverageMigrationPostgresIntegrationTest {
             LocalPostgresTestDatabase.provision("ai_grid_framework_coverage_migration");
 
     @Test
-    void v2PreservesPublishedPackagesAndTheirActiveDistributionBindings() throws Exception {
+    void repeatBaselineMigrationPreservesPublishedPackagesAndDistributionBindings() throws Exception {
         Flyway v1 = flyway("1");
         v1.migrate();
         String packagesBefore = packageRowsDigest();
 
-        Flyway current = flyway("2");
+        Flyway current = flyway("1");
         current.migrate();
 
         assertEquals(packagesBefore, packageRowsDigest(),

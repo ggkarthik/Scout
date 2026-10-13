@@ -37,8 +37,6 @@ public class ProductionSafetyValidator {
     private String forbiddenIdentitySubjects = "";
     @Value("${app.ai-security.identity-hmac-key:}")
     private String aiIdentityHmacKey = "";
-    @Value("${app.ai-security.runtime-identity-hmac-key:}")
-    private String aiRuntimeIdentityHmacKey = "";
     @Value("${app.ai-security.runtime.enabled:false}")
     private boolean aiRuntimeEnabled;
 
@@ -85,6 +83,9 @@ public class ProductionSafetyValidator {
     @EventListener(ApplicationReadyEvent.class)
     @Order(0)
     public void validate() {
+        if (aiRuntimeEnabled) {
+            throw new IllegalStateException("RUNTIME_OUT_OF_SCOPE: APP_AI_SECURITY_RUNTIME_ENABLED must be false in this release.");
+        }
         validateLegacyPlatformOwnerCredentialsAreUnused();
         validatePlatformOwnerBootstrapConfiguration();
         if (!requireProductionSecrets) {
@@ -125,11 +126,6 @@ public class ProductionSafetyValidator {
         if (!hasStrongValue(aiIdentityHmacKey) || isPlaceholder(aiIdentityHmacKey)) {
             throw new IllegalStateException(
                     "APP_AI_SECURITY_IDENTITY_HMAC_KEY must be a non-placeholder value of at least 32 characters in production.");
-        }
-        if (aiRuntimeEnabled
-                && (!hasStrongValue(aiRuntimeIdentityHmacKey) || isPlaceholder(aiRuntimeIdentityHmacKey))) {
-            throw new IllegalStateException(
-                    "APP_AI_SECURITY_RUNTIME_IDENTITY_HMAC_KEY must be a non-placeholder value of at least 32 characters when runtime collection is enabled.");
         }
         if (corsAllowedOrigins == null || corsAllowedOrigins.isBlank() || corsAllowedOrigins.contains("*")) {
             throw new IllegalStateException("APP_CORS_ALLOWED_ORIGINS must be set to explicit production origins.");

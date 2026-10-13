@@ -35,6 +35,7 @@ public class AiGridTenantPolicyDefaultsService {
                         select candidate.version
                           from platform.ai_grid_policy_versions candidate
                          where candidate.policy_id = d.policy_id
+                           and candidate.evaluation_mode not like 'RUNTIME_%' and candidate.policy_id not like 'AGCF-RT-%'
                            and candidate.lifecycle in ('PUBLISHED', 'CANARY')
                            and (d.pinned_version is null or d.pinned_version = candidate.version)
                          order by candidate.published_at desc nulls last,

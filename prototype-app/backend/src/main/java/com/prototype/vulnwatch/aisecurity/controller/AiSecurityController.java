@@ -81,12 +81,14 @@ public class AiSecurityController {
             @RequestParam(required = false) String severity,
             @RequestParam(required = false) String excludeNativeKinds,
             @RequestParam(required = false) String excludeArtifactTypes,
+            @RequestParam(required = false) String inventoryView,
+            @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size
     ) {
         Tenant tenant = tenant();
         return apiService.artifactSummaries(tenant, artifactType, nativeKind, provider, subscription, severity,
-                excludeNativeKinds, excludeArtifactTypes, page, size);
+                excludeNativeKinds, excludeArtifactTypes, inventoryView, search, page, size);
     }
 
     /** Purpose-built inventory views deliberately return the same redacted artifact contract as detail/graph. */
@@ -122,6 +124,24 @@ public class AiSecurityController {
     public ArtifactResponse artifact(@PathVariable UUID artifactId) {
         Tenant tenant = tenant();
         return apiService.artifact(tenant, artifactId);
+    }
+
+    @GetMapping("/artifacts/{artifactId}/versions")
+    public PageResponse<AiSecurityApiService.AgentVersionResponse> versions(@PathVariable UUID artifactId,
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "50") int size) {
+        return apiService.agentVersions(tenant(), artifactId, page, size);
+    }
+
+    @GetMapping("/agent-deployment/settings")
+    public AiSecurityApiService.DeploymentSettings deploymentSettings() {
+        return apiService.deploymentSettings(tenant());
+    }
+
+    @PutMapping("/agent-deployment/settings")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN')")
+    public AiSecurityApiService.DeploymentSettings deploymentSettings(
+            @RequestBody AiSecurityApiService.DeploymentSettings settings) {
+        return apiService.updateDeploymentSettings(tenant(), settings);
     }
 
     @GetMapping("/artifacts/{artifactId}/activity-evidence")

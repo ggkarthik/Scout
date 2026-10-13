@@ -84,7 +84,7 @@ app:
     runtime-identity-hmac-previous-key: ${APP_AI_SECURITY_RUNTIME_IDENTITY_HMAC_PREVIOUS_KEY:}
     runtime-identity-hmac-previous-key-version: ${APP_AI_SECURITY_RUNTIME_IDENTITY_HMAC_PREVIOUS_KEY_VERSION:}
     runtime:
-      enabled: ${APP_AI_SECURITY_RUNTIME_ENABLED:true}
+      enabled: ${APP_AI_SECURITY_RUNTIME_ENABLED:false}
       max-events-per-execution: ${APP_AI_SECURITY_RUNTIME_MAX_EVENTS_PER_EXECUTION:1000}
       max-metadata-bytes-per-execution: ${APP_AI_SECURITY_RUNTIME_MAX_METADATA_BYTES_PER_EXECUTION:16384}
       max-api-calls-per-run: ${APP_AI_SECURITY_RUNTIME_MAX_API_CALLS_PER_RUN:100}

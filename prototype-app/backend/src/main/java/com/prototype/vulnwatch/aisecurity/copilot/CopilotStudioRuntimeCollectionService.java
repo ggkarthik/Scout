@@ -23,6 +23,7 @@ public class CopilotStudioRuntimeCollectionService {
                                                  @Value("${app.ai-security.runtime.enabled:false}") boolean runtimeEnabled,
                                                  @Value("${app.ai-security.copilot.enabled:false}") boolean copilotEnabled) { this.configs=configs; this.credentials=credentials; this.dataverse=dataverse; this.ingestion=ingestion; this.featureFlags=featureFlags; this.capabilities=capabilities; this.runtimeEnabled=runtimeEnabled; this.copilotEnabled=copilotEnabled; }
     public Result run(Tenant tenant, UUID connectorId) {
+        com.prototype.vulnwatch.aisecurity.service.AiRuntimeScope.requireInScope();
         featureFlags.assertEnabled(tenant, AiSecurityConnectorFeatureFlagService.Feature.COPILOT_RUNTIME,
                 runtimeEnabled && copilotEnabled);
         var config=configs.required(tenant, connectorId); if (!config.executionEnabled() || config.killSwitch()) throw new IllegalStateException("Copilot runtime collection is disabled");

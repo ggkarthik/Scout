@@ -58,6 +58,24 @@ public class AiSecurityDigestBaselineController {
         return baselines.revoke(tenant(), artifactId, digestKind, actors.currentActor().userId());
     }
 
+    @GetMapping("/observations")
+    public List<AiSecurityDigestBaselineService.ObservationResponse> observations(@PathVariable UUID artifactId) {
+        return baselines.observations(tenant(), artifactId);
+    }
+
+    @GetMapping("/history")
+    public List<AiSecurityDigestBaselineService.HistoryResponse> history(@PathVariable UUID artifactId) {
+        return baselines.history(tenant(), artifactId);
+    }
+
+    @PostMapping("/approve-observation")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    public AiSecurityDigestBaselineService.Response approveObservation(@PathVariable UUID artifactId,
+            @RequestBody AiSecurityDigestBaselineService.ObservationRequest request,
+            @RequestParam(defaultValue = "false") boolean reapproval) {
+        return baselines.approveObservation(tenant(), artifactId, request, actors.currentActor().userId(), reapproval);
+    }
+
     private Tenant tenant() {
         Tenant tenant = workspace.getWorkspace();
         access.assertEntitled(tenant);
