@@ -1,3 +1,4 @@
+import { shouldPollAiRuns } from '../features/ai-security/assessment';
 import { useQuery } from '@tanstack/react-query';
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -112,7 +113,7 @@ export function AiInventoryPage() {
   const runsQuery = useQuery({
     queryKey: ['ai-security-runs'],
     queryFn: () => api.listAiSecurityRuns(),
-    refetchInterval: (query) => shouldPollAiRuns(query.state.data as Array<{ status: string }> | undefined)
+    refetchInterval: (query) => shouldPollAiRuns(query.state.data as Array<{ status: string; assessmentStatus?: 'PENDING' | 'RUNNING' | 'COMPLETE' | 'PARTIAL' | 'FAILED' }> | undefined)
       ? RUN_QUEUE_REFRESH_INTERVAL_MS
       : false,
   });
@@ -338,11 +339,4 @@ export function AiInventoryPage() {
       </div>
     </InventoryShell>
   );
-}
-
-function shouldPollAiRuns(runs: Array<{ status: string }> | undefined): boolean {
-  return (runs ?? []).some((run) => {
-    const status = run.status.trim().toUpperCase();
-    return status === 'RUNNING' || status === 'STARTED' || status === 'QUEUED';
-  });
 }

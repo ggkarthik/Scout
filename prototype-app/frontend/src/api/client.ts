@@ -1576,6 +1576,9 @@ export const api = {
   getAiGridRunMetrics: (runId: string) => request<AiGridRunMetrics>(
     `/ai-assessment-runs/${encodeURIComponent(runId)}/metrics`,
   ),
+  getAiAssessmentStatus: (runId: string) => request<import('../features/ai-security/types').AiAssessmentProcessing>(
+    `/ai-assessments/${encodeURIComponent(runId)}/status`,
+  ),
   executeAiGridPolicies: (policyIds: string[]) => request<AiGridPolicyExecutionResult>('/ai-assessments/execute', {
     method: 'POST',
     body: JSON.stringify({ policyIds }),

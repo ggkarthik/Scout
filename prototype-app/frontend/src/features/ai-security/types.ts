@@ -467,7 +467,16 @@ export type AiGridRunMetrics = {
   firstGapAt: string | null;
 };
 
-export type AiGridPolicyExecutionResult = {
+export type AiAssessmentStatus = 'PENDING' | 'RUNNING' | 'COMPLETE' | 'PARTIAL' | 'FAILED';
+export type AiAssessmentProcessing = {
+  collectionStatus?: string;
+  assessmentStatus?: AiAssessmentStatus;
+  assessedSubjects?: number;
+  failedPolicies?: number;
+  failureSummaries?: Array<{ policyId: string; code: string; summary: string; retryable: boolean }>;
+};
+
+export type AiGridPolicyExecutionResult = AiAssessmentProcessing & {
   runId: string;
   requestedPolicies: number;
   evaluatedPolicies: number;
@@ -605,7 +614,9 @@ export type AiSecurityFinding = {
   policyVersion: string;
   artifactId: string | null;
   executionId?: string | null;
-  subjectType?: 'ARTIFACT' | 'EXECUTION' | string;
+  subjectType?: 'ARTIFACT' | 'EXPOSURE_PATH' | string;
+  findingKind?: 'AI_POSTURE' | 'AI_EXPOSURE';
+  exposurePaths?: Array<{ id: string; title: string; state: string; status: string }>;
   artifactName: string;
   evidenceSource?: string | null;
   evidenceClass?: string | null;
@@ -690,7 +701,7 @@ export type PolicyParameterValue = {
   value: string;
 };
 
-export type PolicyConfiguration = {
+export type PolicyConfiguration = AiAssessmentProcessing & {
   governance: {
     platformPolicyVersion: string | null;
     platformLifecycle: string | null;
@@ -713,7 +724,7 @@ export type PolicyAssistExplanation = {
   generatedAt: string;
 };
 
-export type AiSecurityRun = {
+export type AiSecurityRun = AiAssessmentProcessing & {
   id: string;
   status: string;
   recordsFetched: number;

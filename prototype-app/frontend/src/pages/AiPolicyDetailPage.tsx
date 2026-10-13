@@ -1,3 +1,4 @@
+import { assessmentPending, assessmentMessage, invalidateAiAssessmentQueries } from '../features/ai-security/assessment';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -285,8 +286,17 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
   const configQuery = useQuery({
     queryKey: ['ai-security-policy-configuration', policyId],
     queryFn: () => api.getAiGridPolicyConfiguration(policyId),
+    refetchInterval: (query) => assessmentPending(query.state.data) ? 5000 : false,
   });
   const configuration = configQuery.data ?? null;
+  React.useEffect(() => {
+    if (configuration?.assessmentStatus && !assessmentPending(configuration)) {
+      void queryClient.invalidateQueries({ queryKey: ['ai-security-findings-for-policy', policyId] });
+      void queryClient.invalidateQueries({ queryKey: ['ai-grid-policies'] });
+      void queryClient.invalidateQueries({ queryKey: ['ai-assessment-states-latest'] });
+    }
+  }, [configuration, policyId, queryClient]);
+
 
   const [draftScope, setDraftScope] = React.useState<DraftScope | null>(null);
   const [scopeDirty, setScopeDirty] = React.useState(false);
@@ -311,9 +321,8 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
   }, [configuration, parametersDirty]);
 
   const refreshAfterConfigChange = React.useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ['ai-security-findings-for-policy', policyId] });
-    void queryClient.invalidateQueries({ queryKey: ['ai-security-policies'] });
-  }, [queryClient, policyId]);
+    void invalidateAiAssessmentQueries(queryClient);
+  }, [queryClient]);
 
   const scopeMutation = useMutation({
     mutationFn: () => {
@@ -428,6 +437,7 @@ export function AiPolicyDetailPage({ policyId }: { policyId: string }) {
 
   return (
     <div className="cvd2-page ai-policy-detail-page">
+      {configuration?.assessmentStatus ? <p role="status" className="notice">{assessmentMessage(configuration)}</p> : null}
       <div className="ai-policy-detail-topbar">
         <button type="button" className="cvd-ov-link" onClick={() => navigate('/policies')}>← Back to Policies</button>
         <label className="ai-policy-switch">
