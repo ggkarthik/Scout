@@ -112,7 +112,7 @@ class AiGridValidationGovernancePostgresIntegrationTest {
                     predicate_json, reason_code, remediation, framework_mappings_json,
                     native_kinds_json, scope_resolution, release_family, package_digest)
                 select 'GOVERNANCE_PHASE1_LOW_POLICY', version, 'Phase 1 low governance test policy',
-                    description, 'LOW', lifecycle, workflow_class, default_selection,
+                    description, 'LOW', 'VALIDATED', workflow_class, default_selection,
                     artifact_types_json, required_capabilities_json, required_relationships_json,
                     required_resource_families_json, required_facts_json, predicate_json,
                     'GOVERNANCE_PHASE1_LOW_REASON', remediation, framework_mappings_json,

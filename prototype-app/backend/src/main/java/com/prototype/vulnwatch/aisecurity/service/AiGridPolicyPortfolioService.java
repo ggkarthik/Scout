@@ -60,14 +60,7 @@ public class AiGridPolicyPortfolioService {
 
             List<ControlCoverage> controls = jdbc.query("""
                     with latest as (
-                        select distinct on (p.policy_id) p.*
-                          from platform.ai_grid_policy_versions p
-                          left join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id
-                         where p.evaluation_mode not like 'RUNTIME_%' and p.policy_id not like 'AGCF-RT-%'
-                           and p.release_family in ('AGCF_PHASE_1','AGCF_PHASE_2')
-                           and p.lifecycle in ('VALIDATED','APPROVED','CANARY','PUBLISHED')
-                         order by p.policy_id,(p.version=d.pinned_version) desc,
-                                  p.published_at desc nulls last,p.created_at desc,p.version desc
+                        select p.* from %s p
                     ), mapped as (
                         select p.policy_id,p.version,p.provider,p.lifecycle,d.available,d.rollout_stage,
                                d.canary_tenant_ids_json,
@@ -134,7 +127,7 @@ public class AiGridPolicyPortfolioService {
                       left join blockers b on b.control_id=c.control_id
                      where c.framework_key=:framework and c.framework_version=:version
                      group by c.control_id,c.name,c.display_order,b.blockers order by c.display_order
-                    """, new MapSqlParameterSource().addValue("framework", framework).addValue("version", version)
+                    """.formatted(AiGridPolicyResolution.catalogVersions(":tenantId")), new MapSqlParameterSource().addValue("framework", framework).addValue("version", version)
                     .addValue("tenantId", tenant.getId()).addValue("epoch", epoch), (rs, row) -> {
                 long mapped = rs.getLong("mapped_count");
                 long distributed = rs.getLong("distributed_count");
@@ -160,13 +153,13 @@ public class AiGridPolicyPortfolioService {
                     select count(distinct p.policy_id) total,
                            count(distinct p.policy_id) filter (where platform.ai_grid_policy_visible_to_tenant(
                                d.available,d.rollout_stage,d.canary_tenant_ids_json,cast(:tenantId as uuid))) distributed,
-                           count(distinct p.policy_id) filter (where coalesce(s.selection,d.default_selection)='REQUIRED'
+                           count(distinct p.policy_id) filter (where case when s.configuration_source='TENANT_OVERRIDE' then s.selection else d.default_selection end='REQUIRED'
                                and platform.ai_grid_policy_visible_to_tenant(
                                    d.available,d.rollout_stage,d.canary_tenant_ids_json,cast(:tenantId as uuid))) required,
-                           count(distinct p.policy_id) filter (where coalesce(s.selection,d.default_selection)='ENABLED'
+                           count(distinct p.policy_id) filter (where case when s.configuration_source='TENANT_OVERRIDE' then s.selection else d.default_selection end='ENABLED'
                                and platform.ai_grid_policy_visible_to_tenant(
                                    d.available,d.rollout_stage,d.canary_tenant_ids_json,cast(:tenantId as uuid))) enabled,
-                           count(distinct p.policy_id) filter (where coalesce(s.selection,d.default_selection)='PREVIEW'
+                           count(distinct p.policy_id) filter (where case when s.configuration_source='TENANT_OVERRIDE' then s.selection else d.default_selection end='PREVIEW'
                                and platform.ai_grid_policy_visible_to_tenant(
                                    d.available,d.rollout_stage,d.canary_tenant_ids_json,cast(:tenantId as uuid))) preview
                       from platform.ai_grid_policy_versions p

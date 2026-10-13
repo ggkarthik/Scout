@@ -17,29 +17,32 @@ public class AiGridCoverageService {
             with artifacts as (
                 select distinct on (m.artifact_id) m.artifact_id,
                        b.content_json ->> 'artifactType' artifact_type,
-                       b.content_json ->> 'nativeKind' native_kind
+                       b.content_json ->> 'nativeKind' native_kind,coalesce(b.content_json->>'provider',a.provider) provider
                   from ai_grid_snapshot_manifests m
                   join ai_grid_snapshot_bodies b on b.id = m.body_id
+                  join ai_security_artifacts a on a.id=m.artifact_id
                  where m.run_id = :runId
                  order by m.artifact_id, m.observed_at desc, m.id
             ), policies as (
-                select distinct on (p.policy_id) p.policy_id, p.version, p.default_selection,
-                       p.artifact_types_json, p.native_kinds_json, p.framework_mappings_json
-                  from platform.ai_grid_policy_versions p
-                 where p.lifecycle = 'PUBLISHED'
-                 order by p.policy_id, p.published_at desc, p.version desc
+                select distinct on (p.policy_id) p.policy_id, p.version, p.resolved_default_selection default_selection,
+                       case when jsonb_typeof(p.artifact_types_json)='array' then p.artifact_types_json else '["__INVALID_POLICY_CONTRACT__"]'::jsonb end artifact_types_json,
+                       case when jsonb_typeof(p.native_kinds_json)='array' then p.native_kinds_json else '["__INVALID_POLICY_CONTRACT__"]'::jsonb end native_kinds_json,
+                       p.framework_mappings_json,p.provider
+                  from %s p
+                 order by p.policy_id, p.published_at desc nulls last, p.version desc
             ), expected as (
                 select a.artifact_id, a.artifact_type, a.native_kind, p.policy_id, p.version,
                        p.framework_mappings_json,
-                       coalesce(s.selection, p.default_selection) selection
+                       case when s.configuration_source='TENANT_OVERRIDE' then s.selection else p.default_selection end selection
                   from artifacts a
                   cross join policies p
                   left join ai_grid_policy_selections s on s.policy_id = p.policy_id
-                 where jsonb_exists(p.artifact_types_json, a.artifact_type)
+                 where (jsonb_array_length(p.artifact_types_json)=0 or jsonb_exists(p.artifact_types_json,a.artifact_type))
+                   and (p.provider is null or p.provider in ('','MULTI_CLOUD') or p.provider=a.provider)
                    and (jsonb_array_length(p.native_kinds_json) = 0
                         or jsonb_exists(p.native_kinds_json, a.native_kind))
             )
-            """;
+            """.formatted(AiGridPolicyResolution.currentVersions());
 
     private final NamedParameterJdbcTemplate jdbc;
     private final TenantSchemaExecutionService tenantExecution;
@@ -78,11 +81,11 @@ public class AiGridCoverageService {
                       from scope_heads h
                       join ai_grid_snapshot_manifests m
                         on m.run_id = h.run_id and m.scope_key = h.scope_key
-                     order by m.artifact_id, m.observed_at desc, m.id desc
+                     order by m.artifact_id,case when h.region='GLOBAL' then 1 else 0 end,m.observed_at desc,m.id desc
                 )
                 select :tenantId, :epochId, a.id, h.run_id, h.manifest_id,
                        h.provider, h.account_id, h.region, h.resource_family,
-                       a.artifact_type, a.native_kind,
+                       coalesce(b.content_json->>'artifactType',a.artifact_type), coalesce(b.content_json->>'nativeKind',a.native_kind),
                        coalesce(c.technology_id, 'UNCLASSIFIED'),
                        coalesce(nullif(a.environment, ''),
                                 nullif(a.attributes_json #>> '{tags,environment}', ''),
@@ -90,6 +93,7 @@ public class AiGridCoverageService {
                        coalesce(nullif(a.owner_name, ''), 'UNOWNED'), h.observed_at
                   from authoritative h
                   join ai_security_artifacts a on a.id = h.artifact_id
+                  join ai_grid_snapshot_bodies b on b.id=(select body_id from ai_grid_snapshot_manifests where id=h.manifest_id)
                   left join lateral (
                       select technology_id from ai_grid_artifact_classifications c
                        where c.artifact_id = a.id and c.state = 'CLASSIFIED'
@@ -106,17 +110,20 @@ public class AiGridCoverageService {
                      assessment_id, applicability, evidence_readiness, decision,
                      missing_evidence_json, input_facts_json)
                 with policies as (
-                    select distinct on (p.policy_id) p.policy_id, p.version, p.default_selection,
-                           p.artifact_types_json, p.native_kinds_json, p.framework_mappings_json
-                      from platform.ai_grid_policy_versions p
-                     where p.lifecycle = 'PUBLISHED'
-                     order by p.policy_id, p.published_at desc, p.version desc
+                    select distinct on (p.policy_id) p.policy_id, p.version, p.resolved_default_selection default_selection,
+                           case when jsonb_typeof(p.artifact_types_json)='array' then p.artifact_types_json else '["__INVALID_POLICY_CONTRACT__"]'::jsonb end artifact_types_json,
+                       case when jsonb_typeof(p.native_kinds_json)='array' then p.native_kinds_json else '["__INVALID_POLICY_CONTRACT__"]'::jsonb end native_kinds_json,
+                       p.framework_mappings_json,p.provider
+                      from %s p
+                     order by p.policy_id, p.published_at desc nulls last, p.version desc
                 )
                 select :tenantId, :epochId, :triggerRunId, a.artifact_id, a.source_run_id,
                        a.snapshot_manifest_id, a.provider, a.account_id, a.region, a.resource_family,
                        a.artifact_type, a.native_kind, a.technology_id, a.environment, a.owner_name,
-                       p.policy_id, p.version, coalesce(s.selection, p.default_selection),
-                       p.framework_mappings_json, x.id, x.applicability, x.evidence_readiness, x.decision,
+                       p.policy_id, p.version, case when s.configuration_source='TENANT_OVERRIDE' then s.selection else p.default_selection end,
+                       p.framework_mappings_json, x.id, x.applicability,
+                       case when failure.id is not null then 'COLLECTION_ERROR' else x.evidence_readiness end,
+                       case when failure.id is not null then 'ERROR' else x.decision end,
                        coalesce(x.missing_evidence_json, '[]'::jsonb),
                        coalesce(x.input_facts_json, '{}'::jsonb)
                   from ai_grid_current_coverage_artifacts a
@@ -125,11 +132,19 @@ public class AiGridCoverageService {
                   left join ai_grid_assessments x
                     on x.run_id = a.source_run_id and x.policy_id = p.policy_id
                    and x.policy_version = p.version and x.subject_type = 'ARTIFACT'
-                   and x.subject_id = a.artifact_id
-                 where jsonb_exists(p.artifact_types_json, a.artifact_type)
+                   and x.subject_id = a.artifact_id and x.snapshot_manifest_id=a.snapshot_manifest_id
+                   and x.selection=case when s.configuration_source='TENANT_OVERRIDE' then s.selection else p.default_selection end
+                   and x.evaluation_as_of>=greatest(coalesce(s.tenant_configured_at,'-infinity'::timestamptz),
+                       coalesce((select updated_at from ai_grid_policy_scopes where policy_id=p.policy_id),'-infinity'::timestamptz),
+                       coalesce((select updated_at from ai_grid_policy_parameters where policy_id=p.policy_id),'-infinity'::timestamptz),
+                       coalesce((select max(updated_at) from ai_grid_policy_artifact_overrides where policy_id=p.policy_id),'-infinity'::timestamptz))
+                  left join ai_grid_coverage_gaps failure on failure.policy_id=p.policy_id
+                   and failure.artifact_id is null and failure.state='POLICY_EVALUATION_ERROR' and failure.status='OPEN'
+                 where (jsonb_array_length(p.artifact_types_json)=0 or jsonb_exists(p.artifact_types_json,a.artifact_type))
+                   and (p.provider is null or p.provider in ('','MULTI_CLOUD') or p.provider=a.provider)
                    and (jsonb_array_length(p.native_kinds_json) = 0
                         or jsonb_exists(p.native_kinds_json, a.native_kind))
-                """, parameters);
+                """.formatted(AiGridPolicyResolution.versions(":tenantId")), parameters);
         jdbc.update("""
                 insert into ai_grid_current_coverage_state
                     (tenant_id, epoch_id, trigger_run_id, scope_head_count, artifact_count, candidate_count)

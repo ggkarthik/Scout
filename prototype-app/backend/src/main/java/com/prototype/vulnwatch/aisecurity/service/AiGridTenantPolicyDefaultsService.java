@@ -27,26 +27,27 @@ public class AiGridTenantPolicyDefaultsService {
         this.audit = audit;
     }
 
+    public long countSavedDefaultTransitions(List<Tenant> cohort,String policyId,String proposedDefault) {
+        long affected=0;
+        for (Tenant tenant:cohort) {
+            Long count=tenantExecution.run(tenant,() -> jdbc.queryForObject("""
+                    select count(*) from ai_grid_policy_selections where policy_id=:id
+                     and configuration_source='PLATFORM_DEFAULT' and selection<>:effective
+                    """,Map.of("id",policyId,"effective",proposedDefault),Long.class));
+            affected+=count==null ? 0 : count;
+        }
+        return affected;
+    }
+
     public SynchronizationResult ensureDefaults(Tenant tenant) {
         List<Baseline> baselines = TenantContext.runAsPlatform(() -> jdbc.query("""
                 select d.policy_id, p.version, d.default_selection
                   from platform.ai_grid_policy_distribution d
-                  join lateral (
-                        select candidate.version
-                          from platform.ai_grid_policy_versions candidate
-                         where candidate.policy_id = d.policy_id
-                           and candidate.evaluation_mode not like 'RUNTIME_%' and candidate.policy_id not like 'AGCF-RT-%'
-                           and candidate.lifecycle in ('PUBLISHED', 'CANARY')
-                           and (d.pinned_version is null or d.pinned_version = candidate.version)
-                         order by candidate.published_at desc nulls last,
-                                  candidate.created_at desc,
-                                  candidate.version desc
-                         limit 1
-                  ) p on true
+                  join %s p on p.policy_id=d.policy_id
                  where platform.ai_grid_policy_visible_to_tenant(
                            d.available, d.rollout_stage, d.canary_tenant_ids_json, cast(:tenantId as uuid))
                  order by d.policy_id
-                """, Map.of("tenantId", tenant.getId().toString()), (rs, row) ->
+                """.formatted(AiGridPolicyResolution.versions(":tenantId")), Map.of("tenantId", tenant.getId().toString()), (rs, row) ->
                 new Baseline(rs.getString("policy_id"), rs.getString("version"), rs.getString("default_selection"))));
         return tenantExecution.run(tenant, () -> {
             Map<String, CurrentSelection> current = new HashMap<>();

@@ -40,6 +40,14 @@ public class AiGridValidationGovernanceService {
     private final TenantSchemaExecutionService tenantExecution;
     private final TenantService tenants;
 
+    private org.springframework.beans.factory.ObjectProvider<AiGridTenantPolicyDefaultsService> tenantDefaults;
+    private com.prototype.vulnwatch.service.AuditEventService rolloutAudit;
+    @org.springframework.beans.factory.annotation.Autowired
+    void configureTenantDefaults(org.springframework.beans.factory.ObjectProvider<AiGridTenantPolicyDefaultsService> defaults,
+            com.prototype.vulnwatch.service.AuditEventService rolloutAudit) {
+        this.tenantDefaults=defaults; this.rolloutAudit=rolloutAudit;
+    }
+
     public AiGridValidationGovernanceService(NamedParameterJdbcTemplate jdbc, TransactionTemplate transactions,
                                              ObjectMapper objectMapper,
                                              TenantSchemaExecutionService tenantExecution, TenantService tenants) {
@@ -628,6 +636,13 @@ public class AiGridValidationGovernanceService {
                 throw conflict("CANARY cohort tenant lacks a complete snapshot or dev/test deployment: " + tenant.getSlug());
             }
         }
+        String proposedDefault=TenantContext.runAsPlatform(() -> jdbc.queryForObject(
+                "select default_selection from platform.ai_grid_policy_versions where policy_id=:id and version=:version",
+                Map.of("id",policyId,"version",currentVersion),String.class));
+        long changedDefaults=tenantDefaults.getObject().countSavedDefaultTransitions(cohort,policyId,proposedDefault);
+        for (Tenant tenant:cohort) tenantExecution.run(tenant,() -> rolloutAudit.recordExplicitActor(
+                tenant.getId(),actor,"PLATFORM_OWNER","ai_grid.policy_defaults.rollout_impact","ai_grid_policy",policyId,
+                "{\"affectedTenantPolicyPairs\":"+changedDefaults+"}","SUCCESS"));
         String rolloutStage = publishAll ? "GENERAL_AVAILABILITY" : "CANARY";
         // GA is not a canary cohort. Keep the target list in the release binding for
         // audit/rollout work, but expose an empty canary list in distribution metadata.
