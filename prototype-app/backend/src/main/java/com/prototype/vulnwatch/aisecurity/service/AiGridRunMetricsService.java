@@ -83,6 +83,18 @@ public class AiGridRunMetricsService {
         refreshUtilityMetrics(tenant, runId, candidates);
     }
 
+    void refreshAssessmentCounters(UUID runId) {
+        jdbc.update("""
+                update ai_grid_run_metrics set
+                    assessment_count=(select count(*) from ai_grid_assessments where run_id=:runId),
+                    pass_count=(select count(*) from ai_grid_assessments where run_id=:runId and decision='PASS'),
+                    fail_count=(select count(*) from ai_grid_assessments where run_id=:runId and decision='FAIL'),
+                    no_decision_count=(select count(*) from ai_grid_assessments where run_id=:runId and decision not in ('PASS','FAIL')),
+                    open_gap_count=(select count(*) from ai_grid_coverage_gaps where run_id=:runId and status='OPEN'),updated_at=now()
+                 where run_id=:runId
+                """,Map.of("runId",runId));
+    }
+
     public void refreshUtilityMetrics(Tenant tenant, UUID runId) {
         refreshUtilityMetrics(tenant, runId, coverage.expectedCandidates(runId));
     }

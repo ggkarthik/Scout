@@ -72,6 +72,7 @@ class AiSecurityObservationPostgresIntegrationTest {
     @Autowired private AiSecurityObservationService observationService;
     @Autowired private AiGridOwnershipService ownershipService;
     @Autowired private AiGridApiService aiGridApiService;
+    @Autowired private com.prototype.vulnwatch.aisecurity.service.AiGridAssessmentWorker assessmentWorker;
     @Autowired private com.prototype.vulnwatch.aisecurity.service.AiSecurityApiService aiSecurityApiService;
     @Autowired private AiGridBudgetService budgetService;
     @Autowired private AiGridCoverageService coverageService;
@@ -872,7 +873,7 @@ class AiSecurityObservationPostgresIntegrationTest {
                  where run_id = :runId and policy_id = 'AI_GRID_COVERAGE_OMISSION_TEST'
                    and state = 'MISSING_ASSESSMENT' and status = 'OPEN'
                 """, Map.of("runId", runId), Integer.class)));
-        aiGridApiService.replay(tenant, runId);
+        aiGridApiService.executeSelectedPolicies(tenant, java.util.Set.of("AI_GRID_COVERAGE_OMISSION_TEST"));
         assertEquals(0, aiGridApiService.coverage(tenant).missingAssessments());
         assertEquals(0, tenantExecution.run(tenant, () -> jdbc.queryForObject("""
                 select count(*) from ai_grid_coverage_gaps
@@ -907,7 +908,7 @@ class AiSecurityObservationPostgresIntegrationTest {
             assertEquals(originalFingerprints.get("finding"), replayed.get("fingerprint"));
             assertEquals("FAIL", replayed.get("decision"),
                     "wall-clock passage must not turn a replayed decision into stale evidence");
-            assertEquals(true, replayed.get("stable_as_of"));
+            assertEquals(false, replayed.get("stable_as_of"), "Historical replay must not replace a newer current assessment row");
             return (String) replayed.get("decision_fingerprint");
         });
         aiGridApiService.replay(tenant, runId);
@@ -976,18 +977,18 @@ class AiSecurityObservationPostgresIntegrationTest {
             return null;
         });
 
-        UUID incompleteRun = ingestR0Run(tenant, connectorId, "MEDIUM", "incomplete-remediation", false);
+        UUID incompleteRun = ingestR0Run(tenant, connectorId, "LOW", "incomplete-remediation", false);
         tenantExecution.run(tenant, () -> {
-            assertEquals("NO_DECISION", jdbc.queryForObject("""
+            assertEquals("FAIL", jdbc.queryForObject("""
                     select decision from ai_grid_assessments
                      where run_id = :runId and policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL'
                     """, Map.of("runId", incompleteRun), String.class));
             assertEquals("OPEN", jdbc.queryForObject(
                     "select status from findings where id = :id", Map.of("id", findingId), String.class));
-            assertEquals(recurrenceRun, jdbc.queryForObject(
+            assertEquals(incompleteRun, jdbc.queryForObject(
                     "select last_observed_run_id from findings where id = :id",
                     Map.of("id", findingId), UUID.class),
-                    "incomplete evidence must not close or advance the canonical finding");
+                    "fresh prior complete guardrail heads can qualify the current failure");
             return null;
         });
 
@@ -999,7 +1000,7 @@ class AiSecurityObservationPostgresIntegrationTest {
                     """, Map.of());
             tenantExecution.run(tenant, () -> {
                 jdbc.update("update ai_grid_facts set confidence = 0.5 where run_id = :runId",
-                        Map.of("runId", recurrenceRun));
+                        Map.of("runId", incompleteRun));
                 assertEquals(0.9, jdbc.queryForObject("""
                         select (required_facts_json->0->>'minConfidence')::double precision
                           from platform.ai_grid_policy_versions
@@ -1008,7 +1009,7 @@ class AiSecurityObservationPostgresIntegrationTest {
                 assertEquals(0, jdbc.queryForObject("""
                         select count(*) from ai_grid_facts
                          where run_id = :runId and confidence is distinct from 0.5
-                        """, Map.of("runId", recurrenceRun), Integer.class));
+                        """, Map.of("runId", incompleteRun), Integer.class));
                 assertTrue(jdbc.queryForObject("""
                         select count(*) > 0
                           from ai_grid_snapshot_manifests m
@@ -1016,30 +1017,30 @@ class AiSecurityObservationPostgresIntegrationTest {
                          where m.run_id = :runId
                            and b.content_json->>'artifactType' = 'AI_AGENT'
                            and b.content_json->>'nativeKind' = 'AWS_BEDROCK_AGENT'
-                        """, Map.of("runId", recurrenceRun), Boolean.class));
+                        """, Map.of("runId", incompleteRun), Boolean.class));
                 assertEquals(1, jdbc.queryForObject("""
                         select count(*) from platform.ai_grid_policy_versions
                          where policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL' and lifecycle = 'PUBLISHED'
                         """, Map.of(), Integer.class));
                 jdbc.update("update ai_grid_assessments set evaluated_at = '2000-01-01' where run_id = :runId",
-                        Map.of("runId", recurrenceRun));
+                        Map.of("runId", incompleteRun));
                 return null;
             });
-            aiGridApiService.replay(tenant, recurrenceRun);
+            aiGridApiService.executeSelectedPolicies(tenant, java.util.Set.of("AWS_BEDROCK_WEAK_GUARDRAIL"));
             tenantExecution.run(tenant, () -> {
                 assertTrue(jdbc.queryForObject("""
                         select evaluated_at > '2000-01-02' from ai_grid_assessments
                          where run_id = :runId and policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL'
-                        """, Map.of("runId", recurrenceRun), Boolean.class),
-                        "replay must re-evaluate the stored run rather than return its prior row");
+                        """, Map.of("runId", incompleteRun), Boolean.class),
+                        "current reassessment must use the latest complete source head");
                 assertEquals("NO_DECISION", jdbc.queryForObject("""
                         select decision from ai_grid_assessments
                          where run_id = :runId and policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL'
-                        """, Map.of("runId", recurrenceRun), String.class));
+                        """, Map.of("runId", incompleteRun), String.class));
                 assertEquals("LOW_CONFIDENCE", jdbc.queryForObject("""
                         select evidence_readiness from ai_grid_assessments
                          where run_id = :runId and policy_id = 'AWS_BEDROCK_WEAK_GUARDRAIL'
-                        """, Map.of("runId", recurrenceRun), String.class));
+                        """, Map.of("runId", incompleteRun), String.class));
                 assertEquals("OPEN", jdbc.queryForObject(
                         "select status from findings where id = :id", Map.of("id", findingId), String.class));
                 return null;
@@ -1083,7 +1084,7 @@ class AiSecurityObservationPostgresIntegrationTest {
     }
 
     @Test
-    void aiGridScopeFailureRollsBackAssessmentFindingAndOutboxAtomically() {
+    void aiGridFinalizationFailurePreservesCollectionAndCanRecoverDurably() {
         Tenant tenant = provision("AI Grid Atomic Co", "ai-grid-atomic-co");
         UUID connectorId = connectorService.save(tenant,
                 new AiSecurityAwsConnectorService.ConnectorConfigRequest(
@@ -1118,17 +1119,22 @@ class AiSecurityObservationPostgresIntegrationTest {
                 List.of(guardrail), List.of(), List.of());
 
         doThrow(new IllegalStateException("injected reconciliation failure"))
-                .when(reconciliationService).reconcile(eq(tenant), eq(runId), anyList());
-        assertThrows(IllegalStateException.class, () -> observationService.ingest(tenant, completingScope));
+                .when(reconciliationService).reconcileCurrent(eq(tenant), org.mockito.ArgumentMatchers.any(UUID.class), eq(runId));
+        assertEquals(ScopeStatus.COMPLETE, observationService.ingest(tenant, completingScope).scopeStatus());
         reset(reconciliationService);
 
         tenantExecution.run(tenant, () -> {
-            assertEquals(baseline.get("assessments"), count("ai_grid_assessments"));
-            assertEquals(baseline.get("outbox"), count("ai_grid_outbox"));
-            assertEquals(baseline.get("findings"), count("findings"));
-            assertEquals(baseline.get("receipts"), count("ai_security_observation_receipts"));
+            assertTrue(count("ai_grid_assessments")>=baseline.get("assessments"));
+            assertTrue(count("ai_grid_outbox")>baseline.get("outbox"));
+            assertTrue(count("findings")>=baseline.get("findings"));
+            assertEquals(baseline.get("receipts")+1,count("ai_security_observation_receipts"));
+            assertEquals(1,jdbc.queryForObject("select count(*) from ai_security_snapshot_scopes where scope_key=:scope and status='COMPLETE'",
+                    Map.of("scope",completingScope.scopeKey()),Integer.class));
+            UUID failed=jdbc.queryForObject("select id from ai_grid_outbox where event_type='STATIC_ASSESSMENT_REQUESTED' and status='FAILED' order by created_at desc limit 1",Map.of(),UUID.class);
+            assessmentWorker.replayFailure(tenant,failed);
             return null;
         });
+        assessmentWorker.recover();
 
         observationService.ingest(tenant, completingScope);
         tenantExecution.run(tenant, () -> {

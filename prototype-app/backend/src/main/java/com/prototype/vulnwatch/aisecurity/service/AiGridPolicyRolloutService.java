@@ -34,6 +34,10 @@ public class AiGridPolicyRolloutService {
         this.assessments = assessments;
     }
 
+    private org.springframework.beans.factory.ObjectProvider<AiGridAssessmentWorker> worker;
+    @org.springframework.beans.factory.annotation.Autowired
+    void configureWorker(org.springframework.beans.factory.ObjectProvider<AiGridAssessmentWorker> worker) { this.worker=worker; }
+
     public List<Rollout> rollouts() {
         return TenantContext.runAsPlatform(() -> jdbc.query("""
                 select id,release_id,release_type,policy_id,previous_version,new_version,package_digest,status,created_at,completed_at
@@ -56,7 +60,7 @@ public class AiGridPolicyRolloutService {
 
     public void retry(UUID rolloutId) {
         TenantContext.runAsPlatform(() -> jdbc.update("""
-                update platform.ai_grid_policy_rollout_tasks set status='PENDING', next_retry_at=null,
+                update platform.ai_grid_policy_rollout_tasks set status='PENDING', attempts=0,next_retry_at=null,
                        failure_detail=null, updated_at=now() where rollout_id=:id and status in ('FAILED','WAITING_FOR_SNAPSHOT')
                 """, Map.of("id", rolloutId)));
     }
@@ -79,7 +83,7 @@ public class AiGridPolicyRolloutService {
                 select t.id,t.tenant_id,t.rollout_id
                  from platform.ai_grid_policy_rollout_tasks t
                   join platform.ai_grid_policy_rollouts r on r.id=t.rollout_id
-                 where r.status='PENDING' and t.status in ('PENDING','FAILED')
+                 where r.status='PENDING' and t.status in ('PENDING','FAILED') and t.attempts<5
                    and (t.next_retry_at is null or t.next_retry_at <= now())
                  order by t.created_at for update of t skip locked limit 1
                 """, rs -> {
@@ -104,10 +108,12 @@ public class AiGridPolicyRolloutService {
                 updateWaiting(task.id());
                 return;
             }
-            tenantExecution.run(tenant, () -> transactions.execute(status -> {
-                assessments.evaluateRun(tenant, runId);
-                return null;
-            }));
+            String policyId=TenantContext.runAsPlatform(() -> jdbc.queryForObject(
+                    "select policy_id from platform.ai_grid_policy_rollouts where id=:id",Map.of("id",task.rolloutId()),String.class));
+            tenantExecution.run(tenant,() -> transactions.executeWithoutResult(status -> worker.getObject().enqueue(tenant,runId,java.util.Set.of(policyId))));
+            var result=worker.getObject().status(tenant,runId);
+            if (!"COMPLETE".equals(result.assessmentStatus())) throw new IllegalStateException("Policy rollout assessment is "+result.assessmentStatus());
+            if (!releaseBindingIsValid(task)) { cancel(task.id(),"Release binding changed during assessment"); return; }
             complete(task.id(), runId);
         } catch (RuntimeException ex) {
             fail(task.id(), ex.getMessage());
@@ -128,16 +134,15 @@ public class AiGridPolicyRolloutService {
                   from platform.ai_grid_policy_rollouts r
                   join platform.ai_grid_policy_release_bindings binding on r.release_id = binding.id::text
                   join platform.ai_grid_policy_release_decisions decision on decision.id = binding.approval_decision_id
-                  join platform.ai_grid_policy_versions policy on policy.policy_id = binding.policy_id
+                  join %s policy on policy.policy_id = binding.policy_id
                       and policy.version = binding.policy_version
                   join platform.ai_grid_policy_distribution distribution on distribution.policy_id = binding.policy_id
                  where r.id=:rolloutId and binding.state='ACTIVE' and decision.decision='APPROVED'
                    and decision.approved_package_digest=binding.approved_package_digest
                    and policy.lifecycle='PUBLISHED' and policy.package_digest=binding.approved_package_digest
-                   and distribution.available=true and distribution.rollout_stage='CANARY'
+                   and distribution.available=true
                    and distribution.pinned_version=binding.policy_version
-                   and jsonb_exists(distribution.canary_tenant_ids_json, cast(:tenantId as text))
-                """, Map.of("rolloutId", task.rolloutId(), "tenantId", task.tenantId()), Integer.class);
+                """.formatted(AiGridPolicyResolution.versions(":tenantId")), Map.of("rolloutId", task.rolloutId(), "tenantId", task.tenantId()), Integer.class);
             return matches != null && matches > 0;
         });
     }

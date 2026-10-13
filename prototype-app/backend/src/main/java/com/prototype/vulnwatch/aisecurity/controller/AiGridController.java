@@ -217,6 +217,17 @@ public class AiGridController {
     public AiGridApiService.PolicyExecutionResult execute(@RequestBody ExecutePoliciesRequest request) {
         return api.executeSelectedPolicies(tenant(), request.policyIds());
     }
+    @GetMapping("/ai-assessments/{runId}/status")
+    public com.prototype.vulnwatch.aisecurity.service.AiGridAssessmentWorker.ProcessingStatus assessmentStatus(@PathVariable UUID runId) {
+        return api.assessmentStatus(tenant(),runId);
+    }
+    @PostMapping("/ai-assessments/requests/{requestId}/retry")
+    @PreAuthorize("hasAnyRole('PLATFORM_OWNER','TENANT_ADMIN','SECURITY_ANALYST')")
+    public void retryAssessment(@PathVariable UUID requestId) { api.replayAssessmentFailure(tenant(),requestId); }
+    @GetMapping("/ai-policies/{id}/assessment-status")
+    public com.prototype.vulnwatch.aisecurity.service.AiGridAssessmentWorker.ProcessingStatus policyAssessmentStatus(@PathVariable String id) {
+        return api.policyAssessmentStatus(tenant(),id);
+    }
     @GetMapping("/ai-policies") public List<AiGridApiService.PolicyView> policies() { return api.policies(tenant()); }
     @GetMapping("/ai-policies/{id}")
     public AiSecurityApiService.PolicyResponse policyDetail(@PathVariable String id) {

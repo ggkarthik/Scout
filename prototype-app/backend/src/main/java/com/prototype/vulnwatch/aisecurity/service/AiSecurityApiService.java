@@ -40,6 +40,37 @@ import org.springframework.web.server.ResponseStatusException;
 public class AiSecurityApiService {
 
     private static final Logger LOG = LoggerFactory.getLogger(AiSecurityApiService.class);
+    /** One deterministic matching subject context per canonical finding, shared by list and count. */
+    private static final String FINDING_CONTEXT = """
+              join lateral (
+                  select subject.subject_type,subject.subject_id,
+                         artifact.id artifact_id,path.id exposure_path_id
+                    from finding_subjects subject
+                    left join ai_grid_exposure_paths path on subject.subject_type='EXPOSURE_PATH' and path.id=subject.subject_id
+                    left join ai_grid_exposure_associations association on association.exposure_path_id=path.id and association.artifact_id is not null
+                    left join ai_security_artifacts artifact on artifact.id=case
+                        when subject.subject_type='ARTIFACT' then subject.subject_id else coalesce(association.artifact_id,path.root_cause_artifact_id) end
+                   where subject.finding_id=f.id and subject.subject_role='PRIMARY'
+                     and subject.subject_type in ('ARTIFACT','EXPOSURE_PATH')
+                     and (:provider is null or artifact.provider=:provider)
+                     and (:subscription is null or artifact.account_id=:subscription)
+                     and (:nativeKind is null or artifact.native_kind=any(string_to_array(:nativeKind,',')))
+                   order by case when path.status='OPEN' and path.state='VALIDATED_EXPOSURE' then 0
+                                 when path.status='OPEN' then 1 else 2 end,
+                            path.last_observed_at desc nulls last,subject.subject_id,
+                            case association.association_role when 'ROOT_CAUSE' then 0 when 'ENTRY_POINT' then 1 else 2 end,artifact.id
+                   limit 1
+              ) fs on true
+              left join ai_security_artifacts a on a.id=fs.artifact_id
+            """;
+    private static final String FINDING_PATHS = """
+              left join lateral (
+                  select coalesce(jsonb_agg(jsonb_build_object('id',p.id,'title',p.title,'state',p.state,'status',p.status)
+                       order by case when p.status='OPEN' and p.state='VALIDATED_EXPOSURE' then 0 else 1 end,
+                                p.last_observed_at desc,p.id),'[]'::jsonb)::text path_summaries
+                    from ai_grid_exposure_paths p where p.finding_id=f.id
+              ) paths on true
+            """;
     private static final String ARTIFACT_SELECT_FIELDS = """
             id, provider, provider_resource_id, artifact_type, native_kind, name,
             account_id, region, active, attributes_json::text, owner_name, owner_state,
@@ -181,7 +212,7 @@ public class AiSecurityApiService {
                                when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) severity,
                            count(distinct fs.subject_id) as total
                       from findings f
-                      join finding_subjects fs on fs.finding_id = f.id and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
+                      join finding_subjects fs on fs.finding_id = f.id and fs.subject_type = 'ARTIFACT' and fs.subject_role in ('PRIMARY','ROOT_CAUSE')
                       join ai_security_artifacts a on a.id = fs.subject_id
                      where f.status = 'OPEN' and f.finding_kind in ('AI_POSTURE', 'AI_EXPOSURE')
                      group by a.native_kind, severity
@@ -199,7 +230,7 @@ public class AiSecurityApiService {
             jdbc.query("""
                     select a.native_kind, count(distinct fs.subject_id) as total
                       from findings f
-                      join finding_subjects fs on fs.finding_id = f.id and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
+                      join finding_subjects fs on fs.finding_id = f.id and fs.subject_type = 'ARTIFACT' and fs.subject_role in ('PRIMARY','ROOT_CAUSE')
                       join ai_security_artifacts a on a.id = fs.subject_id
                      where f.status = 'OPEN' and f.finding_kind in ('AI_POSTURE', 'AI_EXPOSURE')
                      group by a.native_kind
@@ -243,7 +274,7 @@ public class AiSecurityApiService {
                                when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) as severity
                       from findings f
                       join finding_subjects fs on fs.finding_id = f.id
-                       and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
+                       and fs.subject_type = 'ARTIFACT' and fs.subject_role in ('PRIMARY','ROOT_CAUSE')
                      where f.status = 'OPEN' and f.finding_kind in ('AI_POSTURE', 'AI_EXPOSURE')
                 )
                 select a.id, a.name, a.native_kind, a.provider, a.account_id,
@@ -356,7 +387,7 @@ public class AiSecurityApiService {
                        and (:severity is null or exists (
                            select 1 from findings f
                              join finding_subjects fs on fs.finding_id = f.id
-                              and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
+                              and fs.subject_type = 'ARTIFACT' and fs.subject_role in ('PRIMARY','ROOT_CAUSE')
                             where fs.subject_id = ai_security_artifacts.id
                               and f.status = 'OPEN' and f.finding_kind in ('AI_POSTURE', 'AI_EXPOSURE')
                               and coalesce(f.severity_override, case when f.risk_score >= 9 then 'CRITICAL'
@@ -446,7 +477,7 @@ public class AiSecurityApiService {
                        and (:severity is null or exists (
                            select 1 from findings f
                              join finding_subjects fs on fs.finding_id = f.id
-                              and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
+                              and fs.subject_type = 'ARTIFACT' and fs.subject_role in ('PRIMARY','ROOT_CAUSE')
                             where fs.subject_id = a.id
                               and f.status = 'OPEN' and f.finding_kind in ('AI_POSTURE', 'AI_EXPOSURE')
                               and coalesce(f.severity_override, case when f.risk_score >= 9 then 'CRITICAL'
@@ -480,7 +511,7 @@ public class AiSecurityApiService {
                       left join lateral (
                           select count(*) as total from findings f
                             join finding_subjects fs on fs.finding_id = f.id
-                             and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
+                             and fs.subject_type = 'ARTIFACT' and fs.subject_role in ('PRIMARY','ROOT_CAUSE')
                            where fs.subject_id = a.id and f.status = 'OPEN' and f.finding_kind in ('AI_POSTURE', 'AI_EXPOSURE')
                              and coalesce(f.severity_override, case when f.risk_score >= 9 then 'CRITICAL'
                                  when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) = 'CRITICAL'
@@ -488,7 +519,7 @@ public class AiSecurityApiService {
                       left join lateral (
                           select count(*) as total from findings f
                             join finding_subjects fs on fs.finding_id = f.id
-                             and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
+                             and fs.subject_type = 'ARTIFACT' and fs.subject_role in ('PRIMARY','ROOT_CAUSE')
                            where fs.subject_id = a.id and f.status = 'OPEN' and f.finding_kind in ('AI_POSTURE', 'AI_EXPOSURE')
                              and coalesce(f.severity_override, case when f.risk_score >= 9 then 'CRITICAL'
                                  when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) = 'HIGH'
@@ -496,7 +527,7 @@ public class AiSecurityApiService {
                       left join lateral (
                           select count(*) as total from findings f
                             join finding_subjects fs on fs.finding_id = f.id
-                             and fs.subject_type = 'ARTIFACT' and fs.subject_role = 'PRIMARY'
+                             and fs.subject_type = 'ARTIFACT' and fs.subject_role in ('PRIMARY','ROOT_CAUSE')
                            where fs.subject_id = a.id and f.status = 'OPEN' and f.finding_kind in ('AI_POSTURE', 'AI_EXPOSURE')
                       ) tf on true
                       left join lateral (
@@ -869,7 +900,7 @@ public class AiSecurityApiService {
             String filter = """
                      where (:policyId is null or f.policy_id = :policyId)
                        and (:status is null or f.status = :status)
-                       and (:provider is null or coalesce(a.provider,x.provider) = :provider)
+                       and (:provider is null or a.provider = :provider)
                        and (:subscription is null or a.account_id = :subscription)
                        and (:nativeKind is null or a.native_kind = any(string_to_array(:nativeKind, ',')))
                        and (:severity is null or coalesce(f.severity_override, case when f.risk_score >= 9 then 'CRITICAL'
@@ -877,11 +908,11 @@ public class AiSecurityApiService {
                     """;
             List<FindingResponse> items = jdbc.query("""
                     select f.id, f.display_id, f.policy_id, f.policy_version,
-                           case when fs.subject_type='ARTIFACT' then fs.subject_id end artifact_id,
-                           case when fs.subject_type='EXECUTION' then fs.subject_id end execution_id,
+                           fs.artifact_id,
+                           null::uuid execution_id,
                            fs.subject_type,
-                           coalesce(a.name, 'Runtime execution ' || left(fs.subject_id::text,8)) artifact_name,
-                           x.evidence_source, x.evidence_class,
+                           coalesce(a.name,'Exposure path') artifact_name,
+                           null::text evidence_source, null::text evidence_class, f.finding_kind, paths.path_summaries,
                            coalesce(f.severity_override, case when f.risk_score >= 9 then 'CRITICAL'
                                when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) severity,
                            f.status, f.title, f.evidence::text evidence_json,
@@ -889,9 +920,7 @@ public class AiSecurityApiService {
                            f.closed_reason,
                            coalesce(review.disposition, 'UNREVIEWED') as disposition
                       from findings f
-                      join finding_subjects fs on fs.finding_id = f.id and fs.subject_role = 'PRIMARY'
-                      left join ai_security_artifacts a on a.id = fs.subject_id and fs.subject_type='ARTIFACT'
-                      left join ai_agent_executions x on x.id = fs.subject_id and fs.subject_type='EXECUTION'
+                      """ + FINDING_CONTEXT + FINDING_PATHS + """
                       left join lateral (
                           select disposition from finding_reviews r
                            where r.finding_id = f.id order by reviewed_at desc limit 1
@@ -899,10 +928,8 @@ public class AiSecurityApiService {
                     """ + filter + " and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE') order by f.last_observed_at desc, f.id limit :limit offset :offset",
                     params, this::finding);
             long total = count("""
-                    select count(*) from findings f
-                    join finding_subjects fs on fs.finding_id = f.id and fs.subject_role = 'PRIMARY'
-                    left join ai_security_artifacts a on a.id = fs.subject_id and fs.subject_type='ARTIFACT'
-                    left join ai_agent_executions x on x.id = fs.subject_id and fs.subject_type='EXECUTION'
+                    select count(distinct f.id) from findings f
+                    """ + FINDING_CONTEXT + FINDING_PATHS + """
                     """ + filter + " and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE')", params);
             return new PageResponse<>(items, safePage, safeSize, total);
         });
@@ -1011,7 +1038,9 @@ public class AiSecurityApiService {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported scope condition");
             }
         }
+        reevaluationService.preflight(tenant, policyId, null);
         return tenantExecution.run(tenant, () -> transactionTemplate.execute(status -> {
+            jdbc.query("select pg_advisory_xact_lock(hashtextextended(cast(:tenantId as text),0))", Map.of("tenantId",tenant.getId()), rs -> null);
             jdbc.update("""
                     insert into ai_grid_policy_scopes (
                         policy_id, tenant_id, mode, condition_logic, conditions_json, updated_by
@@ -1048,7 +1077,9 @@ public class AiSecurityApiService {
         if (!VALID_OVERRIDES.contains(override)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported exception override");
         }
+        reevaluationService.preflight(tenant, policyId, null);
         return tenantExecution.run(tenant, () -> transactionTemplate.execute(status -> {
+            jdbc.query("select pg_advisory_xact_lock(hashtextextended(cast(:tenantId as text),0))", Map.of("tenantId",tenant.getId()), rs -> null);
             jdbc.update("""
                     insert into ai_grid_policy_artifact_overrides (
                         id, tenant_id, policy_id, artifact_id, override, reason, created_by
@@ -1089,7 +1120,9 @@ public class AiSecurityApiService {
         }
         String logic = "OR".equalsIgnoreCase(conditionLogic) ? "OR" : "AND";
         ScopeConfig exceptionScope = new ScopeConfig(AiSecurityPolicyScopeMatcher.MODE_MATCH_RULES, logic, ruleConditions);
+        reevaluationService.preflight(tenant, policyId, null);
         return tenantExecution.run(tenant, () -> transactionTemplate.execute(status -> {
+            jdbc.query("select pg_advisory_xact_lock(hashtextextended(cast(:tenantId as text),0))", Map.of("tenantId",tenant.getId()), rs -> null);
             List<ArtifactScopeRow> artifacts = jdbc.query("""
                     select id, provider, region, account_id, artifact_type, native_kind, name
                       from ai_security_artifacts where active = true
@@ -1130,7 +1163,9 @@ public class AiSecurityApiService {
             Tenant tenant, String policyId, UUID artifactId, String actor) {
         PolicyDefinition definition = requirePolicy(tenant, policyId);
         ensureTenantConfigurable(policyId);
+        reevaluationService.preflight(tenant, policyId, null);
         return tenantExecution.run(tenant, () -> transactionTemplate.execute(status -> {
+            jdbc.query("select pg_advisory_xact_lock(hashtextextended(cast(:tenantId as text),0))", Map.of("tenantId",tenant.getId()), rs -> null);
             jdbc.update("""
                     delete from ai_grid_policy_artifact_overrides
                      where policy_id = :policyId and artifact_id = :artifactId
@@ -1159,7 +1194,9 @@ public class AiSecurityApiService {
             }
             validated.put(spec.key(), value.toUpperCase(Locale.ROOT));
         }
+        reevaluationService.preflight(tenant, policyId, new LinkedHashMap<>(validated));
         return tenantExecution.run(tenant, () -> transactionTemplate.execute(status -> {
+            jdbc.query("select pg_advisory_xact_lock(hashtextextended(cast(:tenantId as text),0))", Map.of("tenantId",tenant.getId()), rs -> null);
             jdbc.update("""
                     insert into ai_grid_policy_parameters (policy_id, tenant_id, parameters_json, updated_by)
                     values (:policyId, :tenantId, cast(:parameters as jsonb), :actor)
@@ -1247,42 +1284,40 @@ public class AiSecurityApiService {
         return jdbc.query("""
                 select distinct on (p.policy_id) p.policy_id,p.version,p.name,p.severity,p.artifact_types_json::text,
                        p.required_resource_families_json::text,p.description,p.remediation,p.framework_mappings_json::text
-                  from platform.ai_grid_policy_versions p
+                  from %s p
                   join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id
-                   and (p.version=d.pinned_version or (d.pinned_version is null and p.package_digest is null))
-                 where coalesce(p.evaluation_mode, '') not like 'RUNTIME_%' and p.policy_id not like 'AGCF-RT-%'
-                   and p.lifecycle in ('VALIDATED', 'PUBLISHED', 'CANARY', 'DEPRECATED')
+                 where coalesce(p.evaluation_mode, '') not like 'RUNTIME_%%' and p.policy_id not like 'AGCF-RT-%%'
+                   and p.lifecycle in ('VALIDATED','APPROVED','PUBLISHED','CANARY','DEPRECATED')
                    and platform.ai_grid_policy_visible_to_tenant(
                            d.available or p.lifecycle='DEPRECATED', d.rollout_stage,
                            d.canary_tenant_ids_json, cast(:tenantId as uuid))
                  order by p.policy_id,p.version
-                """, Map.of("tenantId", tenant.getId().toString()), (rs, n) -> catalogDefinition(rs));
+                """.formatted(AiGridPolicyResolution.versions(":tenantId")), Map.of("tenantId", tenant.getId().toString()), (rs, n) -> catalogDefinition(rs));
     }
 
     private java.util.Optional<PolicyDefinition> catalogDefinition(Tenant tenant, String policyId) {
         List<PolicyDefinition> definitions = jdbc.query("""
                 select p.policy_id,p.version,p.name,p.severity,p.artifact_types_json::text,
                        p.required_resource_families_json::text,p.description,p.remediation,p.framework_mappings_json::text
-                  from platform.ai_grid_policy_versions p
+                  from %s p
                   join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id
-                   and (p.version=d.pinned_version or (d.pinned_version is null and p.package_digest is null))
-                 where p.policy_id=:id and coalesce(p.evaluation_mode, '') not like 'RUNTIME_%' and p.policy_id not like 'AGCF-RT-%'
-                   and p.lifecycle in ('VALIDATED', 'PUBLISHED', 'CANARY', 'DEPRECATED')
+                 where p.policy_id=:id and coalesce(p.evaluation_mode, '') not like 'RUNTIME_%%' and p.policy_id not like 'AGCF-RT-%%'
+                   and p.lifecycle in ('VALIDATED','APPROVED','PUBLISHED','CANARY','DEPRECATED')
                    and platform.ai_grid_policy_visible_to_tenant(
                            d.available or p.lifecycle='DEPRECATED', d.rollout_stage,
                            d.canary_tenant_ids_json, cast(:tenantId as uuid))
                  order by p.version limit 1
-                """, Map.of("id", policyId, "tenantId", tenant.getId().toString()), (rs, n) -> catalogDefinition(rs));
+                """.formatted(AiGridPolicyResolution.versions(":tenantId")), Map.of("id", policyId, "tenantId", tenant.getId().toString()), (rs, n) -> catalogDefinition(rs));
         return definitions.stream().findFirst();
     }
 
     /** Parameter definitions are populated exclusively from the governed catalog. */
     private List<PolicyParameterSpec> policyParameterSpecs(String policyId) {
         List<String> definitions = jdbc.query("""
-                select parameter_definitions_json::text from platform.ai_grid_policy_versions
-                 where policy_id=:id and lifecycle in ('VALIDATED', 'PUBLISHED', 'CANARY')
+                select parameter_definitions_json::text from %s
+                 where policy_id=:id and lifecycle in ('VALIDATED','APPROVED','PUBLISHED','CANARY')
                  order by published_at desc nulls last, version desc limit 1
-                """, Map.of("id", policyId), (rs, n) -> rs.getString(1));
+                """.formatted(AiGridPolicyResolution.currentVersions()), Map.of("id", policyId), (rs, n) -> rs.getString(1));
         List<PolicyParameterSpec> catalogSpecs = definitions.isEmpty() ? List.of() : parameterSpecs(definitions.get(0));
         return catalogSpecs;
     }
@@ -1373,13 +1408,13 @@ public class AiSecurityApiService {
                        p.tenant_configurable, d.default_selection,
                        coalesce(s.configuration_source, 'PLATFORM_DEFAULT') configuration_source,
                        s.updated_at
-                  from platform.ai_grid_policy_versions p
+                  from %s p
                   join platform.ai_grid_policy_distribution d on d.policy_id = p.policy_id
                    and (d.pinned_version is null or d.pinned_version = p.version)
                   left join ai_grid_policy_selections s on s.policy_id = p.policy_id
                  where p.policy_id = :policyId
                  order by p.published_at desc nulls last, p.version desc limit 1
-                """, Map.of("policyId", definition.id()), rs -> {
+                """.formatted(AiGridPolicyResolution.currentVersions()), Map.of("policyId", definition.id()), rs -> {
                     if (!rs.next()) return Map.of();
                     Map<String, Object> values = new LinkedHashMap<>();
                     values.put("version", rs.getString("version"));
@@ -1399,7 +1434,11 @@ public class AiSecurityApiService {
                 (String) governance.get("platformDefaultSelection"),
                 (String) governance.get("configurationSource"),
                 governance.get("updatedAt") instanceof java.sql.Timestamp timestamp ? timestamp.toInstant() : null);
-        return new PolicyConfigurationResponse(policyGovernance, scope, exceptions, parameters, matched, artifacts.size());
+        Tenant tenant=new Tenant(); tenant.setId(com.prototype.vulnwatch.service.TenantContext.getCurrentTenantId());
+        tenant.setSchemaName(com.prototype.vulnwatch.service.TenantContext.getCurrentSchemaName());
+        var processing=aiGridApi.policyAssessmentStatus(tenant,definition.id());
+        return new PolicyConfigurationResponse(policyGovernance, scope, exceptions, parameters, matched, artifacts.size(),
+                "COMPLETE",processing.assessmentStatus(),processing.assessedSubjects(),processing.failedPolicies(),processing.failureSummaries());
     }
 
     private List<PolicyParameterValueResponse> buildParameterValues(String policyId) {
@@ -1452,7 +1491,7 @@ public class AiSecurityApiService {
                                 && AiSecuritySyncRunFacade.AZURE_SYNC_TYPE.equals(run.getSyncType()))
                         || ("MICROSOFT_COPILOT".equals(normalized)
                                 && AiSecuritySyncRunFacade.COPILOT_SYNC_TYPE.equals(run.getSyncType())))
-                .map(this::run)
+                .map(run -> tenantExecution.run(tenant, () -> run(run)))
                 .toList();
     }
 
@@ -1503,7 +1542,7 @@ public class AiSecurityApiService {
     private PolicyResponse policy(PolicyDefinition definition) {
         Map<String, Object> row = jdbc.queryForMap("""
                 select d.available,
-                       coalesce(s.selection, d.default_selection) as selection,
+                       case when s.configuration_source='TENANT_OVERRIDE' then s.selection else d.default_selection end as selection,
                        coalesce(open_counts.open_count, 0) as open_count,
                        coalesce(lifetime_counts.lifetime_count, 0) as lifetime_count,
                        quality.last_evaluated_at, quality.pass_count, quality.fail_count,
@@ -1561,11 +1600,11 @@ public class AiSecurityApiService {
     private List<FindingResponse> findingsById(UUID findingId) {
         return jdbc.query("""
                 select f.id, f.display_id, f.policy_id, f.policy_version,
-                       case when fs.subject_type='ARTIFACT' then fs.subject_id end artifact_id,
-                       case when fs.subject_type='EXECUTION' then fs.subject_id end execution_id,
+                       fs.artifact_id,
+                       null::uuid execution_id,
                        fs.subject_type,
-                       coalesce(a.name, 'Runtime execution ' || left(fs.subject_id::text,8)) artifact_name,
-                       x.evidence_source, x.evidence_class,
+                       coalesce(a.name,'Exposure path') artifact_name,
+                       null::text evidence_source, null::text evidence_class, f.finding_kind, paths.path_summaries,
                        coalesce(f.severity_override, case when f.risk_score >= 9 then 'CRITICAL'
                            when f.risk_score >= 7 then 'HIGH' when f.risk_score >= 4 then 'MEDIUM' else 'LOW' end) severity,
                        f.status, f.title, f.evidence::text evidence_json,
@@ -1573,15 +1612,14 @@ public class AiSecurityApiService {
                        f.closed_reason,
                        coalesce(review.disposition, 'UNREVIEWED') as disposition
                   from findings f
-                  join finding_subjects fs on fs.finding_id = f.id and fs.subject_role = 'PRIMARY'
-                  left join ai_security_artifacts a on a.id = fs.subject_id and fs.subject_type='ARTIFACT'
-                  left join ai_agent_executions x on x.id = fs.subject_id and fs.subject_type='EXECUTION'
+                  """ + FINDING_CONTEXT + FINDING_PATHS + """
                   left join lateral (
                       select disposition from finding_reviews r
                        where r.finding_id = f.id order by reviewed_at desc limit 1
                   ) review on true
                  where f.id = :id and f.finding_kind in ('AI_POSTURE','AI_EXPOSURE')
-                """, Map.of("id", findingId), this::finding);
+                """, new MapSqlParameterSource().addValue("id",findingId).addValue("provider",null,Types.VARCHAR)
+                .addValue("subscription",null,Types.VARCHAR).addValue("nativeKind",null,Types.VARCHAR), this::finding);
     }
 
     private List<RelationshipResponse> graphEdges(UUID root, int limit) {
@@ -1689,13 +1727,17 @@ public class AiSecurityApiService {
                 instant(rs, "first_observed_at"),
                 instant(rs, "last_observed_at"),
                 instant(rs, "resolved_at"),
-                rs.getString("closed_reason"));
+                rs.getString("closed_reason"),rs.getString("finding_kind"),readPathSummaries(rs.getString("path_summaries")));
     }
 
     private RunResponse run(SyncRun run) {
+        Tenant tenant=new Tenant(); tenant.setId(com.prototype.vulnwatch.service.TenantContext.getCurrentTenantId());
+        tenant.setSchemaName(com.prototype.vulnwatch.service.TenantContext.getCurrentSchemaName());
+        var processing=aiGridApi.assessmentStatus(tenant,run.getId());
         return new RunResponse(
                 run.getId(), run.getStatus(), run.getRecordsFetched(), run.getRecordsFailed(),
-                run.getStartedAt(), run.getCompletedAt(), run.getErrorMessage());
+                run.getStartedAt(), run.getCompletedAt(), run.getErrorMessage(),run.getStatus(),processing.assessmentStatus(),
+                processing.assessedSubjects(),processing.failedPolicies(),processing.failureSummaries());
     }
 
     private long count(String sql, org.springframework.jdbc.core.namedparam.SqlParameterSource params) {
@@ -1833,13 +1875,19 @@ public class AiSecurityApiService {
     ) {
     }
 
+    public record ExposurePathSummary(UUID id,String title,String state,String status) {}
+    private List<ExposurePathSummary> readPathSummaries(String value) {
+        try { return objectMapper.readValue(value,new TypeReference<List<ExposurePathSummary>>() {}); }
+        catch (java.io.IOException error) { throw new IllegalStateException("Invalid exposure path summary",error); }
+    }
+
     public record FindingResponse(
             UUID id, String displayId, String policyId, String policyVersion, UUID artifactId,
             UUID executionId, String subjectType,
             String artifactName, String evidenceSource, String evidenceClass,
             String severity, String status, String title, Map<String, Object> evidence,
             String reviewDisposition, Instant firstObservedAt, Instant lastObservedAt, Instant resolvedAt
-            , String closedReason
+            , String closedReason, String findingKind, List<ExposurePathSummary> exposurePaths
     ) {
     }
 
@@ -1875,7 +1923,9 @@ public class AiSecurityApiService {
 
     public record PolicyConfigurationResponse(
             PolicyGovernanceResponse governance, PolicyScopeResponse scope, List<PolicyExceptionResponse> exceptions,
-            List<PolicyParameterValueResponse> parameters, long matchedArtifactCount, long totalArtifactCount
+            List<PolicyParameterValueResponse> parameters, long matchedArtifactCount, long totalArtifactCount,
+            String collectionStatus,String assessmentStatus,int assessedSubjects,int failedPolicies,
+            List<AiGridAssessmentService.PolicyFailure> failureSummaries
     ) {
     }
 
@@ -1900,7 +1950,8 @@ public class AiSecurityApiService {
 
     public record RunResponse(
             UUID id, String status, int recordsFetched, int recordsFailed,
-            Instant startedAt, Instant completedAt, String errorMessage
+            Instant startedAt, Instant completedAt, String errorMessage, String collectionStatus,String assessmentStatus,
+            int assessedSubjects,int failedPolicies,List<AiGridAssessmentService.PolicyFailure> failureSummaries
     ) {
     }
 

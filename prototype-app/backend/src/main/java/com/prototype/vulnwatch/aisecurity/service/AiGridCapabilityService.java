@@ -48,8 +48,13 @@ public class AiGridCapabilityService {
 
     public List<String> gaps(Map<CapabilityKey, CapabilityState> index, String provider, String accountId,
                              String region, List<String> required) {
+        return gaps(index,provider,accountId,region,required,Instant.now());
+    }
+
+    public List<String> gaps(Map<CapabilityKey,CapabilityState> index,String provider,String accountId,
+                             String region,List<String> required,Instant evaluationAsOf) {
         List<String> gaps = new ArrayList<>();
-        Instant now = Instant.now();
+        Instant now = evaluationAsOf;
         for (String capability : required) {
             CapabilityState state = index.get(new CapabilityKey(provider, capability, accountId, region));
             if (state == null) state = index.get(new CapabilityKey(provider, capability, accountId, "GLOBAL"));

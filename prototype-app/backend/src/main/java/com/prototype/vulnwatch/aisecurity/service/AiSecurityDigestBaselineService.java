@@ -25,6 +25,12 @@ public class AiSecurityDigestBaselineService {
     private final AuditEventService audit;
     private final AiGridFindingService findings;
 
+    private org.springframework.beans.factory.ObjectProvider<AiGridAssessmentWorker> assessmentWorker;
+    @org.springframework.beans.factory.annotation.Autowired
+    void configureAssessmentWorker(org.springframework.beans.factory.ObjectProvider<AiGridAssessmentWorker> worker) {
+        this.assessmentWorker = worker;
+    }
+
     public AiSecurityDigestBaselineService(NamedParameterJdbcTemplate jdbc,
                                            TenantSchemaExecutionService tenantExecution,
                                            TransactionTemplate transactions,
@@ -54,6 +60,7 @@ public class AiSecurityDigestBaselineService {
     public Response approve(Tenant tenant, UUID artifactId, Request request, String actor, boolean reapproval) {
         validate(request);
         Response response = tenantExecution.run(tenant, () -> transactions.execute(status -> {
+            jdbc.query("select pg_advisory_xact_lock(hashtextextended(cast(:tenantId as text),0))",Map.of("tenantId",tenant.getId()),rs -> null);
             assertArtifact(tenant, artifactId);
             Observation observation = currentObservation(tenant, artifactId, request.digestKind());
             if (!java.util.Objects.equals(request.sourceRunId(), observation.runId())
@@ -98,6 +105,7 @@ public class AiSecurityDigestBaselineService {
     public Response revoke(Tenant tenant, UUID artifactId, String digestKind, String actor) {
         requireKind(digestKind);
         Response response = tenantExecution.run(tenant, () -> transactions.execute(status -> {
+            jdbc.query("select pg_advisory_xact_lock(hashtextextended(cast(:tenantId as text),0))",Map.of("tenantId",tenant.getId()),rs -> null);
             assertArtifact(tenant, artifactId);
             int changed = jdbc.update("""
                     update ai_security_artifact_digest_baselines
@@ -112,12 +120,9 @@ public class AiSecurityDigestBaselineService {
             if (observation != null) {
                 observeCurrentTenant(tenant, artifactId, digestKind, observation.algorithm(), observation.keyVersion(),
                         observation.digest(), observation.runId(), observation.observedAt());
-            } else {
-                String policyId = "GUARDRAIL_CONFIGURATION".equals(digestKind)
-                        ? "AI_GUARDRAIL_CONFIGURATION_CHANGED_AFTER_APPROVAL" : "AI_ARTIFACT_DIGEST_CHANGED_AFTER_APPROVAL";
-                findings.withdrawBaselineComparison(tenant, new AiGridFindingService.AssessmentResult(UUID.randomUUID(), sourceRun,
-                        policyId, "1.0.0", "Approval withdrawn", "HIGH", "DISABLED", "UNKNOWN", "UNAPPROVED", artifactId,
-                        sha256(policyId + "|" + artifactId + "|" + digestKind), Map.of("digestKind", digestKind)));
+            } else if (assessmentWorker != null) {
+                assessmentWorker.getObject().enqueue(tenant,sourceRun,java.util.Set.of(
+                        "GUARDRAIL_CONFIGURATION".equals(digestKind) ? "AI_GUARDRAIL_CONFIGURATION_CHANGED_AFTER_APPROVAL" : "AI_ARTIFACT_DIGEST_CHANGED_AFTER_APPROVAL"));
             }
             return required(artifactId, digestKind);
         }));
@@ -171,6 +176,60 @@ public class AiSecurityDigestBaselineService {
         } else if (outcome == Outcome.UNCHANGED) {
             resolveSetupActions(artifactId, digestKind);
         }
+        if (assessmentWorker != null) assessmentWorker.getObject().enqueue(tenant,sourceRunId,java.util.Set.of(
+                "GUARDRAIL_CONFIGURATION".equals(digestKind) ? "AI_GUARDRAIL_CONFIGURATION_CHANGED_AFTER_APPROVAL" : "AI_ARTIFACT_DIGEST_CHANGED_AFTER_APPROVAL"));
+        return outcome;
+    }
+
+    /** Recompute from the latest compatible observation and the current approval inside an isolated write. */
+    public int reconcileLatest(Tenant tenant,String policyId) {
+        boolean guardrailPolicy="AI_GUARDRAIL_CONFIGURATION_CHANGED_AFTER_APPROVAL".equals(policyId);
+        List<Map<String,Object>> observations=jdbc.queryForList("""
+                select artifact_id,digest_kind,algorithm,key_version,observed_digest,source_run_id,observed_at
+                  from ai_security_artifact_digest_observations
+                 where (:guardrail and digest_kind='GUARDRAIL_CONFIGURATION')
+                    or (not :guardrail and digest_kind<>'GUARDRAIL_CONFIGURATION')
+                 order by artifact_id,digest_kind
+                """,Map.of("guardrail",guardrailPolicy));
+        int compatible=0;
+        for (Map<String,Object> row:observations) {
+            UUID artifactId=(UUID)row.get("artifact_id");
+            String kind=(String)row.get("digest_kind");
+            Observation observation=findObservation(tenant,artifactId,kind);
+            if (observation==null) continue;
+            compatible++;
+            Outcome outcome=latestOutcome(artifactId,kind,observation);
+            reconcileComparison(tenant,artifactId,kind,outcome,observation.runId(),observation.observedAt());
+        }
+        List<Map<String,Object>> withdrawn=jdbc.queryForList("""
+                select b.artifact_id,b.digest_kind,b.source_run_id from ai_security_artifact_digest_baselines b
+                 where b.approval_status<>'APPROVED'
+                   and ((:guardrail and b.digest_kind='GUARDRAIL_CONFIGURATION') or (not :guardrail and b.digest_kind<>'GUARDRAIL_CONFIGURATION'))
+                   and not exists (select 1 from ai_security_artifact_digest_observations o where o.artifact_id=b.artifact_id and o.digest_kind=b.digest_kind)
+                """,Map.of("guardrail",guardrailPolicy));
+        for (var row:withdrawn) findings.withdrawBaselineComparison(tenant,new AiGridFindingService.AssessmentResult(
+                UUID.randomUUID(),(UUID)row.get("source_run_id"),policyId,"1.0.0","Approval withdrawn","HIGH","DISABLED",
+                "UNKNOWN","UNAPPROVED",(UUID)row.get("artifact_id"),sha256(policyId+"|"+row.get("artifact_id")+"|"+row.get("digest_kind")),Map.of("digestKind",row.get("digest_kind"))));
+
+        return compatible+withdrawn.size();
+    }
+
+    private Outcome latestOutcome(UUID artifactId,String kind,Observation observation) {
+        Baseline baseline=jdbc.query("select algorithm,key_version,approved_digest,approval_status,approval_reference_verified "
+                + "from ai_security_artifact_digest_baselines where artifact_id=:id and digest_kind=:kind",
+                Map.of("id",artifactId,"kind",kind),rs -> rs.next() ? new Baseline(rs.getString(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getBoolean(5)) : null);
+        Outcome outcome=comparison(baseline==null ? null : baseline.status(),baseline==null ? null : baseline.algorithm(),
+                baseline==null ? null : baseline.keyVersion(),baseline==null ? null : baseline.digest(),
+                observation.algorithm(),observation.keyVersion(),observation.digest());
+        if (baseline!=null && "APPROVED".equals(baseline.status()) && !baseline.referenceVerified()) outcome=Outcome.BASELINE_UNKNOWN_REAPPROVAL_REQUIRED;
+        if ("GUARDRAIL_CONFIGURATION".equals(kind) && baseline!=null && "APPROVED".equals(baseline.status()) && baseline.referenceVerified()
+                && outcome!=Outcome.BASELINE_UNKNOWN_REAPPROVAL_REQUIRED && outcome!=Outcome.CONFIGURATION_UNKNOWN)
+            outcome=AiGuardrailBaselineComparison.compare(baseline.digest(),observation.digest());
+        if (observation.observedAt().isBefore(Instant.now().minusSeconds(86400))) outcome=Outcome.CONFIGURATION_UNKNOWN;
+        return outcome;
+    }
+
+    private void reconcileComparison(Tenant tenant,UUID artifactId,String digestKind,Outcome outcome,UUID sourceRunId,Instant observedAt) {
         boolean guardrail = "GUARDRAIL_CONFIGURATION".equals(digestKind);
         boolean changed = outcome == Outcome.CHANGED_AFTER_APPROVAL || outcome == Outcome.CONTROL_WEAKENED
                 || outcome == Outcome.CONTROL_CONFIGURATION_CHANGED_REVIEW_REQUIRED;
@@ -188,7 +247,6 @@ public class AiSecurityDigestBaselineService {
         boolean findingChanged = changed || outcome == Outcome.UNCHANGED ? findings.reconcile(tenant, assessment)
                 : findings.withdrawBaselineComparison(tenant, assessment);
         if (findingChanged) findings.refreshProjectionAfterCommit(tenant);
-        return outcome;
     }
 
     private UUID persistComparison(Tenant tenant, UUID artifactId, String kind, Outcome outcome, UUID runId,
@@ -220,9 +278,13 @@ public class AiSecurityDigestBaselineService {
     }
 
     private String workflowSelection(Tenant tenant, String policyId, boolean guardrail) {
-        List<String> selected = jdbc.query("select selection from ai_grid_policy_selections where policy_id=:policyId",
+        List<String> selected = jdbc.query("select selection from ai_grid_policy_selections where policy_id=:policyId and configuration_source='TENANT_OVERRIDE'",
                 Map.of("policyId", policyId), (rs, row) -> rs.getString(1));
-        if (!guardrail) return selected.isEmpty() ? "ENABLED" : selected.get(0);
+        if (!guardrail) {
+            List<String> defaults=jdbc.query("select resolved_default_selection from " + AiGridPolicyResolution.versions(":tenantId") + " p where policy_id=:policyId",
+                    Map.of("tenantId",tenant.getId(),"policyId",policyId),(rs,row) -> rs.getString(1));
+            return selected.isEmpty() ? defaults.isEmpty() ? "ENABLED" : defaults.get(0) : selected.get(0);
+        }
         // New control-regression findings must pass the existing distribution/canary boundary.
         List<String> distributed = jdbc.query("""
                 select d.default_selection from platform.ai_grid_policy_distribution d
@@ -245,6 +307,7 @@ public class AiSecurityDigestBaselineService {
         }
         requireKind(request.digestKind());
         return tenantExecution.run(tenant, () -> transactions.execute(status -> {
+            jdbc.query("select pg_advisory_xact_lock(hashtextextended(cast(:tenantId as text),0))",Map.of("tenantId",tenant.getId()),rs -> null);
             assertArtifact(tenant, artifactId);
             Observation current = currentObservation(tenant, artifactId, request.digestKind());
             if (!current.runId().equals(request.sourceRunId()) || !current.observedAt().equals(request.observedAt())) {

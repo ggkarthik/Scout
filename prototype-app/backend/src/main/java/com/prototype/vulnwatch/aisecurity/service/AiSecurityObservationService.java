@@ -84,6 +84,7 @@ public class AiSecurityObservationService {
     }
 
     private IngestionResult ingestCurrentTenant(Tenant tenant, ObservationEnvelopeV1 envelope) {
+        jdbc.query("select pg_advisory_xact_lock(hashtextextended(cast(:tenantId as text),0))",Map.of("tenantId",tenant.getId()),rs -> null);
         validateCurrentTenantOwnership(tenant, envelope);
         MapSqlParameterSource receipt = new MapSqlParameterSource()
                 .addValue("id", UUID.randomUUID())
