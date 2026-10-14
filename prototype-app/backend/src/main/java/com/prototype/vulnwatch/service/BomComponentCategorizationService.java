@@ -15,8 +15,9 @@ public class BomComponentCategorizationService {
 
     /**
      * Component types that are not software and must stay out of software inventory and
-     * vulnerability correlation. A model has no CPE and no CVEs; correlating one produces
-     * false findings against an artifact that was never a package.
+     * vulnerability correlation in the current shared software pipeline. Direct model or
+     * dataset advisory ingestion is a separate capability; exclusion is not a claim
+     * that these artifacts can never have vulnerabilities.
      */
     private static final java.util.Set<String> NON_SOFTWARE_TYPES = java.util.Set.of(
             "machine-learning-model", "ml-model", "ai-model", "model",

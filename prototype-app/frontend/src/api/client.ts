@@ -496,7 +496,23 @@ export type AiBomDeclaredResource = {
   lastDeclaredAt: string;
 };
 
+export type AiBomCorrelationEvidence = {
+  paths: Array<{
+    id: string; findingId: string; status: 'ACTIVE' | 'RETIRED'; bomId: string; sourceRevision: number;
+    components: Array<{ id: string; ref: string; name: string; version: string | null }>;
+    relationshipIds: string[]; terminalComponentId: string | null; matchMethod: string;
+    confirmedAt: string; retiredAt: string | null; retirementReason: string | null; uncertain: boolean; lifecycleHistory?: Array<{ status: string; at: string; revision: number }>;
+  }>;
+  gaps: Array<{ id: string; componentId: string | null; componentRef: string | null; reason: string;
+    remediation: string; sourceRevision: number; detectedAt: string }>;
+  pathCount: number; gapCount: number; page: number; size: number;
+  associationCount?: number;
+  associationsWithoutPaths?: Array<{ id: string; findingId: string; status: string; confirmedAt: string | null; retiredAt: string | null;
+    retirementReason: string | null; lifecycleHistory: Array<{ status: string; at: string; revision: number }> }>;
+};
+
 export type AiBomDeclaredResourceDetail = {
+  correlation?: AiBomCorrelationEvidence;
   resource: AiBomDeclaredResource;
   sourceBomType: string | null;
   sourceState: string | null;
@@ -2267,6 +2283,8 @@ export const api = {
     request<AiBomDeclaredResourceDetail>(`/bom/declared-resources/${encodeURIComponent(resourceId)}`),
   getAiBomDeclaredResourceFindings: (resourceId: string) =>
     request<Finding[]>(`/bom/declared-resources/${encodeURIComponent(resourceId)}/findings`),
+  getAiBomCorrelationEvidence: (resourceId: string, history = false, page = 0) =>
+    request<AiBomCorrelationEvidence>(`/bom/declared-resources/${encodeURIComponent(resourceId)}/correlation?history=${history}&page=${page}&size=50`),
   proposeAiBomMapping: (resourceId: string, artifactId: string) =>
     request<AiBomDeclaredResource>(`/bom/declared-resources/${encodeURIComponent(resourceId)}/mapping/propose`, {
       method: 'POST',

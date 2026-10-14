@@ -25,8 +25,8 @@ class BomComponentSoftwareEligibilityTest {
         assertTrue(service.entersSoftwareInventory(componentType), componentType);
     }
 
-    // A model has no CPE and no CVEs. Correlating one produces findings against an artifact
-    // that was never a package.
+    // Declared model and dataset types remain outside the shared software pipeline.
+    // Direct artifact advisories and automatic reclassification are deferred.
     @ParameterizedTest
     @ValueSource(strings = {"machine-learning-model", "ml-model", "ai-model", "model",
             "data", "dataset"})

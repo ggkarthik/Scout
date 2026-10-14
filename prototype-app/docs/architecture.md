@@ -310,3 +310,8 @@ For deployment-facing environment variables and operational endpoints, see [Back
 5. **Delta queue over synchronous writes** — `finding_delta_queue` decouples correlation (high-write bursts) from finding creation (requires policy evaluation, suppression checks). The 2-second drain window batches work and avoids thundering-herd under large SBOM ingestion events.
 
 6. **`ddl-auto=none`** — Flyway migrations own all DDL; Hibernate never creates or alters tables. New tenant schemas are provisioned by `TenantSchemaService`, which clones `tenant_default` (tables, sequences, defaults, foreign keys, RLS policies) rather than relying on Hibernate schema generation.
+
+
+## AI-BOM correlation authority and lifecycle
+
+The shared software pipeline owns canonical vulnerability findings. `AiBomCorrelationResolver` computes bounded source-document dependency support without writes; `AiBomCorrelationReconciler` applies association/path/gap/subject changes in one resource transaction after tenant context is established. Source locking serializes this boundary with replacement/deletion writers, and captured revision mismatch aborts the unit. Current readers filter ACTIVE links; history remains explicit, and finding workflow status is independent. Tenant V2 adds evidence/lifecycle storage without changing either V1 baseline. Observation/backfill precedes optional retirement enablement; disabling reconciliation writes preserves canonical software processing. See [implementation plan](ai-bom-correlation-implementation-plan.md) and [release evidence](ai-bom-correlation-release-evidence.md).
