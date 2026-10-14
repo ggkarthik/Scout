@@ -18,8 +18,9 @@ Implemented on `codex/ai-bom-correlation-repair`, based on the attached implemen
 
 | Check | Result |
 | --- | --- |
-| Full backend unit suite | 1,159 passed; 22 skipped; no failures/errors |
+| Clean committed snapshot: full backend unit suite | 1,159 passed; no skipped tests, failures, or errors |
 | Focused PostgreSQL suites | 39 passed; no skipped tests, failures, or errors |
+| Clean committed snapshot: complete PostgreSQL CI suite | 249 tests passed across 77 classes; no skipped tests, failures, or errors |
 | Backend coverage gate and SpotBugs | Passed in `verify` |
 | Frontend lint | Passed; three existing warnings in unrelated files |
 | Frontend typecheck and production build | Passed |
@@ -27,7 +28,7 @@ Implemented on `codex/ai-bom-correlation-repair`, based on the attached implemen
 | Migration validation, integrity, and tenant DDL guards | Passed |
 | Schema migrator environment tests and diff whitespace check | Passed |
 
-Backend verification used an isolated PostgreSQL 16 cluster in `/tmp`, bound to loopback port 55439. No application database was used. The final command was `mvn -q -Ppostgres-it -Dit.test=AiBomResourceVulnerabilityCorrelationPostgresIntegrationTest,AiBomLifecycleBaselinePostgresIntegrationTest,AiBomDeclaredInventoryPostgresIntegrationTest,AiBomAffectedResourceFindingsFilterPostgresIntegrationTest,AiBomDeclaredResourceControllerPostgresIntegrationTest,AiBomProjectionQueueCapPostgresIntegrationTest,BomInventoryReadServicePostgresIntegrationTest -Dpostgres.test.admin-url=jdbc:postgresql://127.0.0.1:55439/postgres -Dpostgres.test.username=ai_bom_test verify`.
+Backend verification used an isolated PostgreSQL 16 cluster in `/tmp`, bound to loopback port 55439. No application database was used. The complete CI command ran from a clean Git archive excluding unrelated local changes: `APP_PLATFORM_OWNER_BOOTSTRAP_ENABLED=false mvn -q -Ppostgres-it -Dpostgres.test.admin-url=jdbc:postgresql://127.0.0.1:55439/postgres -Dpostgres.test.username=ai_bom_test verify`. The focused acceptance command was `mvn -q -Ppostgres-it -Dit.test=AiBomResourceVulnerabilityCorrelationPostgresIntegrationTest,AiBomLifecycleBaselinePostgresIntegrationTest,AiBomDeclaredInventoryPostgresIntegrationTest,AiBomAffectedResourceFindingsFilterPostgresIntegrationTest,AiBomDeclaredResourceControllerPostgresIntegrationTest,AiBomProjectionQueueCapPostgresIntegrationTest,BomInventoryReadServicePostgresIntegrationTest -Dpostgres.test.admin-url=jdbc:postgresql://127.0.0.1:55439/postgres -Dpostgres.test.username=ai_bom_test verify`.
 
 Frontend verification ran lint, typecheck, build, and `npm run test:coverage -- --maxWorkers=4`. The worker limit avoids unrelated App-test timeouts seen during an unrestricted run.
 
@@ -52,11 +53,23 @@ Observed fixture transitions include:
 | Writes disabled | Association/subject writes remain disabled |
 | Repeated delivery | Link/path/subject identities and canonical finding count remain stable |
 
+## Browser review evidence
+
+The user story is a declared model resource whose software dependency already has a canonical finding: a reviewer can inspect ordered support, see incomplete version evidence and retained uncertainty, then request retired history separately. The browser previews render the actual before/after detail page in clean archives using deterministic demo HTTP fixtures; these screenshots do not claim a deployed environment or live database connection.
+
+| Boundary | Evidence |
+| --- | --- |
+| Browser → API | Detail and findings GETs returned 200; selecting Retired history issued `/api/bom/declared-resources/resource-1/correlation?history=true&page=0&size=50` and returned 200 in the fixture preview |
+| API → database | Real PostgreSQL controller/reconciliation suites cover tenant authorization, path/gap persistence, active-only filtering, pagination, rollback, and lifecycle transitions; all 249 integration tests passed |
+| Response → UI | Browser DOM and images show the three ordered edges, VERSION_MISSING remediation, retained uncertainty, and explicit RETIRED reason/time only in history; the preview console had zero errors/warnings |
+
+[Before](../../output/playwright/ai-bom-before.png) · [Current support and uncertainty](../../output/playwright/ai-bom-after.png) · [Retired history](../../output/playwright/ai-bom-history.png)
+
 ## Rollout and rollback
 
 Default: `AI_BOM_CORRELATION_WRITES_ENABLED=true`, `AI_BOM_CORRELATION_RETIREMENT_ENABLED=false`. The existing production sweep backfills supported paths and repairs subjects repeatedly while logging desired versus active link counts, desired/withdrawn/uncertain path counts, subject repairs, retirements, reactivations, gaps, and limits using identifiers rather than BOM payloads.
 
-Deploy active-reader changes together with reconciliation. Let the existing worker perform observation passes for representative tenants, inspect paths/gaps and proposed withdrawals, and retain the release evidence before setting `AI_BOM_CORRELATION_RETIREMENT_ENABLED=true`. Incomplete units retain uncertain support even after retirement is enabled.
+Apply tenant V2 with the existing schema migrator before deploying schema-aware application code. Deploy active-reader changes together with reconciliation. Let the existing worker perform observation passes for representative tenants, inspect paths/gaps and proposed withdrawals, and retain the release evidence before setting `AI_BOM_CORRELATION_RETIREMENT_ENABLED=true`. Incomplete units retain uncertain support even after retirement is enabled.
 
 For rollback, set both `AI_BOM_CORRELATION_RETIREMENT_ENABLED=false` and `AI_BOM_CORRELATION_WRITES_ENABLED=false`. Keep the forward migration and history-aware readers. Shared software correlation continues independently.
 
