@@ -2,6 +2,14 @@
 
 Implemented on `codex/ai-bom-correlation-repair`, based on the attached implementation plan. The implementation is separated into storage/matching, reconciliation/readers, and classification/display review groups. The review stack starts from the existing AI-findings work at `30a70b83`, whose prerequisite commits are not yet on `main`. Existing unrelated working-tree changes were preserved.
 
+## Review stack
+
+1. [PR #59 — storage and strict bounded matching](https://github.com/ggkarthik/Scout/pull/59), based on `codex/ai-findings-repair`.
+2. [PR #60 — atomic reconciliation and lifecycle-aware readers](https://github.com/ggkarthik/Scout/pull/60), based on PR #59's branch.
+3. [PR #61 — uncertainty display, classification coverage, and release evidence](https://github.com/ggkarthik/Scout/pull/61), based on PR #60's branch.
+
+All are draft PRs. No deployment, merge, or retirement enablement has been performed. Local verification below is complete; hosted CI is separate and runs on each PR.
+
 ## Delivered behavior
 
 - Tenant V2 adds association lifecycle, ordered dependency paths, independent correlation gaps, and lifecycle history. Tenant and platform V1 migrations are unchanged. Fresh provisioning and V1-to-V2 upgrades are tested, including RLS and existing link uniqueness.
