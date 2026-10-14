@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { api } from '../api/client';
+import { api, type AiBomCorrelationEvidence } from '../api/client';
 import { pathForAiBomDeclaredResources, pathForFindingDetail, pathForInventoryAiAsset } from '../app/routes';
 import { useActor } from '../features/auth/context';
 import { hasAnyRole } from '../features/auth/roles';
@@ -33,6 +33,48 @@ function KVRow({ label, children }: { label: string; children: React.ReactNode }
       <span className="fd3-kv-val">{children ?? <span className="fd3-empty">—</span>}</span>
     </div>
   );
+}
+
+function CorrelationEvidence({ resourceId, initial }: { resourceId: string; initial?: AiBomCorrelationEvidence }) {
+  const [history, setHistory] = React.useState(false);
+  const [page, setPage] = React.useState(0);
+  const query = useQuery({
+    queryKey: ['ai-bom-correlation', resourceId, history, page],
+    queryFn: () => api.getAiBomCorrelationEvidence(resourceId, history, page),
+    initialData: !history && page === 0 ? initial : undefined,
+    staleTime: 30_000,
+  });
+  const evidence = query.data;
+  return <Panel title="Dependency Evidence">
+    <p className="panel-caption">Active associations record dependency support. Finding status, deployment, and exploitability are assessed separately.</p>
+    <div className="fd3-actions">
+      <button type="button" className="btn btn-secondary" aria-pressed={!history} onClick={() => { setHistory(false); setPage(0); }}>Current support</button>
+      <button type="button" className="btn btn-secondary" aria-pressed={history} onClick={() => { setHistory(true); setPage(0); }}>Retired history</button>
+    </div>
+    {query.isLoading ? <p role="status">Loading dependency evidence…</p> : query.isError ? <p role="alert">Dependency evidence could not be loaded.</p> : evidence ? <>
+      {evidence.gaps.length > 0 && <div className="notice warning"><p>Coverage is incomplete. Previously recorded support may be retained while these gaps remain.</p>
+        <ul>{evidence.gaps.map(gap => <li key={gap.id}><strong>{gap.reason}</strong>{gap.componentRef ? ` (${gap.componentRef})` : ''}: {gap.remediation}</li>)}</ul>
+      </div>}
+      {evidence.paths.length === 0 && (evidence.associationsWithoutPaths?.length ?? 0) === 0 ? <p className="panel-caption">{history ? 'No retired dependency associations recorded.' : 'No supporting paths recorded yet. Assessment and AI-resource linking run asynchronously; this is not a clean assessment result.'}</p> :
+        evidence.paths.length > 0 ? <ul>{evidence.paths.map(path => <li key={path.id}>
+          <Link to={pathForFindingDetail(path.findingId)}>Finding {path.findingId}</Link>
+          <p>{path.components.map(c => `${c.name}${c.version ? ` @ ${c.version}` : ''}`).join(' → ')}</p>
+          <small>Source revision {path.sourceRevision} · {path.matchMethod} · {path.status}</small>
+          {path.uncertain && <p className="notice warning">Support retained with uncertainty. Resolve the correlation gaps before treating this path as confirmed current evidence.</p>}
+          {history && <p>Retired {fmtDt(path.retiredAt)} · {path.retirementReason}</p>}
+          {(path.lifecycleHistory?.length ?? 0) > 0 && <details><summary>Association history</summary><ul>{path.lifecycleHistory?.map((event, i) => <li key={`${event.at}-${i}`}>{event.status} at {fmtDt(event.at)} · Source revision {event.revision}</li>)}</ul></details>}
+        </li>)}</ul> : null}
+      {(evidence.associationsWithoutPaths?.length ?? 0) > 0 && <ul>{evidence.associationsWithoutPaths?.map(association => <li key={association.id}>
+        <Link to={pathForFindingDetail(association.findingId)}>Finding {association.findingId}</Link>
+        <p>{history ? `Retired ${fmtDt(association.retiredAt)} · ${association.retirementReason}` : 'Legacy association retained. Its dependency path has not yet been confirmed by reconciliation.'}</p>
+      </li>)}</ul>}
+      {Math.max(evidence.pathCount, evidence.gapCount, evidence.associationCount ?? 0) > evidence.size && <div className="fd3-actions">
+        <button type="button" className="btn btn-secondary" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Previous evidence</button>
+        <span>Page {page + 1}</span>
+        <button type="button" className="btn btn-secondary" disabled={(page + 1) * evidence.size >= Math.max(evidence.pathCount, evidence.gapCount, evidence.associationCount ?? 0)} onClick={() => setPage(p => p + 1)}>Next evidence</button>
+      </div>}
+    </> : null}
+  </Panel>;
 }
 
 export function AiBomDeclaredResourceDetailPage({ resourceId }: AiBomDeclaredResourceDetailPageProps) {
@@ -202,11 +244,15 @@ export function AiBomDeclaredResourceDetailPage({ resourceId }: AiBomDeclaredRes
         )}
       </Panel>
 
+      <CorrelationEvidence key={resourceId} resourceId={resourceId} initial={detail.correlation} />
+
       <Panel title="Findings Affecting This Resource">
         {findingsQuery.isLoading ? (
           <p className="panel-caption">Loading…</p>
+        ) : findingsQuery.isError ? (
+          <p role="alert">Affected findings could not be loaded.</p>
         ) : findings.length === 0 ? (
-          <p className="panel-caption">No open vulnerability findings transitively affect this resource.</p>
+          <p className="panel-caption">No vulnerability associations recorded yet. Assessment and AI-resource linking run asynchronously; an empty list does not confirm absence of risk.</p>
         ) : (
           <table className="data-table">
             <thead><tr><th>Finding</th><th>Package</th><th>Severity</th><th>Status</th></tr></thead>

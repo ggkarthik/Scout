@@ -243,4 +243,25 @@ class AiBomDeclaredInventoryPostgresIntegrationTest {
         assertNotEquals(declaredA.get(0).getId(), declaredB.get(0).getId(),
                 "two sources' declarations of a same-named model must never collapse into one row");
     }
+
+    @Test void servingClassificationFollowsDeclaredTypeAndDoesNotGuessFromNamesOrPurls() throws Exception {
+        Tenant tenant = tenantService.getDefaultTenant();
+        String asset = "serving-classification-" + SEQUENCE.incrementAndGet();
+        upload(tenant, asset, aiBom(
+                ComponentSpec.of("library", "vllm", "0.6.0", "pkg:pypi/vllm@0.6.0", "vllm-library"),
+                ComponentSpec.of("application", "triton", "2.50.0", "pkg:generic/triton@2.50.0", "triton-app"),
+                ComponentSpec.of("machine-learning-model", "vllm", "0.6.0", "pkg:pypi/vllm@0.6.0", "mistyped-serving"),
+                ComponentSpec.of("machine-learning-model", "weights", "1", "pkg:huggingface/acme/weights@1", "weights"),
+                ComponentSpec.of("dataset", "training-corpus", "1", null, "dataset")
+        ), BomSourceSelector.independent());
+        UUID assetId = resolveAssetId(asset);
+        var software = inventoryComponentRepository.findByAssetId(assetId).stream().map(InventoryComponent::getPackageName).toList();
+        assertEquals(2, software.size()); assertTrue(software.contains("vllm")); assertTrue(software.contains("triton"));
+        var declared = declaredResourceRepository.findBySourceId(sourceForAsset(tenant, assetId).getId());
+        assertEquals(3, declared.size());
+        assertTrue(declared.stream().anyMatch(r -> r.getName().equals("vllm") && r.getResourceKind() == AiBomDeclaredResourceKind.MODEL));
+        assertTrue(declared.stream().anyMatch(r -> r.getResourceKind() == AiBomDeclaredResourceKind.DATASET));
+        // The mis-typed serving declaration is intentionally excluded from software ingestion.
+        // Automatic classification correction is deferred; a purl alone does not override type.
+    }
 }

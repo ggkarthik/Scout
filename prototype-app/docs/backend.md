@@ -997,3 +997,12 @@ Per-tenant DDL now runs on its own Flyway line, separate from the platform's sta
 ## Operational Metrics
 
 `OperationalMetricsInterceptor` tracks response time (ms) for 23 monitored endpoints. Metrics are exposed for query via `OperationalDashboardController`.
+
+
+## AI-BOM dependency correlation evidence
+
+`AiBomDeclaredResourceController` adds `GET /api/bom/declared-resources/{resourceId}/correlation?history=false&page=0&size=50`. The caller must own the resource and have an existing declared-resource read role. `history=true` returns retired dependency paths/associations; current reads return active support and unresolved gaps. Page size is capped at 100, and component labels are loaded in one batch. Detail responses include the first current evidence page in the additive `correlation` field. Existing `/findings` responses preserve their shape and include only ACTIVE associations, regardless of the independent finding workflow status.
+
+Evidence contains ordered component and relationship IDs, source revision, match method, lifecycle history, uncertainty qualification, and gap remediation. Gaps can exist without a finding/link. The production sweep establishes tenant context before invoking the transaction-owning reconciler through a Spring proxy; locks source then resource, validates captured revision, and holds the source lock until commit. Replacement uploads and document soft deletion acquire the same source lock. A failed unit rolls back and does not prevent other resources or tenants from progressing.
+
+`AI_BOM_CORRELATION_WRITES_ENABLED=true` and `AI_BOM_CORRELATION_RETIREMENT_ENABLED=false` are the defaults. Observe desired versus active associations and backfill/repair subjects before enabling retirement. Set both flags false for rollback without undoing the forward migration or interrupting canonical software correlation. Traversal limits use `AI_BOM_CORRELATION_MAX_DEPTH/NODES/EDGES/PATHS`; see [release evidence](ai-bom-correlation-release-evidence.md) for validation and rollout accounting. Scheduling-state updates cannot overwrite the source's current document/revision.

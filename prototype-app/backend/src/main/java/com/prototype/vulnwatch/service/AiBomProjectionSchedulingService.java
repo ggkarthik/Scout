@@ -46,7 +46,7 @@ public class AiBomProjectionSchedulingService {
         tenantExecution.run(tenant, () -> {
             if (!entitlementService.isEnabled(tenant, TenantEntitlementService.AI_SECURITY)) {
                 source.setState(BomSourceState.HELD_ENTITLEMENT);
-                sourceRepository.save(source);
+                sourceRepository.updateSchedulingState(source.getId(), source.getState());
                 return null;
             }
 
@@ -57,12 +57,12 @@ public class AiBomProjectionSchedulingService {
                             IngestionJobService.STATUS_RUNNING, IngestionJobService.JOB_TYPE_AI_GRID_BOM_PROJECTION);
             if (queuedAndRunning >= maxQueuedPerTenant) {
                 source.setState(BomSourceState.DEFERRED);
-                sourceRepository.save(source);
+                sourceRepository.updateSchedulingState(source.getId(), source.getState());
                 return null;
             }
 
             source.setState(BomSourceState.ACTIVE);
-            sourceRepository.save(source);
+            sourceRepository.updateSchedulingState(source.getId(), source.getState());
             ingestionJobService.enqueueAiGridBomProjectionJob(tenant, source.getId());
             return null;
         });

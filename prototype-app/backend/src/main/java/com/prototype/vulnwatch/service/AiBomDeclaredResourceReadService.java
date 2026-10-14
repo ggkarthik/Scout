@@ -46,6 +46,7 @@ public class AiBomDeclaredResourceReadService {
     private final AiBomProvenanceFactRepository provenanceFactRepository;
     private final AiBomProjectionReceiptRepository projectionReceiptRepository;
     private final FindingQueryService findingQueryService;
+    private final AiBomEvidenceReadService evidenceReadService;
 
     @Transactional(readOnly = true)
     public List<AiBomDeclaredResourceResponse> list(Tenant tenant, AiBomDeploymentState deploymentState) {
@@ -101,7 +102,8 @@ public class AiBomDeclaredResourceReadService {
                         provenance == null ? null : provenance.getBomFormat(),
                         provenance == null ? null : provenance.getSpecVersion(),
                         latestReceipt == null ? null : latestReceipt.getOperation(),
-                        latestReceipt == null ? null : latestReceipt.getCompletedAt())
+                        latestReceipt == null ? null : latestReceipt.getCompletedAt()),
+                evidenceReadService.read(tenant, resourceId, false, 0, 50)
         );
     }
 
@@ -109,12 +111,18 @@ public class AiBomDeclaredResourceReadService {
     public List<FindingResponse> findingsAffecting(Tenant tenant, UUID resourceId) {
         requireOwnedResource(tenant, resourceId);
         List<UUID> findingIds = linkRepository.findByDeclaredResourceId(resourceId).stream()
+                .filter(link -> "ACTIVE".equals(link.getStatus()))
                 .map(AiBomResourceVulnerabilityLink::getFindingId)
                 .distinct()
                 .toList();
         return findingQueryService.listEntitiesByTenantAndIds(tenant, findingIds).stream()
                 .map(findingQueryService::toResponse)
                 .toList();
+    }
+
+    public com.prototype.vulnwatch.dto.AiBomCorrelationEvidenceResponse correlation(
+            Tenant tenant, UUID resourceId, boolean history, int page, int size) {
+        return evidenceReadService.read(tenant, resourceId, history, page, size);
     }
 
     /**

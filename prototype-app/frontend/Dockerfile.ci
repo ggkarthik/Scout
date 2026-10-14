@@ -5,7 +5,8 @@ WORKDIR /workspace
 ARG VITE_TURNSTILE_SITE_KEY
 ENV VITE_TURNSTILE_SITE_KEY=${VITE_TURNSTILE_SITE_KEY}
 COPY package.json package-lock.json ./
-RUN apk add --no-cache 'libssl3>=3.3.7-r0' && npm ci
+# Serialize lifecycle scripts so esbuild validation cannot race npm binary writes.
+RUN apk add --no-cache 'libssl3>=3.3.7-r0' && npm ci --foreground-scripts
 COPY . .
 RUN npm run build
 

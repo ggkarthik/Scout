@@ -251,14 +251,14 @@ public class FindingProjectionQueryService {
                     .toList();
             if (!ids.isEmpty()) {
                 where.append(" AND finding_id IN (SELECT link.finding_id FROM ai_bom_resource_vulnerability_links link"
-                        + " WHERE link.declared_resource_id IN (:affectedAiResourceIds))");
+                        + " WHERE link.status = 'ACTIVE' AND link.declared_resource_id IN (:affectedAiResourceIds))");
                 params.addValue("affectedAiResourceIds", ids);
             }
         }
         if (filter.hasAffectedAiResource() != null) {
             where.append(Boolean.TRUE.equals(filter.hasAffectedAiResource())
-                    ? " AND finding_id IN (SELECT link.finding_id FROM ai_bom_resource_vulnerability_links link)"
-                    : " AND finding_id NOT IN (SELECT link.finding_id FROM ai_bom_resource_vulnerability_links link)");
+                    ? " AND finding_id IN (SELECT link.finding_id FROM ai_bom_resource_vulnerability_links link WHERE link.status = 'ACTIVE')"
+                    : " AND finding_id NOT IN (SELECT link.finding_id FROM ai_bom_resource_vulnerability_links link WHERE link.status = 'ACTIVE')");
         }
     }
 

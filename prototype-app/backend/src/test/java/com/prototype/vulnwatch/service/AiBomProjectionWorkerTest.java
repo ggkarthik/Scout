@@ -112,4 +112,21 @@ class AiBomProjectionWorkerTest {
         verify(schedulingService).reconcileHeldAndDeferredSources(tenant);
         verify(vulnerabilityCorrelationService).reconcileAllForTenant(tenant);
     }
+
+    @Test void aTenantSchedulingFailureDoesNotPreventTheNextTenant() {
+        Tenant next = new Tenant(); next.setId(UUID.randomUUID());
+        when(tenants.listActiveTenants()).thenReturn(List.of(tenant, next));
+        doThrow(new IllegalStateException("failed tenant")).when(schedulingService).reconcileHeldAndDeferredSources(tenant);
+        worker.reconcile();
+        verify(schedulingService).reconcileHeldAndDeferredSources(next);
+        verify(vulnerabilityCorrelationService).reconcileAllForTenant(next);
+    }
+
+    @Test void aTenantCorrelationFailureDoesNotPreventTheNextTenant() {
+        Tenant next = new Tenant(); next.setId(UUID.randomUUID());
+        when(tenants.listActiveTenants()).thenReturn(List.of(tenant, next));
+        doThrow(new IllegalStateException("failed correlation")).when(vulnerabilityCorrelationService).reconcileAllForTenant(tenant);
+        worker.reconcile();
+        verify(vulnerabilityCorrelationService).reconcileAllForTenant(next);
+    }
 }

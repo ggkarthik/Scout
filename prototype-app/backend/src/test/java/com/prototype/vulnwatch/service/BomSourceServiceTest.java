@@ -60,7 +60,7 @@ class BomSourceServiceTest {
         BomSource second = service.resolve(tenant, request(BomType.SBOM, null, null, null), ADMIN);
 
         assertNotSame(first, second, "an unnamed upload must not adopt an existing source");
-        verify(sourceRepository, never()).findBySourceKey(any());
+        verify(sourceRepository, never()).findIdBySourceKey(any());
     }
 
     // Without this, the scheduled GitHub sync would create a new source on every run.
@@ -70,8 +70,9 @@ class BomSourceServiceTest {
         existing.setId(UUID.randomUUID());
         existing.setBomType(BomType.SBOM);
         existing.setSourceKey("github-repo:SBOM:acme/widget");
-        when(sourceRepository.findBySourceKey("github-repo:SBOM:acme/widget"))
-                .thenReturn(Optional.of(existing));
+        when(sourceRepository.findForUpdate(existing.getId())).thenReturn(Optional.of(existing));
+        when(sourceRepository.findIdBySourceKey("github-repo:SBOM:acme/widget"))
+                .thenReturn(Optional.of(existing.getId()));
 
         BomSource resolved = service.resolve(
                 tenant, request(BomType.SBOM, null, "github-repo:SBOM:acme/widget", null), ADMIN);
@@ -84,7 +85,7 @@ class BomSourceServiceTest {
         BomSource existing = new BomSource();
         existing.setId(UUID.randomUUID());
         existing.setBomType(BomType.SBOM);
-        when(sourceRepository.findById(existing.getId())).thenReturn(Optional.of(existing));
+        when(sourceRepository.findForUpdate(existing.getId())).thenReturn(Optional.of(existing));
 
         assertSame(existing,
                 service.resolve(tenant, request(BomType.SBOM, existing.getId(), null, null), ADMIN));
@@ -95,7 +96,7 @@ class BomSourceServiceTest {
         BomSource existing = new BomSource();
         existing.setId(UUID.randomUUID());
         existing.setBomType(BomType.SBOM);
-        when(sourceRepository.findById(existing.getId())).thenReturn(Optional.of(existing));
+        when(sourceRepository.findForUpdate(existing.getId())).thenReturn(Optional.of(existing));
 
         IOException error = assertThrows(IOException.class, () ->
                 service.resolve(tenant, request(BomType.AI_BOM, existing.getId(), null, null), ADMIN));
@@ -105,7 +106,7 @@ class BomSourceServiceTest {
     @Test
     void unknownExplicitSourceIsRejected() {
         UUID missing = UUID.randomUUID();
-        when(sourceRepository.findById(missing)).thenReturn(Optional.empty());
+        when(sourceRepository.findForUpdate(missing)).thenReturn(Optional.empty());
 
         assertThrows(IOException.class, () ->
                 service.resolve(tenant, request(BomType.SBOM, missing, null, null), ADMIN));
@@ -146,7 +147,7 @@ class BomSourceServiceTest {
         existing.setId(UUID.randomUUID());
         existing.setBomType(BomType.SBOM);
         existing.setCompleteness(BomSourceCompleteness.COMPLETE_ASSET_SOFTWARE);
-        when(sourceRepository.findById(existing.getId())).thenReturn(Optional.of(existing));
+        when(sourceRepository.findForUpdate(existing.getId())).thenReturn(Optional.of(existing));
 
         BomSource resolved =
                 service.resolve(tenant, request(BomType.SBOM, existing.getId(), null, null), ADMIN);
@@ -161,6 +162,7 @@ class BomSourceServiceTest {
         source.setId(UUID.randomUUID());
         UUID bomId = UUID.randomUUID();
 
+        when(sourceRepository.findForUpdate(source.getId())).thenReturn(Optional.of(source));
         service.recordCurrentVersion(source, bomId);
 
         assertEquals(bomId, source.getCurrentBomId());

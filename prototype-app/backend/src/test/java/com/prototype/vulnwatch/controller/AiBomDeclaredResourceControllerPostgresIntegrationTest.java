@@ -130,23 +130,9 @@ class AiBomDeclaredResourceControllerPostgresIntegrationTest {
     }
 
     private Finding seedOpenVulnerabilityFindingAffecting(Tenant tenant, Asset asset, String libraryName, String libraryVersion) {
-        SbomUpload sbom = new SbomUpload();
-        sbom.setTenant(tenant);
-        sbom.setAsset(asset);
-        sbom.setFormat(SbomFormat.CYCLONEDX);
-        sbom.setOriginalFilename("declared-resource-controller-it.json");
-        sbom = sbomUploadRepository.save(sbom);
-
-        InventoryComponent component = new InventoryComponent();
-        component.setTenant(tenant);
-        component.setAsset(asset);
-        component.setSbomUpload(sbom);
-        component.setPackageName(libraryName);
-        component.setVersion(libraryVersion);
-        component.setEcosystem("pypi");
-        component.setPurl("pkg:pypi/" + libraryName + "@" + libraryVersion);
-        component.setComponentStatus(InventoryComponentStatus.ACTIVE);
-        component = inventoryComponentRepository.save(component);
+        InventoryComponent component = inventoryComponentRepository.findByAssetId(asset.getId()).stream()
+                .filter(c -> libraryName.equals(c.getPackageName()) && libraryVersion.equals(c.getVersion())).findFirst()
+                .orElseGet(() -> { throw new AssertionError("software component not ingested"); });
 
         Vulnerability vulnerability = new Vulnerability();
         vulnerability.setExternalId("CVE-2099-" + SEQUENCE.incrementAndGet());
