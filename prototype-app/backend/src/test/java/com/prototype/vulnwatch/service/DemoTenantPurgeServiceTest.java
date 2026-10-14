@@ -130,7 +130,7 @@ class DemoTenantPurgeServiceTest {
         verify(tenantSchemaService).dropTenantSchema("tenant_customer_one");
         verify(resetJdbcTemplate).update("delete from platform.tenant_support_grants where tenant_id = ?", tenant.getId());
         verify(resetJdbcTemplate).update("delete from platform.tenant_memberships where tenant_id = ?", tenant.getId());
-        verify(resetJdbcTemplate).update("update tenant_default.demo_requests set tenant_id = null where tenant_id = ?", tenant.getId());
+        verify(resetJdbcTemplate).execute(any(org.springframework.jdbc.core.ConnectionCallback.class));
         verify(resetJdbcTemplate).update("delete from platform.tenants where id = ?", tenant.getId());
         verify(appUserRepository).save(user);
         verify(auditEventService).record("tenant.deleted", "tenant", tenant.getId().toString(), null);

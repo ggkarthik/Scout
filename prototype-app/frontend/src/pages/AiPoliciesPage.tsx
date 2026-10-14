@@ -1,3 +1,5 @@
+import { assessmentMessage, assessmentPending, invalidateAiAssessmentQueries } from '../features/ai-security/assessment';
+import { useAssessmentUpdates } from '../features/ai-security/useAssessmentUpdates';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -92,6 +94,7 @@ function userReadableBlockers(blockers: string[]): string[] {
 }
 
 export function AiPoliciesPage() {
+  useAssessmentUpdates();
   const actor = useActor();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -112,8 +115,7 @@ export function AiPoliciesPage() {
     mutationFn: ({ id, selection }: { id: string; selection: AiGridPolicySelection }) =>
       api.updateAiGridPolicySelection(id, selection),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['ai-grid-policies'] });
-      void queryClient.invalidateQueries({ queryKey: ['ai-security-policies'] });
+      void invalidateAiAssessmentQueries(queryClient);
     },
   });
   const canManage = hasRole(actor, 'TENANT_ADMIN') || hasRole(actor, 'PLATFORM_OWNER');
@@ -122,10 +124,20 @@ export function AiPoliciesPage() {
     mutationFn: () => api.executeAiGridPolicies(Array.from(selectedPolicyIds)),
     onSuccess: () => {
       setSelectedPolicyIds(new Set());
-      void queryClient.invalidateQueries({ queryKey: ['ai-grid-policies'] });
-      void queryClient.invalidateQueries({ queryKey: ['ai-security-policies'] });
+      void invalidateAiAssessmentQueries(queryClient);
     },
   });
+
+  const executionStatus = useQuery({
+    queryKey: ['ai-assessment-status', executeMutation.data?.runId],
+    queryFn: () => api.getAiAssessmentStatus(executeMutation.data!.runId),
+    enabled: !!executeMutation.data?.runId && assessmentPending(executeMutation.data),
+    refetchInterval: (query) => assessmentPending(query.state.data ?? executeMutation.data) ? 5000 : false,
+  });
+  const executionOutcome = executionStatus.data ?? executeMutation.data;
+  React.useEffect(() => {
+    if (executionStatus.data && !assessmentPending(executionStatus.data)) void invalidateAiAssessmentQueries(queryClient);
+  }, [executionStatus.data, queryClient]);
 
   const policies = React.useMemo(() => policiesQuery.data ?? [], [policiesQuery.data]);
   const severityOptions = React.useMemo(() => (
@@ -214,7 +226,7 @@ export function AiPoliciesPage() {
             </button>
           </div>
           {executeMutation.isError ? <div className="notice error">Selected policies could not be assessed. Please try again.</div> : null}
-          {executeMutation.data ? <div className="notice success">Assessment completed for {executeMutation.data.evaluatedPolicies} selected {executeMutation.data.evaluatedPolicies === 1 ? 'policy' : 'policies'}.</div> : null}
+          {executionOutcome ? <div role="status" className={`notice ${assessmentPending(executionOutcome) ? '' : executionOutcome.assessmentStatus === 'COMPLETE' ? 'success' : ''}`}>{assessmentMessage(executionOutcome)}</div> : null}
           {selectedPolicyIds.size > 0 ? <div className="ai-policy-selection-status">{selectedPolicyIds.size} {selectedPolicyIds.size === 1 ? 'policy' : 'policies'} selected for assessment.</div> : null}
           <div className="panel ai-security-table-panel">
             {visiblePolicies.length === 0 ? (

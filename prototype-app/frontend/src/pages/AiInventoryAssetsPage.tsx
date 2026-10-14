@@ -1,3 +1,4 @@
+import { shouldPollAiRuns } from '../features/ai-security/assessment';
 import { useQuery } from '@tanstack/react-query';
 import React from 'react';
 import { Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
@@ -16,12 +17,7 @@ const CATEGORIZED_NATIVE_KINDS = new Set(AI_ARTIFACT_CATEGORIES.flatMap((categor
 const DEDICATED_NATIVE_KINDS = combinedNativeKindFilterValue([...CATEGORIZED_NATIVE_KINDS, ...AI_AGENT_VERSION_KINDS]);
 const DEDICATED_ARTIFACT_TYPES = 'DATA_STORE,MCP_SERVER';
 
-function shouldPollAiRuns(runs: Array<{ status: string }> | undefined): boolean {
-  return (runs ?? []).some((run) => {
-    const status = run.status.trim().toUpperCase();
-    return status === 'RUNNING' || status === 'STARTED' || status === 'QUEUED';
-  });
-}
+
 
 export function AiInventoryAssetsPage() {
   const navigate = useNavigate();
@@ -54,7 +50,7 @@ export function AiInventoryAssetsPage() {
   const runsQuery = useQuery({
     queryKey: ['ai-security-runs'],
     queryFn: () => api.listAiSecurityRuns(),
-    refetchInterval: (query) => shouldPollAiRuns(query.state.data as Array<{ status: string }> | undefined)
+    refetchInterval: (query) => shouldPollAiRuns(query.state.data as Array<{ status: string; assessmentStatus?: 'PENDING' | 'RUNNING' | 'COMPLETE' | 'PARTIAL' | 'FAILED' }> | undefined)
       ? RUN_QUEUE_REFRESH_INTERVAL_MS
       : false,
   });

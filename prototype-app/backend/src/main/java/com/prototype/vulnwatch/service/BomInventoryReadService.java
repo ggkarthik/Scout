@@ -60,6 +60,7 @@ import org.springframework.web.server.ResponseStatusException;
 public class BomInventoryReadService {
 
     private final BomIngestionRecordRepository bomRecordRepository;
+    private final com.prototype.vulnwatch.repo.BomSourceRepository bomSourceRepository;
     private final BomComponentRepository bomComponentRepository;
     private final BomComponentEvidenceRepository bomComponentEvidenceRepository;
     private final BomComponentVulnerabilityLinkRepository bomComponentVulnerabilityLinkRepository;
@@ -75,6 +76,7 @@ public class BomInventoryReadService {
 
     public BomInventoryReadService(
             BomIngestionRecordRepository bomRecordRepository,
+            com.prototype.vulnwatch.repo.BomSourceRepository bomSourceRepository,
             BomComponentRepository bomComponentRepository,
             BomComponentEvidenceRepository bomComponentEvidenceRepository,
             BomComponentVulnerabilityLinkRepository bomComponentVulnerabilityLinkRepository,
@@ -89,6 +91,7 @@ public class BomInventoryReadService {
             com.prototype.vulnwatch.service.cbom.CbomIngestionService cbomIngestionService
     ) {
         this.bomRecordRepository = bomRecordRepository;
+        this.bomSourceRepository = bomSourceRepository;
         this.bomComponentRepository = bomComponentRepository;
         this.bomComponentEvidenceRepository = bomComponentEvidenceRepository;
         this.bomComponentVulnerabilityLinkRepository = bomComponentVulnerabilityLinkRepository;
@@ -298,6 +301,14 @@ public class BomInventoryReadService {
         BomIngestionRecord record = bomRecordRepository.findById(bomId)
                 .filter(r -> r.getTenant().getId().equals(tenant.getId()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "BOM record not found"));
+        if (record.getSourceId() != null) {
+            var source = bomSourceRepository.findForUpdate(record.getSourceId()).orElseThrow();
+            // Deletion invalidates any captured reconciliation revision, under the upload lock.
+            if (bomId.equals(source.getCurrentBomId())) {
+                source.setRevision(source.getRevision() + 1);
+                bomSourceRepository.save(source);
+            }
+        }
         bomComponentRepository.softDeleteByBomId(bomId);
         // Withdraw the evidence this document carried, without inferring that anything is
         // absent. Finding status deliberately survives: deleting the document that reported a

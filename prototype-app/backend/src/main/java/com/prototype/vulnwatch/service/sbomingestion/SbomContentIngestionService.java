@@ -150,9 +150,9 @@ public class SbomContentIngestionService {
             SbomFormat format = sbomParserService.detectFormat(content);
             List<ParsedComponent> components = sbomParserService.parse(content);
 
-            // Models, datasets and cryptographic assets are not software: they have no CPE and
-            // no CVEs, so correlating them produces false findings against artifacts that were
-            // never packages. They belong to the declared AI inventory and the CBOM evaluator
+            // Declared model, dataset and cryptographic types stay outside this software
+            // inventory pipeline. Direct artifact advisory ingestion is separate; this
+            // boundary does not imply that those artifacts cannot have vulnerabilities. They belong to the declared AI inventory and the CBOM evaluator
             // respectively. This is keyed on each component's own type, so an AI-BOM's software
             // dependencies still enter inventory and still get correlated.
             List<ParsedComponent> softwareComponents = components.stream()

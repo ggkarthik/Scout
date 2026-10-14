@@ -13,12 +13,22 @@ public class AiGridReevaluationService {
     private final TenantSchemaExecutionService tenantExecution;
     private final AiGridApiService aiGrid;
 
+    private org.springframework.beans.factory.ObjectProvider<AiGridAssessmentWorker> assessmentWorker;
+    @org.springframework.beans.factory.annotation.Autowired
+    void configureAssessmentWorker(org.springframework.beans.factory.ObjectProvider<AiGridAssessmentWorker> worker) {
+        this.assessmentWorker = worker;
+    }
+
     public AiGridReevaluationService(NamedParameterJdbcTemplate jdbc,
                                      TenantSchemaExecutionService tenantExecution,
                                      AiGridApiService aiGrid) {
         this.jdbc = jdbc;
         this.tenantExecution = tenantExecution;
         this.aiGrid = aiGrid;
+    }
+
+    public void preflight(Tenant tenant, String policyId, java.util.Map<String, Object> proposedParameters) {
+        aiGrid.preflight(tenant, policyId, proposedParameters);
     }
 
     public void reevaluatePolicy(Tenant tenant, String policyId) {
@@ -29,7 +39,7 @@ public class AiGridReevaluationService {
                  limit 1
                 """, rs -> rs.next() ? rs.getObject("run_id", UUID.class) : null));
         if (latestRun != null) {
-            aiGrid.replay(tenant, latestRun);
+            assessmentWorker.getObject().enqueue(tenant, latestRun, java.util.Set.of(policyId));
         }
     }
 }

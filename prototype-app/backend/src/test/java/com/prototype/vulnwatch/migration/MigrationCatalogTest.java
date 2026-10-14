@@ -29,7 +29,7 @@ class MigrationCatalogTest {
         PackagedMigrationCatalog.Targets targets = PackagedMigrationCatalog.resolve();
 
         assertEquals(1, targets.platformTarget());
-        assertEquals(1, targets.tenantTarget());
+        assertEquals(2, targets.tenantTarget());
     }
 
     @Test
@@ -86,12 +86,12 @@ class MigrationCatalogTest {
     }
 
     @Test
-    void developmentCatalogsContainOnlyTheirCompleteV1Baseline() throws IOException {
+    void developmentCatalogsPreserveV1AndIncludeForwardTenantMigrations() throws IOException {
         try (var platform = Files.list(MIGRATION_DIR); var tenant = Files.list(TENANT_MIGRATION_DIR)) {
             assertEquals(List.of("V1__platform_schema.sql"), platform
                     .filter(path -> path.toString().endsWith(".sql"))
                     .map(path -> path.getFileName().toString()).sorted().toList());
-            assertEquals(List.of("V1__tenant_schema.sql"), tenant
+            assertEquals(List.of("V1__tenant_schema.sql", "V2__ai_bom_correlation_evidence.sql"), tenant
                     .filter(path -> path.toString().endsWith(".sql"))
                     .map(path -> path.getFileName().toString()).sorted().toList());
         }

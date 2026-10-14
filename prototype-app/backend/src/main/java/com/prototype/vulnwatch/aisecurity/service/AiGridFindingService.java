@@ -119,10 +119,9 @@ public class AiGridFindingService {
         if (finding == null) {
             finding = new Finding();
             finding.setTenant(tenant);
-            finding.setFindingKind("EXECUTION".equals(assessment.subjectType()) ? "AI_RUNTIME" : "AI_POSTURE");
+            finding.setFindingKind("AI_POSTURE");
             finding.setFingerprint(assessment.fingerprint());
-            finding.setWorkflowClass("EXECUTION".equals(assessment.subjectType())
-                    ? "RUNTIME_FINDING" : "POSTURE_FINDING");
+            finding.setWorkflowClass("POSTURE_FINDING");
             finding.setStatus(FindingStatus.OPEN);
             finding.setDecisionState(FindingDecisionState.AFFECTED);
             finding.setCreationSource(FindingCreationSource.AI_SECURITY);

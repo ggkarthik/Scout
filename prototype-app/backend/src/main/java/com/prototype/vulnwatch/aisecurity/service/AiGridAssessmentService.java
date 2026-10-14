@@ -57,16 +57,167 @@ public class AiGridAssessmentService {
         this.graphEvidence = graphEvidence;
     }
 
+    private org.springframework.transaction.support.TransactionTemplate isolated;
+    private com.prototype.vulnwatch.service.AuditEventService audit;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    void configureIsolation(org.springframework.transaction.PlatformTransactionManager manager,
+                            com.prototype.vulnwatch.service.AuditEventService audit) {
+        isolated = new org.springframework.transaction.support.TransactionTemplate(manager);
+        isolated.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.audit = audit;
+    }
+
+    public AssessmentSummary evaluateCurrent(Tenant tenant, UUID runId, Set<String> policyIds, Runnable deliveryGuard) {
+        return evaluateIsolated(tenant, runId, policyIds, true, deliveryGuard);
+    }
+
+    private AssessmentSummary evaluateIsolated(Tenant tenant, UUID runId, Set<String> filter,
+                                               boolean current, Runnable deliveryGuard) {
+        List<String> policyIds = jdbc.query("select policy_id from " + AiGridPolicyResolution.versions(":tenantId")
+                + " p where policy_id not in ('AI_GUARDRAIL_CONFIGURATION_CHANGED_AFTER_APPROVAL',"
+                + "'AI_ARTIFACT_DIGEST_CHANGED_AFTER_APPROVAL') order by policy_id",
+                Map.of("tenantId", tenant.getId()), (rs, row) -> rs.getString(1));
+        int subjects = 0;
+        int evaluated = 0;
+        List<PolicyFailure> failures = new ArrayList<>();
+        for (String policyId : policyIds) {
+            if (filter != null && !filter.isEmpty() && !filter.contains(policyId)) continue;
+            try {
+                // Provider/type filtering happens before creating a policy persistence context.
+                Integer applicable = jdbc.queryForObject("""
+                        select count(*) from %s m join ai_grid_snapshot_bodies b on b.id=m.body_id
+                          join ai_security_artifacts a on a.id=m.artifact_id
+                          join %s p on p.policy_id=:policyId
+                         where (:current or m.run_id=:runId)
+                           and (p.provider is null or p.provider in ('','ANY','MULTI_CLOUD') or p.provider=a.provider)
+                           and (jsonb_array_length(p.artifact_types_json)=0
+                                or jsonb_exists(p.artifact_types_json,b.content_json->>'artifactType'))
+                           and (jsonb_array_length(p.native_kinds_json)=0
+                                or jsonb_exists(p.native_kinds_json,b.content_json->>'nativeKind'))
+                        """.formatted(current ? "(" + AiGridCurrentEvidence.MANIFESTS + ")" : "ai_grid_snapshot_manifests",
+                        AiGridPolicyResolution.versions(":tenantId")),
+                        new MapSqlParameterSource().addValue("tenantId", tenant.getId()).addValue("policyId", policyId)
+                                .addValue("runId", runId).addValue("current", current), Integer.class);
+                if (applicable == null || applicable == 0) continue;
+                Integer count = isolated.execute(status -> {
+                    lockTenant(tenant);
+                    deliveryGuard.run();
+                    return evaluatePolicyRun(tenant, runId, Set.of(policyId), current);
+                });
+                subjects += count == null ? 0 : count;
+                evaluated++;
+                if (current) isolated.executeWithoutResult(status -> {
+                    lockTenant(tenant);
+                    deliveryGuard.run();
+                    jdbc.update("delete from ai_grid_assessments where policy_id=:policyId and subject_type='POLICY' and reason_code='POLICY_EVALUATION_ERROR'",Map.of("policyId",policyId));
+                    jdbc.update("update ai_grid_coverage_gaps set status='RESOLVED',resolved_at=now() "
+                            + "where policy_id=:policyId and artifact_id is null and state='POLICY_EVALUATION_ERROR'",
+                            Map.of("policyId", policyId));
+                });
+            } catch (RuntimeException error) {
+                if (error instanceof AiGridAssessmentWorker.LeaseLostException) throw error;
+                PolicyFailure failure = PolicyFailure.from(policyId, error);
+                failures.add(failure);
+                isolated.executeWithoutResult(status -> {
+                    lockTenant(tenant);
+                    deliveryGuard.run();
+                    if (current) recordFailure(tenant, runId, failure);
+                    else audit.recordExplicitActor(tenant.getId(),"ai-grid-assessment","SYSTEM","ai_grid.policy.historical_evaluation_failed",
+                            "ai_security_policy",policyId,json(failure),"FAILURE");
+                });
+            }
+        }
+        return new AssessmentSummary(evaluated, subjects, List.copyOf(failures));
+    }
+
+    void lockTenant(Tenant tenant) {
+        jdbc.query("select pg_advisory_xact_lock(hashtextextended(cast(:tenantId as text),0))",
+                Map.of("tenantId", tenant.getId()), rs -> null);
+    }
+
+    void recordFailure(Tenant tenant, UUID runId, PolicyFailure failure) {
+        String fingerprint = sha256(tenant.getId() + "|POLICY_EVALUATION_ERROR|" + failure.policyId());
+        jdbc.update("""
+                insert into ai_grid_coverage_gaps(id,tenant_id,fingerprint,run_id,policy_id,state,reason,required_action)
+                values (:id,:tenantId,:fingerprint,:runId,:policyId,'POLICY_EVALUATION_ERROR',:reason,
+                        'Repair the policy configuration or retry the assessment request')
+                on conflict(tenant_id,fingerprint) do update set run_id=excluded.run_id,status='OPEN',
+                    reason=excluded.reason,last_observed_at=now(),resolved_at=null
+                """, new MapSqlParameterSource().addValue("id", UUID.randomUUID()).addValue("tenantId", tenant.getId())
+                .addValue("fingerprint", fingerprint).addValue("runId", runId).addValue("policyId", failure.policyId())
+                .addValue("reason", failure.summary()));
+        jdbc.update("""
+                insert into ai_grid_assessments(id,tenant_id,run_id,policy_id,policy_version,subject_type,subject_id,
+                    selection,applicability,evidence_readiness,decision,reason_code,missing_evidence_json,
+                    input_facts_json,fingerprint,evaluation_as_of,decision_fingerprint)
+                select :id,:tenantId,:runId,p.policy_id,p.version,'POLICY',:subjectId,
+                    case when s.configuration_source='TENANT_OVERRIDE' then s.selection else p.resolved_default_selection end,
+                    'APPLICABLE','COLLECTION_ERROR','ERROR','POLICY_EVALUATION_ERROR','["POLICY_EVALUATION_ERROR"]'::jsonb,
+                    '{}'::jsonb,:fingerprint,now(),:fingerprint
+                  from %s p left join ai_grid_policy_selections s on s.policy_id=p.policy_id where p.policy_id=:policyId
+                on conflict(tenant_id,run_id,policy_id,subject_type,subject_id,fingerprint) do update set
+                    decision='ERROR',reason_code='POLICY_EVALUATION_ERROR',evaluated_at=now(),evaluation_as_of=now()
+                """.formatted(AiGridPolicyResolution.versions(":tenantId")),
+                new MapSqlParameterSource().addValue("id",UUID.randomUUID()).addValue("tenantId",tenant.getId())
+                .addValue("runId",runId).addValue("policyId",failure.policyId()).addValue("fingerprint",fingerprint)
+                .addValue("subjectId",UUID.nameUUIDFromBytes(failure.policyId().getBytes(StandardCharsets.UTF_8))));
+        audit.recordExplicitActor(tenant.getId(), "ai-grid-assessment", "SYSTEM", "ai_grid.policy.evaluation_failed",
+                "ai_security_policy", failure.policyId(), json(failure), "FAILURE");
+    }
+
+    void withdrawPolicy(Tenant tenant,String policyId) { findings.closeForPolicy(tenant,policyId); }
+
+    public void preflight(Tenant tenant, String policyId, Map<String, Object> proposedParameters) {
+        try {
+            Policy policy = loadPublishedPolicies(tenant, Set.of(policyId)).stream().findFirst().orElseThrow(
+                    () -> new IllegalArgumentException("Distributed policy is unavailable"));
+            if (!"CORRELATION_PATH".equals(policy.evaluationMode())) {
+                predicates.validate(policy.predicate());
+                if ("DIRECT_RELATIONSHIP".equals(policy.evaluationMode())) {
+                    predicates.validate(directDefinition(policy).sourcePredicate());
+                    predicates.validate(directDefinition(policy).targetPredicate());
+                }
+                Map<String,Object> overrides=new LinkedHashMap<>(loadParameters(Set.of(policyId)).getOrDefault(policyId,Map.of()));
+                if (proposedParameters!=null) overrides.putAll(proposedParameters);
+                Map<String,Object> parameters=effectiveParameters(policy,overrides);
+                predicates.validateParameters(policy.predicate(), parameters);
+            }
+        } catch (IllegalArgumentException error) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST, "Policy configuration cannot evaluate: " + error.getMessage());
+        }
+    }
+
+    public record PolicyFailure(String policyId, String code, String summary, boolean retryable) {
+        static PolicyFailure from(String policyId, RuntimeException error) {
+            String code = AiGridAssessmentWorker.retryable(error) ? "TRANSIENT_DATABASE_FAILURE" :
+                    error instanceof IllegalArgumentException ? "INVALID_POLICY_CONFIGURATION" : "POLICY_EVALUATION_ERROR";
+            return new PolicyFailure(policyId, code, "Policy evaluation failed (" + code + ")", AiGridAssessmentWorker.retryable(error));
+        }
+    }
+    public record AssessmentSummary(int evaluatedPolicies, int assessedSubjects, List<PolicyFailure> failures) {
+        public int failedPolicies() { return failures.size(); }
+        public String assessmentStatus() {
+            return failures.isEmpty() ? "COMPLETE" : evaluatedPolicies > 0 ? "PARTIAL" : "FAILED";
+        }
+    }
+
     public void evaluateRun(Tenant tenant, UUID runId) {
         evaluateRun(tenant, runId, Set.of());
     }
 
-    /** Evaluate only the requested published policies when a non-empty filter is supplied. */
+    /** Historical replay retains captured time and cannot reconcile current findings. */
     public int evaluateRun(Tenant tenant, UUID runId, Set<String> policyIds) {
-        List<Policy> policies = loadPublishedPolicies(tenant);
-        if (policyIds != null && !policyIds.isEmpty()) {
-            policies = policies.stream().filter(policy -> policyIds.contains(policy.id())).toList();
-        }
+        return evaluateIsolated(tenant, runId, policyIds, true, () -> {}).assessedSubjects();
+    }
+
+    public int evaluateHistorical(Tenant tenant, UUID runId) {
+        return evaluateIsolated(tenant,runId,Set.of(),false,() -> {}).assessedSubjects();
+    }
+
+    private int evaluatePolicyRun(Tenant tenant, UUID runId, Set<String> policyIds, boolean current) {
+        List<Policy> policies = loadPublishedPolicies(tenant, policyIds);
         // Runtime policies have an EXECUTION subject and read the runtime metadata tables, not
         // snapshot facts. Evaluating them in the artifact loop would bind them to the wrong
         // subject and run their predicate through the leaf fact engine.
@@ -75,11 +226,11 @@ public class AiGridAssessmentService {
                 // Their current-state evaluator owns reconciliation and stable finding identity.
                 .filter(policy -> !"AI_GUARDRAIL_CONFIGURATION_CHANGED_AFTER_APPROVAL".equals(policy.id())
                         && !"AI_ARTIFACT_DIGEST_CHANGED_AFTER_APPROVAL".equals(policy.id())).toList();
-        Map<String, ScopeConfig> scopes = loadScopes();
+        Map<String, ScopeConfig> scopes = loadScopes(policyIds);
         Map<String, Map<String, String>> overrides = loadOverrides();
-        Map<String, Map<String, Object>> parameters = loadParameters();
+        Map<String, Map<String, Object>> parameters = loadParameters(policyIds);
         Map<String, String> selections = loadSelections();
-        Map<AiGridCapabilityService.CapabilityKey, AiGridCapabilityService.CapabilityState> capabilityIndex = capabilities.forRun(runId);
+        Map<AiGridCapabilityService.CapabilityKey, AiGridCapabilityService.CapabilityState> capabilityIndex = current ? capabilities.latestIndex() : capabilities.forRun(runId);
         List<Artifact> artifacts = jdbc.query("""
                 select distinct on (m.artifact_id)
                        m.artifact_id id,
@@ -89,46 +240,47 @@ public class AiGridAssessmentService {
                        b.content_json->>'region' region,
                        a.provider,
                        a.name,
-                       m.id manifest_id
-                  from ai_grid_snapshot_manifests m
+                       m.id manifest_id, m.run_id source_run_id
+                  from %s m
                   join ai_grid_snapshot_bodies b on b.id = m.body_id
                   join ai_security_artifacts a on a.id = m.artifact_id
-                 where m.run_id = :runId
+                 where (:current or m.run_id = :runId)
                    and (:allTypes or b.content_json->>'artifactType' in (:types))
                  order by m.artifact_id, m.observed_at desc, m.id
-                """, new MapSqlParameterSource().addValue("runId", runId)
+                """.formatted(current ? "(" + AiGridCurrentEvidence.MANIFESTS + ")" : "ai_grid_snapshot_manifests"), new MapSqlParameterSource().addValue("runId", runId).addValue("current", current)
                 .addValue("allTypes", policies.stream().anyMatch(policy -> policy.artifactTypes().isEmpty()))
                 .addValue("types", policies.stream().flatMap(policy -> policy.artifactTypes().stream()).distinct().toList().isEmpty()
                         ? List.of("__NO_ARTIFACT_TYPE__")
                         : policies.stream().flatMap(policy -> policy.artifactTypes().stream()).distinct().toList()), (rs, n) -> new Artifact(rs.getObject("id", UUID.class),
                 rs.getString("artifact_type"), rs.getString("native_kind"), rs.getString("account_id"), rs.getString("region"),
-                rs.getString("provider"), rs.getString("name"), rs.getObject("manifest_id", UUID.class)));
-        if (artifacts.isEmpty()) return policies.size();
-        Instant evaluationAsOf = evaluationAsOf(runId);
-        RunEvaluationCache cache = new RunEvaluationCache(runId);
+                rs.getString("provider"), rs.getString("name"), rs.getObject("manifest_id", UUID.class), rs.getObject("source_run_id", UUID.class)));
+        if (artifacts.isEmpty()) return 0;
+        Instant evaluationAsOf = current ? Instant.now() : evaluationAsOf(runId);
+        RunEvaluationCache cache = new RunEvaluationCache(runId, current);
         boolean findingChanged = false;
+        int assessedSubjects = 0;
         for (Policy policy : policies) {
             // Correlation-path policies are evaluated by the graph evidence resolver and
             // intentionally have no artifact predicate. Only artifact-fact policies require
             // validation by the leaf predicate engine.
             if (!"CORRELATION_PATH".equals(policy.evaluationMode())) {
-                predicates.validate(policy.predicate());
+                predicates.validateParameters(policy.predicate(), effectiveParameters(policy,parameters.getOrDefault(policy.id(),Map.of())));
             }
             for (Artifact artifact : artifacts) {
                 if (!providerMatches(policy.provider(), artifact.provider())) continue;
                 if (!policy.artifactTypes().isEmpty() && !policy.artifactTypes().contains(artifact.artifactType())) continue;
                 if (!policy.nativeKinds().isEmpty() && !policy.nativeKinds().contains(artifact.nativeKind())) continue;
-                Map<String, Object> effectiveParameters = new LinkedHashMap<>(policy.parameterDefaults());
-                effectiveParameters.putAll(parameters.getOrDefault(policy.id(), Map.of()));
-                findingChanged |= evaluateSubject(tenant, runId, evaluationAsOf, policy, artifact,
+                Map<String, Object> effectiveParameters = effectiveParameters(policy,parameters.getOrDefault(policy.id(),Map.of()));
+                assessedSubjects++;
+                findingChanged |= evaluateSubject(tenant, current ? artifact.sourceRunId() : runId, evaluationAsOf, policy, artifact,
                         scopes.getOrDefault(policy.id(), ScopeConfig.all()),
                         selections.getOrDefault(policy.id(), policy.defaultSelection()), cache,
                         overrides.getOrDefault(policy.id(), Map.of()),
                         effectiveParameters, capabilityIndex);
             }
         }
-        if (findingChanged) findings.refreshProjectionAfterCommit(tenant);
-        return policies.size();
+
+        return assessedSubjects;
     }
 
     private boolean evaluateSubject(Tenant tenant, UUID runId, Instant evaluationAsOf,
@@ -144,17 +296,17 @@ public class AiGridAssessmentService {
             AiGridFindingService.AssessmentResult result = persist(tenant, runId, evaluationAsOf,
                     policy, artifact, "DISABLED", "NOT_APPLICABLE", "READY", "NO_DECISION",
                     "OUT_OF_SCOPE", List.of(), Map.of());
-            return findings.reconcile(tenant, result);
+            return cache.current && !"SUPERSEDED".equals(result.reasonCode()) && findings.reconcile(tenant, result);
         }
         List<String> capabilityGaps = capabilities.gaps(capabilityIndex, artifact.provider(), artifact.accountId(),
-                artifact.region(), policy.requiredCapabilities());
+                artifact.region(), policy.requiredCapabilities(),evaluationAsOf);
         if (!capabilityGaps.isEmpty()) {
             AiGridFindingService.AssessmentResult result = persist(tenant, runId, evaluationAsOf,
                     policy, artifact, selection, "APPLICABLE", "CAPABILITY_UNAVAILABLE", "NO_DECISION",
                     "CAPABILITY_UNAVAILABLE", capabilityGaps, Map.of());
-            upsertGap(tenant, runId, artifact.id(), policy.id(), "CAPABILITY_UNAVAILABLE", capabilityGaps,
+            if (cache.current) upsertGap(tenant, runId, artifact.id(), policy.id(), "CAPABILITY_UNAVAILABLE", capabilityGaps,
                     capabilities.remediation(policy.requiredCapabilities()));
-            return findings.reconcile(tenant, result);
+            return cache.current && !"SUPERSEDED".equals(result.reasonCode()) && findings.reconcile(tenant, result);
         }
         List<String> requiredScopes = new ArrayList<>(policy.requiredFamilies());
         if ("NATIVE_KIND_PLUS_STATIC".equals(policy.scopeResolution())) {
@@ -168,8 +320,25 @@ public class AiGridAssessmentService {
             AiGridFindingService.AssessmentResult result = persist(tenant, runId, evaluationAsOf,
                     policy, artifact, selection, "APPLICABLE", "INCOMPLETE_SCOPE",
                     "NO_DECISION", "INCOMPLETE_SCOPE", missing, Map.of());
-            upsertGap(tenant, runId, artifact.id(), policy.id(), "INCOMPLETE_SCOPE", missing);
-            return findings.reconcile(tenant, result);
+            if (cache.current) upsertGap(tenant, runId, artifact.id(), policy.id(), "INCOMPLETE_SCOPE", missing);
+            return cache.current && !"SUPERSEDED".equals(result.reasonCode()) && findings.reconcile(tenant, result);
+        }
+        if (cache.current) {
+            Map<String,Object> scopeAges=new LinkedHashMap<>();
+            List<String> staleScopes=new ArrayList<>();
+            for (String family:distinctScopes) {
+                String region=families.requiredRegion(family,artifact.region()).orElse(artifact.region());
+                Instant observed=cache.scopeObservedAt(new ScopeKey(artifact.provider(),artifact.accountId(),region,family));
+                if (observed!=null && observed.plusSeconds(86400).isBefore(evaluationAsOf)) {
+                    staleScopes.add("scope:"+family+":STALE");
+                    scopeAges.put("scope:"+family,Map.of("observedAt",observed.toString(),"ageSeconds",Math.max(0,Duration.between(observed,evaluationAsOf).getSeconds())));
+                }
+            }
+            if (!staleScopes.isEmpty()) {
+                var result=persist(tenant,runId,evaluationAsOf,policy,artifact,selection,"APPLICABLE","STALE","NO_DECISION","STALE_SCOPE_EVIDENCE",staleScopes,scopeAges);
+                upsertGap(tenant,runId,artifact.id(),policy.id(),"STALE_EVIDENCE",staleScopes);
+                return findings.reconcile(tenant,result);
+            }
         }
         Map<String, Fact> availableFacts = cache.facts().getOrDefault(artifact.id(), Map.of());
         List<FactIssue> factIssues = new ArrayList<>();
@@ -183,6 +352,7 @@ public class AiGridAssessmentService {
                 factEvidence.put("state", fact.state());
                 factEvidence.put("evidenceClass", fact.evidenceClass());
                 factEvidence.put("observedAt", fact.observedAt().toString());
+                factEvidence.put("ageSeconds",Math.max(0,Duration.between(fact.observedAt(),evaluationAsOf).getSeconds()));
                 factEvidence.put("factId", fact.id());
                 if (fact.confidence() != null) factEvidence.put("confidence", fact.confidence());
                 evidence.put(requirement.factKey(), factEvidence);
@@ -203,8 +373,8 @@ public class AiGridAssessmentService {
             AiGridFindingService.AssessmentResult result = persist(tenant, runId, evaluationAsOf,
                     policy, artifact, selection, "APPLICABLE", readiness,
                     decision, decision.equals("ERROR") ? "FACT_COLLECTION_ERROR" : readiness, missing, evidence);
-            upsertGap(tenant, runId, artifact.id(), policy.id(), gapState(readiness), missing);
-            return findings.reconcile(tenant, result);
+            if (cache.current) upsertGap(tenant, runId, artifact.id(), policy.id(), gapState(readiness), missing);
+            return cache.current && !"SUPERSEDED".equals(result.reasonCode()) && findings.reconcile(tenant, result);
         }
         // Graph access is deliberately after capability and fact readiness. A
         // posture policy with no relationship contract must not pay for a graph
@@ -216,16 +386,16 @@ public class AiGridAssessmentService {
             AiGridFindingService.AssessmentResult result = persist(tenant, runId, evaluationAsOf,
                     policy, artifact, selection, "NOT_APPLICABLE", "READY",
                     "NOT_APPLICABLE", "REQUIRED_RELATIONSHIP_ABSENT", relationships.issues(), Map.of());
-            resolveGap(tenant, artifact.id(), policy.id());
-            return findings.reconcile(tenant, result);
+            if (cache.current) resolveGap(tenant, artifact.id(), policy.id());
+            return cache.current && !"SUPERSEDED".equals(result.reasonCode()) && findings.reconcile(tenant, result);
         }
         if (relationships.status() == AiGridGraphEvidenceResolver.Status.STALE) {
             List<String> missing = relationships.issues().stream().map(type -> "relationship:" + type + ":STALE").toList();
             AiGridFindingService.AssessmentResult result = persist(tenant, runId, evaluationAsOf,
                     policy, artifact, selection, "APPLICABLE", "STALE", "NO_DECISION",
                     "STALE_RELATIONSHIP_EVIDENCE", missing, Map.of());
-            upsertGap(tenant, runId, artifact.id(), policy.id(), "STALE_EVIDENCE", missing);
-            return findings.reconcile(tenant, result);
+            if (cache.current) upsertGap(tenant, runId, artifact.id(), policy.id(), "STALE_EVIDENCE", missing);
+            return cache.current && !"SUPERSEDED".equals(result.reasonCode()) && findings.reconcile(tenant, result);
         }
         DirectDecision direct = directDecision(policy, evaluationAsOf, predicateFacts, parameters, cache.facts(),
                 relationships.relationships(), evidence);
@@ -233,21 +403,38 @@ public class AiGridAssessmentService {
             AiGridFindingService.AssessmentResult result = persist(tenant, runId, evaluationAsOf,
                     policy, artifact, selection, "APPLICABLE", direct.readiness(), direct.decision(),
                     direct.reason(), direct.missing(), evidence);
-            upsertGap(tenant, runId, artifact.id(), policy.id(), gapState(direct.readiness()), direct.missing());
-            return findings.reconcile(tenant, result);
+            if (cache.current) upsertGap(tenant, runId, artifact.id(), policy.id(), gapState(direct.readiness()), direct.missing());
+            return cache.current && !"SUPERSEDED".equals(result.reasonCode()) && findings.reconcile(tenant, result);
         }
-        boolean failure = direct == null ? evaluatePredicate(policy.predicate(), predicateFacts, parameters) : direct.failure();
+        boolean failure = direct == null ? evaluatePredicate(policy.predicate(), predicateFacts, parameters,evaluationAsOf) : direct.failure();
         String decision = failure ? "FAIL" : "PASS";
         AiGridFindingService.AssessmentResult result = persist(tenant, runId, evaluationAsOf,
                 policy, artifact, selection,
                 "APPLICABLE", "READY", decision, failure ? policy.reasonCode() : "CONTROL_SATISFIED",
                 List.of(), evidence);
-        resolveGap(tenant, artifact.id(), policy.id());
-        return findings.reconcile(tenant, result);
+        if (cache.current) resolveGap(tenant, artifact.id(), policy.id());
+        return cache.current && !"SUPERSEDED".equals(result.reasonCode()) && findings.reconcile(tenant, result);
     }
 
-    private boolean evaluatePredicate(JsonNode predicate, Map<String, JsonNode> facts, Map<String, Object> parameters) {
-        return predicates.evaluate(predicate, facts, parameters);
+    private Map<String,Object> effectiveParameters(Policy policy,Map<String,Object> overrides) {
+        Map<String,Object> values=new LinkedHashMap<>(policy.parameterDefaults());
+        overrides.forEach((key,value) -> {
+            Object baseline=values.get(key);
+            if (value instanceof String text && baseline instanceof Number) {
+                try { value=new java.math.BigDecimal(text); }
+                catch (NumberFormatException error) { throw new IllegalArgumentException("Invalid numeric policy parameter: " + key); }
+            }
+            if (value instanceof String text && baseline instanceof Boolean) {
+                if (!text.equalsIgnoreCase("true") && !text.equalsIgnoreCase("false")) throw new IllegalArgumentException("Invalid boolean policy parameter: " + key);
+                value=Boolean.valueOf(text);
+            }
+            values.put(key,value);
+        });
+        return values;
+    }
+
+    private boolean evaluatePredicate(JsonNode predicate, Map<String, JsonNode> facts, Map<String, Object> parameters,Instant evaluationAsOf) {
+        return predicates.evaluate(predicate, facts, parameters,evaluationAsOf);
     }
 
     private AiGridFindingService.AssessmentResult persist(Tenant tenant, UUID runId, Instant evaluationAsOf,
@@ -275,6 +462,7 @@ public class AiGridAssessmentService {
                     evaluation_as_of = excluded.evaluation_as_of,
                     decision_fingerprint = excluded.decision_fingerprint,
                     evaluated_at = now()
+                where ai_grid_assessments.evaluation_as_of <= excluded.evaluation_as_of
                 returning id
                 """, new MapSqlParameterSource().addValue("id", assessmentId).addValue("tenantId", tenant.getId())
                 .addValue("runId", runId).addValue("policyId", policy.id()).addValue("policyVersion", policy.version())
@@ -284,6 +472,7 @@ public class AiGridAssessmentService {
                 .addValue("evidence", json(evidence)).addValue("findingFingerprint", findingFingerprint)
                 .addValue("evaluationAsOf", Timestamp.from(evaluationAsOf))
                 .addValue("decisionFingerprint", decisionFingerprint), UUID.class);
+        if (persisted == null) return new AiGridFindingService.AssessmentResult(assessmentId, runId, policy.id(), policy.version(), policy.name(), policy.severity(), "PREVIEW", "NO_DECISION", "SUPERSEDED", artifact.id(), findingFingerprint, evidence);
         snapshots.outbox(tenant, "ASSESSMENT_COMPLETED", "ASSESSMENT", persisted,
                 decisionFingerprint, Map.of("decision", decision, "subjectId", artifact.id(),
                         "decisionFingerprint", decisionFingerprint));
@@ -309,7 +498,7 @@ public class AiGridAssessmentService {
         return asOf;
     }
 
-    private List<Policy> loadPublishedPolicies(Tenant tenant) {
+    private List<Policy> loadPublishedPolicies(Tenant tenant, Set<String> policyIds) {
         return jdbc.query("""
                 select distinct on (policy_id)
                        p.policy_id, p.version, p.name, p.severity, coalesce(d.default_selection,p.default_selection) default_selection, p.artifact_types_json::text,
@@ -317,14 +506,15 @@ public class AiGridAssessmentService {
                        required_capabilities_json::text, required_relationships_json::text, required_resource_families_json::text,
                        required_facts_json::text, predicate_json::text, parameter_definitions_json::text, reason_code,
                        evaluation_mode,evaluation_definition_json::text,p.provider
-                  from platform.ai_grid_policy_versions p
+                  from %s p
                   join platform.ai_grid_policy_distribution d on d.policy_id=p.policy_id and d.available=true
-                where (p.release_family in ('AGCF_PHASE_1', 'AGCF_PHASE_2') or p.release_family is null)
+                where p.policy_id in (:policyIds)
+                   and (p.release_family is null or p.release_family in ('AGCF_PHASE_1','AGCF_PHASE_2'))
                    and p.lifecycle in ('VALIDATED', 'APPROVED', 'PUBLISHED', 'CANARY')
                    and platform.ai_grid_policy_visible_to_tenant(
                            d.available, d.rollout_stage, d.canary_tenant_ids_json, cast(:tenantId as uuid))
                  order by p.policy_id, p.published_at desc, p.version desc
-                """, Map.of("tenantId", tenant.getId().toString()), (rs, n) -> new Policy(rs.getString("policy_id"), rs.getString("version"), rs.getString("name"),
+                """.formatted(AiGridPolicyResolution.versions(":tenantId")), Map.of("tenantId", tenant.getId().toString(), "policyIds", policyIds), (rs, n) -> new Policy(rs.getString("policy_id"), rs.getString("version"), rs.getString("name"),
                 rs.getString("severity"), rs.getString("default_selection"), strings(rs.getString("artifact_types_json")),
                 strings(rs.getString("native_kinds_json")), rs.getString("scope_resolution"),
                 strings(rs.getString("required_capabilities_json")), strings(rs.getString("required_relationships_json")), strings(rs.getString("required_resource_families_json")),
@@ -333,7 +523,7 @@ public class AiGridAssessmentService {
     }
 
     private Map<String, String> loadSelections() {
-        return jdbc.query("select policy_id, selection from ai_grid_policy_selections", rs -> {
+        return jdbc.query("select policy_id, selection from ai_grid_policy_selections where configuration_source='TENANT_OVERRIDE'", rs -> {
             Map<String, String> result = new LinkedHashMap<>();
             while (rs.next()) result.putIfAbsent(rs.getString(1), rs.getString(2));
             return result;
@@ -344,15 +534,15 @@ public class AiGridAssessmentService {
         // remain provider-unscoped while the Phase 1 catalog is paused, preserving their
         // pre-catalog evaluation behavior.
         return policyProvider == null || policyProvider.isBlank()
-                || "MULTI_CLOUD".equals(policyProvider)
+                || "ANY".equals(policyProvider) || "MULTI_CLOUD".equals(policyProvider)
                 || policyProvider.equalsIgnoreCase(artifactProvider);
     }
 
-    private Map<String, ScopeConfig> loadScopes() {
+    private Map<String, ScopeConfig> loadScopes(Set<String> policyIds) {
         return jdbc.query("""
                 select policy_id, mode, condition_logic, conditions_json::text
-                  from ai_grid_policy_scopes
-                """, rs -> {
+                  from ai_grid_policy_scopes where policy_id in (:policyIds)
+                """, Map.of("policyIds", policyIds), rs -> {
             Map<String, ScopeConfig> result = new LinkedHashMap<>();
             while (rs.next()) {
                 result.put(rs.getString("policy_id"), scopeConfig(
@@ -371,7 +561,7 @@ public class AiGridAssessmentService {
                     .toList();
             return new ScopeConfig(mode, logic, conditions);
         } catch (Exception ex) {
-            return ScopeConfig.all();
+            throw new IllegalArgumentException("Invalid policy scope configuration",ex);
         }
     }
 
@@ -389,11 +579,12 @@ public class AiGridAssessmentService {
         });
     }
 
-    private Map<String, Map<String, Object>> loadParameters() {
+    private Map<String, Map<String, Object>> loadParameters() { return loadParameters(Set.of()); }
+    private Map<String, Map<String, Object>> loadParameters(Set<String> policyIds) {
         return jdbc.query("""
                 select policy_id, parameters_json::text
-                  from ai_grid_policy_parameters
-                """, rs -> {
+                  from ai_grid_policy_parameters where (:allPolicies or policy_id in (:policyIds))
+                """, Map.of("allPolicies", policyIds.isEmpty(), "policyIds", policyIds.isEmpty() ? Set.of("__NONE__") : policyIds), rs -> {
             Map<String, Map<String, Object>> result = new LinkedHashMap<>();
             while (rs.next()) {
                 result.put(rs.getString("policy_id"), readMap(rs.getString("parameters_json")));
@@ -406,33 +597,39 @@ public class AiGridAssessmentService {
         for (String family : required) {
             String region = families.requiredRegion(family, artifact.region()).orElse(null);
             if (region == null) { missing.add(family); continue; }
-            if (!completedScopes.contains(new ScopeKey(artifact.accountId(), region, family))) missing.add(family);
+            if (!completedScopes.contains(new ScopeKey(artifact.provider(),artifact.accountId(), region, family))) missing.add(family);
         }
         return missing;
     }
-    private Map<UUID, Map<String, Fact>> loadFactIndex(UUID runId) {
+    private Map<UUID, Map<String, Fact>> loadFactIndex(UUID runId, boolean current) {
         Map<UUID, Map<String, Fact>> result = new LinkedHashMap<>();
         jdbc.query("""
-                select artifact_id,id, fact_key, value_type, value_json::text, state, evidence_class, observed_at, confidence
-                  from ai_grid_facts where run_id = :runId
+                select artifact_id,id, fact_key, value_type, value_json::text, state, evidence_class, observed_at, confidence, valid_until
+                  from ai_grid_facts where %s
                  order by artifact_id,fact_key,observed_at desc,id desc
-                """, Map.of("runId", runId), rs -> {
+                """.formatted(current ? "snapshot_manifest_id in (select id from (" + AiGridCurrentEvidence.SCOPE_MANIFESTS + ") heads)" : "run_id=:runId"), Map.of("runId", runId), rs -> {
             while (rs.next()) result.computeIfAbsent(rs.getObject("artifact_id", UUID.class), ignored -> new LinkedHashMap<>())
                     .putIfAbsent(rs.getString("fact_key"), new Fact(rs.getObject("id", UUID.class),
                     rs.getString("value_type"), tree(rs.getString("value_json")), rs.getString("state"), rs.getString("evidence_class"),
-                    rs.getTimestamp("observed_at").toInstant(), (Double) rs.getObject("confidence")));
+                    rs.getTimestamp("observed_at").toInstant(), (Double) rs.getObject("confidence"),
+                    rs.getTimestamp("valid_until")==null ? null : rs.getTimestamp("valid_until").toInstant()));
             return result;
         });
         return result;
     }
-    private Set<ScopeKey> loadCompletedScopes(UUID runId) {
+    private Map<ScopeKey,Instant> loadScopeTimes(UUID runId,boolean current) {
         return jdbc.query("""
-                select account_id,region,resource_family from ai_security_snapshot_scopes
-                 where run_id=:runId and status='COMPLETE'
-                """, Map.of("runId", runId), rs -> {
-            Set<ScopeKey> result = new HashSet<>();
-            while (rs.next()) result.add(new ScopeKey(rs.getString(1), rs.getString(2), rs.getString(3)));
-            return Set.copyOf(result);
+                select provider,account_id,region,resource_family,completed_at from %s scope
+                 where (:current or run_id=:runId) and status='COMPLETE'
+                """.formatted(current ? "(select distinct on(scope_key) * from ai_security_snapshot_scopes where status='COMPLETE' order by scope_key,completed_at desc nulls last,run_id desc)" : "ai_security_snapshot_scopes"),
+                Map.of("runId",runId,"current",current),rs -> {
+            Map<ScopeKey,Instant> result=new LinkedHashMap<>();
+            while (rs.next()) {
+                Timestamp completed=rs.getTimestamp(5);
+                result.merge(new ScopeKey(rs.getString(1),rs.getString(2),rs.getString(3),rs.getString(4)),completed==null ? Instant.MIN : completed.toInstant(),
+                        (left,right) -> left.isAfter(right) ? left : right);
+            }
+            return result;
         });
     }
 
@@ -444,7 +641,7 @@ public class AiGridAssessmentService {
                                           Map<String, Object> evidence) {
         if (!"DIRECT_RELATIONSHIP".equals(policy.evaluationMode())) return null;
         DirectDefinition definition = directDefinition(policy);
-        if (!evaluatePredicate(definition.sourcePredicate(), sourceFacts, parameters)) {
+        if (!evaluatePredicate(definition.sourcePredicate(), sourceFacts, parameters,asOf)) {
             return DirectDecision.ready(false);
         }
         List<Boolean> targetFailures = new ArrayList<>();
@@ -468,7 +665,7 @@ public class AiGridAssessmentService {
                 evidence.put("target:" + relationship.targetArtifactId() + ":" + requirement.factKey(), factEvidence(targetFact));
             }
             if (!targetReady) continue;
-            targetFailures.add(evaluatePredicate(definition.targetPredicate(), targetPredicateFacts, parameters));
+            targetFailures.add(evaluatePredicate(definition.targetPredicate(), targetPredicateFacts, parameters,asOf));
         }
         return decideDirectTargets(targetFailures, missing);
     }
@@ -505,6 +702,7 @@ public class AiGridAssessmentService {
     }
     String issue(Fact fact, FactRequirement requirement, Instant evaluationAsOf) {
         if (fact == null || "UNKNOWN".equals(fact.state())) return "MISSING";
+        if (fact.observedAt().isAfter(evaluationAsOf) || (fact.validUntil()!=null && fact.validUntil().isBefore(evaluationAsOf))) return "STALE";
         if ("ERROR".equals(fact.state())) return "ERROR";
         if ("STALE".equals(fact.state())) return "STALE";
         if (!requirement.valueType().equals(fact.valueType())
@@ -614,22 +812,24 @@ public class AiGridAssessmentService {
 
     private final class RunEvaluationCache {
         private final UUID runId;
+        private final boolean current;
         private Map<UUID, Map<String, Fact>> facts;
-        private Set<ScopeKey> completedScopes;
+        private Map<ScopeKey,Instant> scopeTimes;
         private AiGridGraphEvidenceResolver.DirectIndex directRelationships;
 
-        private RunEvaluationCache(UUID runId) { this.runId = runId; }
+        private RunEvaluationCache(UUID runId, boolean current) { this.runId = runId; this.current = current; }
         Map<UUID, Map<String, Fact>> facts() {
-            if (facts == null) facts = loadFactIndex(runId);
+            if (facts == null) facts = loadFactIndex(runId, current);
             return facts;
         }
         Set<ScopeKey> completedScopes() {
-            if (completedScopes == null) completedScopes = loadCompletedScopes(runId);
-            return completedScopes;
+            if (scopeTimes==null) scopeTimes=loadScopeTimes(runId,current);
+            return scopeTimes.keySet();
         }
+        Instant scopeObservedAt(ScopeKey scope) { completedScopes(); return scopeTimes.get(scope); }
         AiGridGraphEvidenceResolver.DirectEvidence directEvidence(UUID sourceArtifactId, List<String> requiredTypes, Instant asOf) {
             if (requiredTypes == null || requiredTypes.isEmpty()) return graphEvidence.resolveDirect(runId, sourceArtifactId, requiredTypes, asOf);
-            if (directRelationships == null) directRelationships = graphEvidence.directIndexForRun(runId, asOf);
+            if (directRelationships == null) directRelationships = current ? graphEvidence.directIndexForCurrent(asOf) : graphEvidence.directIndexForRun(runId, asOf);
             return graphEvidence.resolveDirect(directRelationships, sourceArtifactId, requiredTypes, asOf);
         }
     }
@@ -647,8 +847,12 @@ public class AiGridAssessmentService {
                                   long maxAgeSeconds, Double minConfidence) {}
     private record FactIssue(String factKey, String kind) {}
     private record Artifact(UUID id, String artifactType, String nativeKind, String accountId, String region,
-                            String provider, String name, UUID manifestId) {}
-    private record ScopeKey(String accountId, String region, String resourceFamily) {}
+                            String provider, String name, UUID manifestId, UUID sourceRunId) {}
+    private record ScopeKey(String provider,String accountId, String region, String resourceFamily) {}
     record Fact(UUID id, String valueType, JsonNode value, String state, String evidenceClass,
-                Instant observedAt, Double confidence) {}
+                Instant observedAt, Double confidence, Instant validUntil) {
+        Fact(UUID id,String valueType,JsonNode value,String state,String evidenceClass,Instant observedAt,Double confidence) {
+            this(id,valueType,value,state,evidenceClass,observedAt,confidence,null);
+        }
+    }
 }

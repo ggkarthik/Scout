@@ -35,6 +35,26 @@ class AiBomLifecycleBaselinePostgresIntegrationTest {
     private static final LocalPostgresTestDatabase.DatabaseConfig CONSTRAINT_DB =
             LocalPostgresTestDatabase.provision("ai_bom_lifecycle_v4_constraints");
 
+
+    @Test void v1UpgradeAndFreshTenantReceiveCorrelationEvidenceWithoutChangingV1() throws Exception {
+        var db = LocalPostgresTestDatabase.provision("ai_bom_correlation_v2_upgrade");
+        platform(db).migrate();
+        registerTenant(db, FRESH_TENANT_ID, "tenant_fresh");
+        tenant(db, "tenant_default", UPGRADE_TENANT_ID, "1").migrate();
+        int checksum = queryInt(db, "select checksum from tenant_default.tenant_schema_history where version='1'");
+        tenant(db, "tenant_default", UPGRADE_TENANT_ID, "2").migrate();
+        tenant(db, "tenant_fresh", FRESH_TENANT_ID, "2").migrate();
+        assertEquals(checksum, queryInt(db, "select checksum from tenant_default.tenant_schema_history where version='1'"));
+        for (String schema : java.util.List.of("tenant_default", "tenant_fresh")) {
+            assertEquals(2, queryInt(db, "select count(*) from information_schema.tables where table_schema='" + schema
+                    + "' and table_name in ('ai_bom_correlation_paths','ai_bom_correlation_gaps')"));
+            assertEquals(2, queryInt(db, "select count(*) from pg_class c join pg_namespace n on c.relnamespace=n.oid where n.nspname='"
+                    + schema + "' and c.relname in ('ai_bom_correlation_paths','ai_bom_correlation_gaps') and c.relrowsecurity and c.relforcerowsecurity"));
+            assertEquals(1, queryInt(db, "select count(*) from information_schema.table_constraints where table_schema='" + schema
+                    + "' and table_name='ai_bom_resource_vulnerability_links' and constraint_type='UNIQUE'"));
+        }
+    }
+
     @Test
     void baselineDefaultsPreserveEvidenceAndMatchAcrossTenants() throws Exception {
         platform(UPGRADE_DB).migrate();

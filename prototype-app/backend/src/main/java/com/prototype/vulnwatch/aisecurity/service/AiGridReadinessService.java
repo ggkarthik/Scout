@@ -54,13 +54,12 @@ public class AiGridReadinessService {
                          List<AiGridCoverageService.CoverageItem> candidates) {
         List<PolicySpec> policies = jdbc.query("""
                 select distinct on (p.policy_id) p.policy_id, p.version,
-                       coalesce(s.selection, p.default_selection) selection,
+                       case when s.configuration_source='TENANT_OVERRIDE' then s.selection else p.resolved_default_selection end selection,
                        p.required_facts_json::text
-                  from platform.ai_grid_policy_versions p
+                  from %s p
                   left join ai_grid_policy_selections s on s.policy_id = p.policy_id
-                 where p.lifecycle = 'PUBLISHED'
                  order by p.policy_id, p.published_at desc, p.version desc
-                """, (rs, n) -> new PolicySpec(rs.getString("policy_id"), rs.getString("version"),
+                """.formatted(AiGridPolicyResolution.currentVersions()), (rs, n) -> new PolicySpec(rs.getString("policy_id"), rs.getString("version"),
                 rs.getString("selection"), rs.getString("required_facts_json")));
         Map<UUID, AssessmentState> assessments = new HashMap<>();
         candidates.stream().filter(AiGridCoverageService.CoverageItem::assessmentPresent).forEach(candidate ->
@@ -71,6 +70,8 @@ public class AiGridReadinessService {
             byPolicy.computeIfAbsent(candidate.policyId(), ignored -> new ArrayList<>()).add(candidate);
         }
 
+        Set<String> failedPolicies=new java.util.HashSet<>(jdbc.query("select policy_id from ai_grid_coverage_gaps where artifact_id is null and state='POLICY_EVALUATION_ERROR' and status='OPEN'",
+                (rs,row) -> rs.getString(1)));
         for (PolicySpec policy : policies) {
             List<AiGridCoverageService.CoverageItem> policyCandidates = byPolicy.getOrDefault(policy.id(), List.of());
             long applicable = 0;
@@ -101,9 +102,14 @@ public class AiGridReadinessService {
                 assessment.missing().forEach(node -> missingEvidence.add(node.asText()));
                 assessment.inputs().fieldNames().forEachRemaining(availableFacts::add);
             }
+            if (failedPolicies.contains(policy.id())) {
+                decisionReady=0; errors=Math.max(1,policyCandidates.size());
+                missingEvidence.add("POLICY_EVALUATION_ERROR");
+            }
             long decisionRequired = Math.max(0, policyCandidates.size() - notApplicable);
             String readiness;
-            if (policyCandidates.isEmpty()) readiness = "NO_RESOURCES";
+            if (failedPolicies.contains(policy.id())) readiness="BLOCKED";
+            else if (policyCandidates.isEmpty()) readiness = "NO_RESOURCES";
             else if (decisionRequired == 0 && missingAssessments == 0) readiness = "NOT_APPLICABLE";
             else if (missingAssessments == 0 && decisionReady == decisionRequired) readiness = "READY";
             else if (decisionReady > 0) readiness = "PARTIAL";

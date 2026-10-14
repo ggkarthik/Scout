@@ -16,6 +16,16 @@ class AiGridPredicateEngineTest {
     private final AiGridPredicateEngine engine = new AiGridPredicateEngine();
 
     @Test
+    void agePredicatesUseCapturedEvaluationTimeDuringHistoricalReplay() throws Exception {
+        JsonNode predicate=mapper.readTree("{\"all\":[{\"fact\":\"lastReviewed\",\"age_gt_seconds\":3600}]}");
+        Map<String,JsonNode> facts=Map.of("lastReviewed",mapper.valueToTree("2020-01-01T00:00:00Z"));
+        Instant captured=Instant.parse("2020-01-01T00:30:00Z");
+        assertFalse(engine.evaluate(predicate,facts,Map.of(),captured));
+        assertTrue(engine.evaluate(predicate,facts,Map.of(),captured.plusSeconds(3600)));
+        assertFalse(engine.evaluate(predicate,facts,Map.of(),captured),"replaying the captured inputs remains deterministic");
+    }
+
+    @Test
     void evaluatesTheR0GuardrailPredicateFromExactFacts() throws Exception {
         JsonNode predicate = mapper.readTree("""
                 {"all":[

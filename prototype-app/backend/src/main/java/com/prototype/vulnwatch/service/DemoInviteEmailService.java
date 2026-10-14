@@ -66,11 +66,12 @@ public class DemoInviteEmailService {
         body.append("<p>Welcome to Scout.ai, ").append(escape(displayName)).append(".</p>");
         body.append("<p>Your demo workspace for <strong>").append(escape(tenantName)).append("</strong> is ready.</p>");
         body.append("<p>Use the activation link below to create your tenant admin password and finish setup.</p>");
-        body.append("<p><a href=\"").append(inviteUrl).append("\">Activate your workspace</a></p>");
+        body.append("<p><a href=\"").append(inviteUrl).append("\" target=\"_blank\" rel=\"noopener noreferrer\">Activate your workspace</a></p>");
+        body.append("<p>Open the activation link in a separate browser tab to finish password setup.</p>");
         body.append("<ul>");
-        body.append("<li><strong>Activation link:</strong> ").append("<a href=\"").append(inviteUrl).append("\">").append(inviteUrl).append("</a></li>");
+        body.append("<li><strong>Activation link:</strong> ").append("<a href=\"").append(inviteUrl).append("\" target=\"_blank\" rel=\"noopener noreferrer\">").append(inviteUrl).append("</a></li>");
         body.append("<li><strong>Activation link expires:</strong> ").append(formatInstant(inviteExpiresAt)).append("</li>");
-        body.append("<li><strong>Shared login portal:</strong> <a href=\"").append(loginUrl).append("\">").append(loginUrl).append("</a></li>");
+        body.append("<li><strong>Shared login portal:</strong> <a href=\"").append(loginUrl).append("\" target=\"_blank\" rel=\"noopener noreferrer\">").append(loginUrl).append("</a></li>");
         body.append("<li><strong>Validation workspace access through:</strong> ").append(formatInstant(demoExpiresAt)).append("</li>");
         body.append("</ul>");
         body.append("<p>After activation:</p>");
@@ -95,6 +96,7 @@ public class DemoInviteEmailService {
                 + "Your demo workspace for " + tenantName + " is ready.\n\n"
                 + "Use the activation link below to create your tenant admin password and finish setup.\n\n"
                 + "Activate your workspace: " + inviteUrl + "\n"
+                + "Open the activation link in a separate browser tab to finish password setup.\n"
                 + "Activation link expires: " + formatInstant(inviteExpiresAt) + "\n"
                 + "Shared login portal: " + loginUrl + "\n"
                 + "Validation workspace access through: " + formatInstant(demoExpiresAt) + "\n\n"

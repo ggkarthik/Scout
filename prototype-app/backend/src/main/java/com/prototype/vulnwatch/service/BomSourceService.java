@@ -97,7 +97,7 @@ public class BomSourceService {
 
     private BomSource locate(Tenant tenant, SourceRequest request) throws IOException {
         if (request.explicitSourceId() != null) {
-            BomSource existing = sourceRepository.findById(request.explicitSourceId())
+            BomSource existing = sourceRepository.findForUpdate(request.explicitSourceId())
                     .orElseThrow(() -> new IOException(
                             "Unknown BOM source " + request.explicitSourceId()));
             if (existing.getBomType() != request.bomType()) {
@@ -107,8 +107,9 @@ public class BomSourceService {
             return existing;
         }
         if (request.sourceKey() != null && !request.sourceKey().isBlank()) {
-            return sourceRepository.findBySourceKey(request.sourceKey())
-                    .orElseGet(() -> create(tenant, request));
+            var existing = sourceRepository.findIdBySourceKey(request.sourceKey());
+            return existing.isPresent() ? sourceRepository.findForUpdate(existing.get()).orElseThrow()
+                    : create(tenant, request);
         }
         // No source named and no deterministic key: an independent source. Deliberately not
         // matched against an existing one by asset and supplier -- that inference is what
@@ -129,8 +130,10 @@ public class BomSourceService {
 
     /** Promotes a newly stored document version to current and advances the revision. */
     public BomSource recordCurrentVersion(BomSource source, UUID bomId) {
+        BomSource locked = sourceRepository.findForUpdate(source.getId())
+                .orElseThrow(() -> new IllegalStateException("BOM source no longer exists"));
         source.setCurrentBomId(bomId);
-        source.setRevision(source.getRevision() + 1);
+        source.setRevision(locked.getRevision() + 1);
         return sourceRepository.save(source);
     }
 

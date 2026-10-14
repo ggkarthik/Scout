@@ -3,10 +3,13 @@ package com.prototype.vulnwatch.service;
 import com.prototype.vulnwatch.domain.Tenant;
 import com.prototype.vulnwatch.repo.AppUserRepository;
 import com.prototype.vulnwatch.repo.TenantRepository;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -129,9 +132,43 @@ public class DemoTenantPurgeService {
             tenantSchemaService.dropTenantSchema(tenant.getSchemaName());
         }
         purgeSharedTenantRows(tenantId);
-        resetJdbcTemplate.update(
-                "update tenant_default.demo_requests set tenant_id = null where tenant_id = ?",
-                tenantId);
+        purgeDemoLifecycleRows(tenantId);
+    }
+
+    private void purgeDemoLifecycleRows(UUID tenantId) {
+        // These shared lifecycle tables live outside platform, so platform FK
+        // discovery cannot find them. The raw pool still enforces invite RLS;
+        // scope cleanup to the deleted tenant on the same connection and restore
+        // its previous context before returning it to the pool.
+        resetJdbcTemplate.execute((ConnectionCallback<Void>) connection -> {
+            String previousTenantId;
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "select current_setting('app.current_tenant_id', true)");
+                 ResultSet result = statement.executeQuery()) {
+                result.next();
+                previousTenantId = result.getString(1);
+            }
+            try (PreparedStatement context = connection.prepareStatement(
+                    "select set_config('app.current_tenant_id', ?, false)")) {
+                try {
+                    context.setString(1, tenantId.toString());
+                    context.execute();
+                    try (PreparedStatement invites = connection.prepareStatement(
+                            "delete from tenant_default.demo_invites where tenant_id = ?");
+                         PreparedStatement requests = connection.prepareStatement(
+                            "update tenant_default.demo_requests set tenant_id = null where tenant_id = ?")) {
+                        invites.setObject(1, tenantId);
+                        invites.executeUpdate();
+                        requests.setObject(1, tenantId);
+                        requests.executeUpdate();
+                    }
+                } finally {
+                    context.setString(1, previousTenantId == null ? "" : previousTenantId);
+                    context.execute();
+                }
+            }
+            return null;
+        });
     }
 
     private void deleteTenantRegistryRow(UUID tenantId) {
@@ -145,21 +182,21 @@ public class DemoTenantPurgeService {
         resetJdbcTemplate.update(
                 "delete from platform.tenant_memberships where tenant_id = ?",
                 tenantId);
+        // information_schema.constraint_column_usage hides referenced columns
+        // from non-owner roles. PostgreSQL catalogs also expose these FKs to the
+        // restricted runtime role that performs deletion in production.
         List<String> tableNames = resetJdbcTemplate.queryForList("""
-                select distinct concat(kcu.table_schema, '.', kcu.table_name)
-                from information_schema.table_constraints tc
-                join information_schema.key_column_usage kcu
-                  on tc.constraint_name = kcu.constraint_name
-                 and tc.table_schema = kcu.table_schema
-                join information_schema.constraint_column_usage ccu
-                  on ccu.constraint_name = tc.constraint_name
-                 and ccu.constraint_schema = tc.constraint_schema
-                where tc.constraint_type = 'FOREIGN KEY'
-                  and ccu.table_schema = 'platform'
-                  and ccu.table_name = 'tenants'
-                  and ccu.column_name = 'id'
-                  and kcu.table_schema = 'platform'
-                  and kcu.column_name = 'tenant_id'
+                select distinct format('%I.%I', namespace.nspname, dependent.relname)
+                from pg_constraint fk
+                join pg_class dependent on dependent.oid = fk.conrelid
+                join pg_namespace namespace on namespace.oid = dependent.relnamespace
+                join pg_attribute column_info
+                  on column_info.attrelid = dependent.oid
+                 and column_info.attnum = any(fk.conkey)
+                where fk.contype = 'f'
+                  and fk.confrelid = 'platform.tenants'::regclass
+                  and namespace.nspname = 'platform'
+                  and column_info.attname = 'tenant_id'
                 order by 1 desc
                 """, String.class);
         for (String tableName : tableNames) {

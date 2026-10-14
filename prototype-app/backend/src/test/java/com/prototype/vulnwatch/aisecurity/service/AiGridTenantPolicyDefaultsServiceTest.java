@@ -60,8 +60,8 @@ class AiGridTenantPolicyDefaultsServiceTest {
 
         ArgumentCaptor<String> query = ArgumentCaptor.forClass(String.class);
         verify(jdbc, org.mockito.Mockito.times(2)).query(query.capture(), any(Map.class), any(RowMapper.class));
-        assertTrue(query.getAllValues().get(0).contains("join lateral"));
-        assertTrue(query.getAllValues().get(0).contains("limit 1"));
+        assertTrue(query.getAllValues().get(0).contains("select distinct on (v.policy_id)"));
+        assertTrue(query.getAllValues().get(0).contains("v.version=d.pinned_version"));
     }
 
     @Test

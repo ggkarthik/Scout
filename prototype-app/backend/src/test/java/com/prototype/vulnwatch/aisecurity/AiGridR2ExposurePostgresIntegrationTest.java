@@ -3,6 +3,7 @@ package com.prototype.vulnwatch.aisecurity;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.prototype.vulnwatch.aisecurity.service.AiGridExposureService;
@@ -52,6 +53,7 @@ class AiGridR2ExposurePostgresIntegrationTest {
     @Autowired private AiGridApiService api;
     @Autowired private AiGridHostContextService hostContext;
     @Autowired private ObjectMapper objectMapper;
+    @Autowired private com.prototype.vulnwatch.aisecurity.service.AiSecurityApiService customerApi;
 
     @Test
     void exposureGraduatesDemotesClosesAndReopensWithStableIdentity() {
@@ -97,7 +99,13 @@ class AiGridR2ExposurePostgresIntegrationTest {
 
             UUID closureRun = seedRun(tenant, agent, knowledgeBase, false, true);
             systems.deriveForRun(tenant, closureRun);
-            assertEquals(1, exposures.correlateCompleteRun(tenant, closureRun).closed());
+            assertEquals(0, exposures.correlateCompleteRun(tenant, closureRun).closed(),
+                    "A single run cannot establish authoritative absence across connector heads");
+            Instant closureObserved=Instant.now();
+            seedCompleteScope(tenant,closureRun,"AWS","AWS:test",closureObserved);
+            UUID closureEpoch=coverage.refreshCurrent(tenant,closureRun);
+            systems.deriveForCurrentEpoch(tenant,closureEpoch,closureRun);
+            assertEquals(1,exposures.correlateCurrentEpoch(tenant,closureEpoch,closureRun).closed());
             assertEquals("CLOSED", jdbc.queryForObject("select status from ai_grid_exposure_paths where id=:id",
                     Map.of("id", exposureId), String.class));
             assertEquals(1, count("select count(*) from findings where finding_kind='AI_EXPOSURE' and status='RESOLVED'"));
@@ -329,6 +337,91 @@ class AiGridR2ExposurePostgresIntegrationTest {
                     "three applicable templates each traverse at most 100 first-hop paths");
             return null;
         });
+    }
+
+    @Test
+    void suppressionAndOneSlaResetSurviveRepeatedEvidenceRecoveryAndDistinctPagination() {
+        Tenant tenant=tenants.createTenant("R2 deadlines "+UUID.randomUUID(),"r2-deadlines-"+UUID.randomUUID(),"pilot",null);
+        migrations.provisionNewTenant(tenant);
+        tenantExecution.run(tenant,() -> {
+            UUID agent=UUID.randomUUID(), first=UUID.randomUUID(), second=UUID.randomUUID();
+            seedArtifact(tenant,agent,"AI_AGENT","AWS_BEDROCK_AGENT","agent");
+            seedArtifact(tenant,first,"KNOWLEDGE_BASE","AWS_BEDROCK_KNOWLEDGE_BASE","first data");
+            seedArtifact(tenant,second,"KNOWLEDGE_BASE","AWS_BEDROCK_KNOWLEDGE_BASE","second data");
+            addValidatingFacts(tenant,agent,first,Instant.now().plusSeconds(3600));
+            addValidatingFacts(tenant,agent,second,Instant.now().plusSeconds(3600));
+            var artifacts=List.of(agent,first,second);
+            var paths=List.of(new Relationship(agent,first,"USES_KNOWLEDGE_BASE"),new Relationship(agent,second,"USES_KNOWLEDGE_BASE"));
+            UUID initial=seedGraphRun(tenant,artifacts,paths);
+            systems.deriveForRun(tenant,initial); exposures.correlateCompleteRun(tenant,initial);
+            UUID finding=jdbc.queryForObject("select id from findings where finding_kind='AI_EXPOSURE'",Map.of(),UUID.class);
+            Instant initialDeadline=deadline(finding);
+            var page=customerApi.findings(tenant,"R2_EXTERNAL_SENSITIVE_ACCESS","OPEN","AWS","123456789012",null,"AWS_BEDROCK_KNOWLEDGE_BASE",0,1);
+            assertEquals(1,page.total()); assertEquals(1,page.items().size());
+            assertEquals("AI_EXPOSURE",page.items().get(0).findingKind());
+            assertEquals("EXPOSURE_PATH",page.items().get(0).subjectType());
+            assertEquals(null,page.items().get(0).executionId());
+            assertEquals(2,page.items().get(0).exposurePaths().size());
+            assertEquals(0,customerApi.findings(tenant,null,"OPEN",null,null,null,null,1,1).items().size());
+            assertEquals(2,customerApi.finding(tenant,finding).exposurePaths().size());
+            jdbc.update("update findings set status='SUPPRESSED',suppressed_until=now()+interval '1 hour' where id=:id",Map.of("id",finding));
+            UUID suppressed=seedGraphRun(tenant,artifacts,paths);
+            systems.deriveForRun(tenant,suppressed); exposures.correlateCompleteRun(tenant,suppressed);
+            assertEquals("SUPPRESSED",jdbc.queryForObject("select status from findings where id=:id",Map.of("id",finding),String.class));
+            assertEquals(initialDeadline,deadline(finding));
+            jdbc.update("update ai_grid_host_context_facts set valid_until=now()-interval '1 second' where artifact_id=:id",Map.of("id",first));
+            UUID mixed=seedGraphRun(tenant,artifacts,List.of(paths.get(1),paths.get(0)));
+            systems.deriveForRun(tenant,mixed); exposures.correlateCompleteRun(tenant,mixed);
+            assertEquals("VALIDATED_EXPOSURE",jdbc.queryForObject("select workflow_class from findings where id=:id",Map.of("id",finding),String.class));
+            assertEquals(initialDeadline,deadline(finding),"Any validated path preserves the shared deadline");
+            jdbc.update("update findings set status='OPEN',suppressed_until=null where id=:id",Map.of("id",finding));
+            expireAndCorrelate(tenant,artifacts,paths);
+            assertEquals(null,deadline(finding));
+            recoverAndCorrelate(tenant,agent,first,second,artifacts,paths);
+            Instant resetDeadline=deadline(finding); assertTrue(resetDeadline.isAfter(initialDeadline));
+            expireAndCorrelate(tenant,artifacts,paths);
+            recoverAndCorrelate(tenant,agent,first,second,artifacts,paths);
+            assertEquals(resetDeadline,deadline(finding),"Repeated recovery restores the durable saved deadline");
+            Instant overdue=Instant.now().minusSeconds(3600).truncatedTo(ChronoUnit.MICROS);
+            jdbc.update("update findings set due_at=:due where id=:id",Map.of("id",finding,"due",Timestamp.from(overdue)));
+            expireAndCorrelate(tenant,artifacts,paths);
+            recoverAndCorrelate(tenant,agent,first,second,artifacts,paths);
+            assertEquals(overdue,deadline(finding),"Overdue findings receive no extension");
+            assertEquals(1,count("select count(*) from finding_events where event_type='EXPOSURE_SLA_RECOVERED' and details_json->>'freshReset'='true'"));
+            jdbc.update("update findings set status='SUPPRESSED',suppressed_until=null where id=:id",Map.of("id",finding));
+            recoverAndCorrelate(tenant,agent,first,second,artifacts,paths);
+            assertEquals("SUPPRESSED",jdbc.queryForObject("select status from findings where id=:id",Map.of("id",finding),String.class));
+            assertEquals(overdue,deadline(finding));
+            assertEquals(1,count("select count(*) from finding_list_projection where finding_id='"+finding+"' and status='SUPPRESSED'"),"Committed evidence paths refresh the canonical projection");
+        });
+    }
+
+    @Test void expiredRelationshipsDemoteAnAuthoritativePathWithoutAssertingAbsence() {
+        Tenant tenant=tenants.createTenant("R2 expired edge "+UUID.randomUUID(),"r2-edge-"+UUID.randomUUID(),"pilot",null);
+        migrations.provisionNewTenant(tenant);
+        tenantExecution.run(tenant,() -> {
+            UUID agent=UUID.randomUUID(),kb=UUID.randomUUID();
+            seedArtifact(tenant,agent,"AI_AGENT","AWS_BEDROCK_AGENT","agent"); seedArtifact(tenant,kb,"KNOWLEDGE_BASE","AWS_BEDROCK_KNOWLEDGE_BASE","kb");
+            UUID run=seedRun(tenant,agent,kb,true,false); seedCompleteScope(tenant,run,"AWS","AWS:test",Instant.now());
+            addValidatingFacts(tenant,agent,kb,Instant.now().plusSeconds(3600));
+            UUID epoch=coverage.refreshCurrent(tenant,run); systems.deriveForCurrentEpoch(tenant,epoch,run);
+            assertEquals(1,exposures.correlateCurrentEpoch(tenant,epoch,run).validated());
+            jdbc.update("update ai_grid_relationship_snapshots set valid_until=now()-interval '1 second' where run_id=:id",Map.of("id",run));
+            UUID staleEpoch=coverage.refreshCurrent(tenant,run); systems.deriveForCurrentEpoch(tenant,staleEpoch,run);
+            var stale=exposures.correlateCurrentEpoch(tenant,staleEpoch,run);
+            assertEquals(0,stale.closed()); assertEquals(0,stale.validated());
+            assertEquals("NEEDS_EVIDENCE",jdbc.queryForObject("select workflow_class from findings where finding_kind='AI_EXPOSURE'",Map.of(),String.class));
+            assertEquals(1,count("select count(*) from findings where finding_kind='AI_EXPOSURE' and status='OPEN'"));
+        });
+    }
+    private Instant deadline(UUID finding) { return jdbc.query("select due_at from findings where id=:id",Map.of("id",finding),rs -> rs.next() && rs.getTimestamp(1)!=null ? rs.getTimestamp(1).toInstant() : null); }
+    private void expireAndCorrelate(Tenant tenant,List<UUID> artifacts,List<Relationship> paths) {
+        jdbc.update("update ai_grid_host_context_facts set valid_until=now()-interval '1 second'",Map.of());
+        UUID run=seedGraphRun(tenant,artifacts,paths); systems.deriveForRun(tenant,run); exposures.correlateCompleteRun(tenant,run);
+    }
+    private void recoverAndCorrelate(Tenant tenant,UUID agent,UUID first,UUID second,List<UUID> artifacts,List<Relationship> paths) {
+        addValidatingFacts(tenant,agent,first,Instant.now().plusSeconds(3600)); addValidatingFacts(tenant,agent,second,Instant.now().plusSeconds(3600));
+        UUID run=seedGraphRun(tenant,artifacts,paths); systems.deriveForRun(tenant,run); exposures.correlateCompleteRun(tenant,run);
     }
 
     private void addValidatingFacts(Tenant tenant, UUID agent, UUID kb, Instant validUntil) {

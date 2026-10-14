@@ -184,7 +184,7 @@ function PolicyViolationsTab() {
                 >
                   <td><span className={`severity-badge ${finding.severity.toLowerCase()}`}>{finding.severity}</span><strong>{finding.displayId}</strong></td>
                   <td>{finding.title}<small>v{finding.policyVersion}</small></td>
-                  <td>{finding.artifactName}{finding.subjectType === 'EXECUTION' ? <small>{finding.evidenceSource ?? 'Unknown source'} · {finding.evidenceClass ?? 'Unknown class'}</small> : null}</td>
+                  <td>{finding.artifactName}{finding.findingKind === 'AI_EXPOSURE' ? <small>Exposure · {(finding.exposurePaths ?? []).map((path, index) => <React.Fragment key={path.id}>{index > 0 ? ' · ' : ''}<Link to={`/findings/ai/exposures/${path.id}`} onClick={(event) => event.stopPropagation()}>{path.title}</Link></React.Fragment>)}</small> : null}</td>
                   <td><span className="status-pill">{finding.status.replace(/_/g, ' ')}</span></td>
                   <td>{timeAgo(finding.lastObservedAt) ?? 'Unknown'}</td>
                 </tr>

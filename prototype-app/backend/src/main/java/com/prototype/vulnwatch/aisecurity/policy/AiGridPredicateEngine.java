@@ -19,19 +19,43 @@ public class AiGridPredicateEngine {
     }
 
     public boolean evaluate(JsonNode predicate, Map<String, JsonNode> facts, Map<String, Object> parameters) {
-        Counter counter = new Counter();
-        return evaluate(predicate, facts, parameters, 1, counter);
+        return evaluate(predicate,facts,parameters,Instant.now());
+    }
+
+    public boolean evaluate(JsonNode predicate,Map<String,JsonNode> facts,Map<String,Object> parameters,Instant evaluationAsOf) {
+        Counter counter=new Counter();
+        return evaluate(predicate,facts,parameters,1,counter,false,evaluationAsOf);
     }
 
     public void validate(JsonNode predicate) {
-        evaluate(predicate, Map.of(), Map.of(), 1, new Counter(), true);
+        evaluate(predicate,Map.of(),Map.of(),1,new Counter(),true,Instant.EPOCH);
     }
 
-    private boolean evaluate(JsonNode node, Map<String, JsonNode> facts, Map<String, Object> parameters, int depth, Counter counter) {
-        return evaluate(node, facts, parameters, depth, counter, false);
+    /** Validate parameter substitution without requiring collected evidence. */
+    public void validateParameters(JsonNode predicate, Map<String, Object> parameters) {
+        validate(predicate);
+        validateParameterNode(predicate, parameters);
     }
 
-    private boolean evaluate(JsonNode node, Map<String, JsonNode> facts, Map<String, Object> parameters, int depth, Counter counter, boolean validationOnly) {
+    private void validateParameterNode(JsonNode node, Map<String, Object> parameters) {
+        if (node.has("all") || node.has("any")) {
+            for (JsonNode child : node.has("all") ? node.get("all") : node.get("any")) validateParameterNode(child, parameters);
+            return;
+        }
+        if (node.has("not")) { validateParameterNode(node.get("not"), parameters); return; }
+        String operator = leafOperator(node);
+        JsonNode expected = node.get(operator);
+        if (parameterReference(expected)) {
+            String key = expected.path("parameter").asText();
+            if (!parameters.containsKey(key) || parameters.get(key) == null) throw new IllegalArgumentException("Missing policy parameter: " + key);
+            expected = new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(parameters.get(key));
+        }
+        if (java.util.Set.of("gt","gte","lt","lte","count_gt","count_gte","count_lt","count_lte","count_eq","age_gt_seconds","age_gte_seconds").contains(operator)
+                && !expected.isNumber()) throw new IllegalArgumentException("Numeric policy comparison requires a number");
+        if ("in".equals(operator) && !expected.isArray()) throw new IllegalArgumentException("in requires an array value");
+    }
+
+    private boolean evaluate(JsonNode node, Map<String, JsonNode> facts, Map<String, Object> parameters, int depth, Counter counter, boolean validationOnly,Instant evaluationAsOf) {
         if (node == null || !node.isObject() || depth > MAX_DEPTH || ++counter.nodes > MAX_NODES) {
             throw new IllegalArgumentException("Invalid or unbounded AI Grid predicate");
         }
@@ -44,14 +68,14 @@ public class AiGridPredicateEngine {
             }
             boolean result = "all".equals(operator);
             for (JsonNode child : children) {
-                boolean childResult = evaluate(child, facts, parameters, depth + 1, counter, validationOnly);
+                boolean childResult = evaluate(child, facts, parameters, depth + 1, counter, validationOnly,evaluationAsOf);
                 result = "all".equals(operator) ? result && childResult : result || childResult;
             }
             return result;
         }
         if (node.has("not")) {
             ensureOnly(node, "not");
-            return !evaluate(node.get("not"), facts, parameters, depth + 1, counter, validationOnly);
+            return !evaluate(node.get("not"), facts, parameters, depth + 1, counter, validationOnly,evaluationAsOf);
         }
         if (!node.hasNonNull("fact") || !node.get("fact").isTextual()) {
             throw new IllegalArgumentException("Leaf predicate requires a fact key");
@@ -90,8 +114,8 @@ public class AiGridPredicateEngine {
             case "count_lt" -> count(value) < expected.intValue();
             case "count_lte" -> count(value) <= expected.intValue();
             case "count_eq" -> count(value) == expected.intValue();
-            case "age_gt_seconds" -> ageSeconds(value) > expected.longValue();
-            case "age_gte_seconds" -> ageSeconds(value) >= expected.longValue();
+            case "age_gt_seconds" -> ageSeconds(value,evaluationAsOf) > expected.longValue();
+            case "age_gte_seconds" -> ageSeconds(value,evaluationAsOf) >= expected.longValue();
             default -> throw new IllegalArgumentException("Unsupported predicate operator");
         };
     }
@@ -140,9 +164,9 @@ public class AiGridPredicateEngine {
         if (value.isIntegralNumber()) return value.intValue();
         throw new IllegalArgumentException("count comparison requires a collection, string, or integral numeric fact");
     }
-    private long ageSeconds(JsonNode value) {
+    private long ageSeconds(JsonNode value,Instant evaluationAsOf) {
         if (!value.isTextual()) throw new IllegalArgumentException("age comparison requires an ISO-8601 timestamp fact");
-        try { return Math.max(0, Instant.now().getEpochSecond() - Instant.parse(value.asText()).getEpochSecond()); }
+        try { return Math.max(0, evaluationAsOf.getEpochSecond() - Instant.parse(value.asText()).getEpochSecond()); }
         catch (Exception ex) { throw new IllegalArgumentException("age comparison requires an ISO-8601 timestamp fact", ex); }
     }
     private int strength(String value) { return switch (value == null ? "" : value.toUpperCase()) { case "NONE" -> 0; case "LOW" -> 1; case "MEDIUM" -> 2; case "HIGH" -> 3; default -> -1; }; }

@@ -40,6 +40,63 @@ public class AiGridExposureFindingService {
         this.workflow = workflow;
     }
 
+    private AiGridFindingService canonical;
+    @org.springframework.beans.factory.annotation.Autowired
+    void configureProjection(AiGridFindingService canonical) { this.canonical=canonical; }
+
+    void refreshProjection(Tenant tenant) { canonical.refreshProjectionAfterCommit(tenant); }
+
+    /** Attach every constituent path after all path observations have been persisted. */
+    void attachPath(Tenant tenant, UUID findingId, ExposureFinding input) {
+        jdbc.update("update ai_grid_exposure_paths set finding_id=:findingId where id=:id",
+                Map.of("findingId",findingId,"id",input.exposureId()));
+        link(tenant,findingId,"EXPOSURE_PATH",input.exposureId(),"PRIMARY",null);
+        link(tenant,findingId,"AI_SYSTEM",input.systemId(),"AFFECTED",input.systemRevision());
+        link(tenant,findingId,"ARTIFACT",input.entryArtifactId(),"ENTRY_POINT",null);
+        link(tenant,findingId,"ARTIFACT",input.rootCauseArtifactId(),"ROOT_CAUSE",null);
+    }
+
+    void reconcileAggregate(Tenant tenant, UUID runId) {
+        List<UUID> ids=jdbc.query("select distinct finding_id from ai_grid_exposure_paths where finding_id is not null order by finding_id",
+                (rs,row) -> rs.getObject(1,UUID.class));
+        for (UUID id:ids) {
+            List<UUID> open=jdbc.query("select id from ai_grid_exposure_paths where finding_id=:id and status='OPEN' "
+                    + "order by case state when 'VALIDATED_EXPOSURE' then 0 else 1 end,last_observed_at desc,id",
+                    Map.of("id",id),(rs,row) -> rs.getObject(1,UUID.class));
+            if (open.isEmpty()) {
+                UUID path=jdbc.queryForObject("select id from ai_grid_exposure_paths where finding_id=:id order by last_observed_at desc,id limit 1",Map.of("id",id),UUID.class);
+                closeVerified(tenant,id,runId,path);
+            } else markNeedsEvidence(open.get(0),runId);
+        }
+    }
+
+    private SlaState savedSla(UUID findingId) {
+        return jdbc.query("""
+                select details_json::text from finding_events
+                 where finding_id=:id and event_type in ('EXPOSURE_SLA_PAUSED','EXPOSURE_SLA_RECOVERED')
+                   and created_at>coalesce((select max(created_at) from finding_events
+                         where finding_id=:id and event_type='RESOLVED_BY_VERIFIED_REASSESSMENT'),'-infinity'::timestamptz)
+                 order by created_at desc,id desc limit 1
+                """,Map.of("id",findingId),rs -> {
+            if (!rs.next()) return new SlaState(null,false);
+            try {
+                var details=objectMapper.readTree(rs.getString(1));
+                String deadline=details.path("savedDeadline").asText("");
+                return new SlaState(deadline.isBlank() ? null : Instant.parse(deadline),details.path("resetConsumed").asBoolean());
+            } catch (java.io.IOException error) { throw new IllegalStateException("Invalid saved exposure deadline",error); }
+        });
+    }
+    private void recoverSla(Tenant tenant,Finding finding,Instant now,double risk) {
+        SlaState saved=savedSla(finding.getId());
+        Instant deadline=saved.deadline();
+        boolean mayReset=!saved.consumed() && deadline!=null && deadline.isAfter(now);
+        if (mayReset) deadline=dueAt(tenant,now,risk);
+        finding.setDueAt(deadline);
+        workflow.appendEvent(finding,"EXPOSURE_SLA_RECOVERED","ai-grid-correlation","Validating evidence recovered",
+                Map.of("savedDeadline",deadline==null ? "" : deadline.toString(),"resetConsumed",true,"freshReset",mayReset));
+    }
+    private record SlaState(Instant deadline,boolean consumed) {}
+
     public UUID reconcileValidated(Tenant tenant, ExposureFinding input) {
         Instant now = Instant.now();
         Finding finding = findings.findByTenantAndFingerprint(tenant, input.fingerprint()).orElse(null);
@@ -48,7 +105,7 @@ public class AiGridExposureFindingService {
                     select f.id from findings f join finding_subjects fs on fs.finding_id=f.id
                      where f.finding_kind='AI_EXPOSURE' and f.policy_id=:correlationId
                        and fs.subject_type='ARTIFACT' and fs.subject_role='ROOT_CAUSE'
-                       and fs.subject_id=:rootCause order by f.created_at limit 1
+                       and fs.subject_id=:rootCause order by f.created_at,f.id limit 1
                     """, Map.of("correlationId", input.correlationId(), "rootCause", input.rootCauseArtifactId()),
                     (rs, n) -> rs.getObject(1, UUID.class));
             if (!sharedRootFinding.isEmpty()) finding = findings.findById(sharedRootFinding.get(0)).orElse(null);
@@ -68,9 +125,14 @@ public class AiGridExposureFindingService {
             finding.setMatchedBy("ai-grid-correlation");
             finding.setFirstObservedAt(now);
             finding.setDueAt(dueAt(tenant, now, risk));
-        } else if (finding.getStatus() != FindingStatus.OPEN) {
-            workflow.reopenByObservation(finding, now, input.runId());
-            finding.setDueAt(dueAt(tenant, now, risk));
+        } else {
+            boolean suppressionActive=finding.getStatus()==FindingStatus.SUPPRESSED
+                    && (finding.getSuppressedUntil()==null || finding.getSuppressedUntil().isAfter(now));
+            boolean verifiedRecurrence=finding.getStatus()==FindingStatus.RESOLVED
+                    && finding.getClosedReason()==com.prototype.vulnwatch.domain.FindingCloseReason.VERIFIED_REMEDIATION;
+            if (verifiedRecurrence) finding.setDueAt(dueAt(tenant,now,risk));
+            else if ("NEEDS_EVIDENCE".equals(finding.getWorkflowClass())) recoverSla(tenant,finding,now,risk);
+            if (!suppressionActive && finding.getStatus()!=FindingStatus.OPEN) workflow.reopenByObservation(finding,now,input.runId());
         }
         finding.setTitle(input.title());
         finding.setWorkflowClass("VALIDATED_EXPOSURE");
@@ -98,7 +160,13 @@ public class AiGridExposureFindingService {
                 Map.of("id", exposureId), rs -> rs.next() ? rs.getObject(1, UUID.class) : null);
         if (findingId == null) return;
         Finding finding = findings.findById(findingId).orElse(null);
-        if (finding == null || finding.getStatus() != FindingStatus.OPEN) return;
+        if (finding == null || finding.getStatus()==FindingStatus.RESOLVED || "NEEDS_EVIDENCE".equals(finding.getWorkflowClass())) return;
+        Integer validating=jdbc.queryForObject("select count(*) from ai_grid_exposure_paths where finding_id=:id and status='OPEN' and state='VALIDATED_EXPOSURE'",Map.of("id",findingId),Integer.class);
+        if (validating!=null && validating>0) return;
+        SlaState saved=savedSla(findingId);
+        Instant deadline=finding.getDueAt()==null ? saved.deadline() : finding.getDueAt();
+        workflow.appendEvent(finding,"EXPOSURE_SLA_PAUSED","ai-grid-correlation","SLA paused while validating evidence is unavailable",
+                Map.of("savedDeadline",deadline==null ? "" : deadline.toString(),"resetConsumed",saved.consumed()));
         finding.setWorkflowClass("NEEDS_EVIDENCE");
         finding.setReasonCode("VALIDATING_EVIDENCE_EXPIRED");
         finding.setDueAt(null);

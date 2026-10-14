@@ -706,8 +706,8 @@ export function BomManagementPage({
               </div>
               {ingestResult.bomType !== 'CBOM' && (
                 <p className="panel-caption" style={{ margin: '8px 0' }}>
-                  Software vulnerability correlation and finding creation run after ingestion. Check BOM Inventory for component links and Findings for confirmed vulnerabilities.
-                  {ingestResult.bomType === 'AI_BOM' && ' AI Grid posture findings require an AI policy assessment; uploading an AI BOM alone does not create them.'}
+                  Ingestion completed. Software vulnerability assessment, correlation, and finding creation run asynchronously after ingestion. Check BOM Inventory for component links and Findings for confirmed vulnerabilities.
+                  {ingestResult.bomType === 'AI_BOM' && ' AI-resource dependency linking runs later as shared software findings become available. An empty findings list does not confirm a clean assessment. AI Grid posture findings require an AI policy assessment; uploading an AI BOM alone does not create them.'}
                 </p>
               )}
               <div className="result-meta">

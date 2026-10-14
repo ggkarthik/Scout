@@ -155,10 +155,12 @@ export function AiFindingDetailPage({ findingId }: AiFindingDetailPageProps) {
 
   return (
     <div className="fd3-page">
+      {finding.exposurePaths?.length ? <nav aria-label="Associated exposure paths">{finding.exposurePaths.map((path) => <a key={path.id} href={`/findings/ai/exposures/${path.id}`}>{path.title} · {formatLabel(path.state)}</a>)}</nav> : null}
       {/* ── top bar ─────────────────────────────────────────────────────── */}
       <div className="fd3-topbar">
         <button className="fd3-back-btn" onClick={handleBack}>← Back</button>
         <span className="fd3-finding-id mono">{finding.displayId}</span>
+        {finding.findingKind === 'AI_EXPOSURE' ? <span className="status-pill">Exposure</span> : null}
         <span className={severityClassName(finding.severity)}>{finding.severity}</span>
         <span className="status-pill">{finding.status.replace(/_/g, ' ')}</span>
         <div style={{ flex: 1 }} />

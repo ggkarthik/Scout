@@ -22,7 +22,8 @@ public record AiBomDeclaredResourceDetailResponse(
         boolean currentInLatestRevision,
         Component component,
         Completeness completeness,
-        Projection projection
+        Projection projection,
+        AiBomCorrelationEvidenceResponse correlation
 ) {
     public record Component(
             UUID componentId,

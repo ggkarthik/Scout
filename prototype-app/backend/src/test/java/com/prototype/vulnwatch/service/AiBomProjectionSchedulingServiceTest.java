@@ -61,7 +61,7 @@ class AiBomProjectionSchedulingServiceTest {
         service.scheduleOrDefer(tenant, source);
 
         assertEquals(BomSourceState.HELD_ENTITLEMENT, source.getState());
-        verify(sourceRepository).save(source);
+        verify(sourceRepository).updateSchedulingState(source.getId(), source.getState());
         verify(ingestionJobService, never()).enqueueAiGridBomProjectionJob(any(), any());
         verify(ingestionJobRepository, never()).countByStatusAndJobType(any(), any());
     }
@@ -118,8 +118,8 @@ class AiBomProjectionSchedulingServiceTest {
 
         assertEquals(BomSourceState.HELD_ENTITLEMENT, held.getState());
         assertEquals(BomSourceState.HELD_ENTITLEMENT, deferred.getState());
-        verify(sourceRepository).save(held);
-        verify(sourceRepository).save(deferred);
+        verify(sourceRepository).updateSchedulingState(held.getId(), held.getState());
+        verify(sourceRepository).updateSchedulingState(deferred.getId(), deferred.getState());
         verify(ingestionJobService, never()).enqueueAiGridBomProjectionJob(any(), any());
     }
 
@@ -133,7 +133,7 @@ class AiBomProjectionSchedulingServiceTest {
 
         service.reconcileHeldAndDeferredSources(tenant);
 
-        verify(sourceRepository, never()).save(notAiBom);
+        verify(sourceRepository, never()).updateSchedulingState(notAiBom.getId(), notAiBom.getState());
         verify(entitlementService, never()).isEnabled(any(), any());
     }
 }
