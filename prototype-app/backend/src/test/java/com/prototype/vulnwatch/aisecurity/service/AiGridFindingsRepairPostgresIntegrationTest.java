@@ -77,9 +77,9 @@ class AiGridFindingsRepairPostgresIntegrationTest {
             assertEquals(1,initial.assessedSubjects());
             UUID priorAssessment=jdbc.queryForObject("select assessment_id from findings where policy_id=:id",Map.of("id",sqlFailure),UUID.class);
             String priorEvidence=jdbc.queryForObject("select evidence::text from findings where policy_id=:id",Map.of("id",sqlFailure),String.class);
-            String schema=TenantContext.getCurrentSchemaName();
-            jdbc.getJdbcTemplate().execute("create function "+schema+".fail_repair_assessment() returns trigger language plpgsql as $$ begin if NEW.policy_id='"+sqlFailure+"' and NEW.subject_type='ARTIFACT' then raise exception 'private SQL detail' using errcode='23514'; end if; return NEW; end $$");
-            jdbc.getJdbcTemplate().execute("create trigger reject_repair_policy before insert on "+schema+".ai_grid_assessments for each row execute function "+schema+".fail_repair_assessment()");
+            triggerPolicy(sqlFailure);
+            jdbc.getJdbcTemplate().execute("create function fail_repair_assessment() returns trigger language plpgsql as $$ begin if NEW.policy_id=(select policy_id from repair_test_trigger_policy) and NEW.subject_type='ARTIFACT' then raise exception 'private SQL detail' using errcode='23514'; end if; return NEW; end $$");
+            jdbc.getJdbcTemplate().execute("create trigger reject_repair_policy before insert on ai_grid_assessments for each row execute function fail_repair_assessment()");
             Snapshot next=snapshot(tenant,"AWS:one",Instant.now(),true);
             var result=assessments.evaluateCurrent(tenant,next.runId(),Set.of(healthy,malformed,sqlFailure),() -> {});
             assertEquals("PARTIAL",result.assessmentStatus()); assertEquals(2,result.failedPolicies()); assertEquals(1,result.assessedSubjects());
@@ -165,9 +165,9 @@ class AiGridFindingsRepairPostgresIntegrationTest {
         Tenant tenant=tenant(); String id="SLOW_"+UUID.randomUUID(); policy(id,"{\"fact\":\"test.failure\",\"eq\":true}");
         execution.run(tenant,() -> {
             Snapshot source=snapshot(tenant,"AWS:slow",Instant.now(),true);
-            String schema=TenantContext.getCurrentSchemaName();
-            jdbc.getJdbcTemplate().execute("create function "+schema+".slow_policy() returns trigger language plpgsql as $$ begin if NEW.policy_id='"+id+"' and NEW.subject_type='ARTIFACT' then perform pg_sleep(3); end if; return NEW; end $$");
-            jdbc.getJdbcTemplate().execute("create trigger slow_policy before insert on "+schema+".ai_grid_assessments for each row execute function "+schema+".slow_policy()");
+            triggerPolicy(id);
+            jdbc.getJdbcTemplate().execute("create function slow_policy() returns trigger language plpgsql as $$ begin if NEW.policy_id=(select policy_id from repair_test_trigger_policy) and NEW.subject_type='ARTIFACT' then perform pg_sleep(3); end if; return NEW; end $$");
+            jdbc.getJdbcTemplate().execute("create trigger slow_policy before insert on ai_grid_assessments for each row execute function slow_policy()");
             UUID request=request(tenant,source.runId(),AiGridAssessmentWorker.EVENT_TYPE);
             jdbc.update("update ai_grid_outbox set payload_json=jsonb_set(payload_json,'{policyIds}',cast(:policies as jsonb)) where id=:id",Map.of("id",request,"policies","[\""+id+"\"]"));
             var claim=transactions.execute(status -> worker.claim(request)); assertNotNull(claim);
@@ -251,6 +251,12 @@ class AiGridFindingsRepairPostgresIntegrationTest {
             assertEquals(0,count("select count(*) from findings where policy_id='AI_ARTIFACT_DIGEST_CHANGED_AFTER_APPROVAL' and status='OPEN'"));
             assertEquals("REVOKED",baselines.list(tenant,source.artifactId()).get(0).approvalStatus());
         });
+    }
+
+    // Tenant execution sets the search path; a regular table is visible to worker connections.
+    private void triggerPolicy(String policyId) {
+        jdbc.getJdbcTemplate().execute("create table repair_test_trigger_policy (policy_id text not null)");
+        jdbc.update("insert into repair_test_trigger_policy (policy_id) values (:id)", Map.of("id",policyId));
     }
 
     private Tenant tenant() {
