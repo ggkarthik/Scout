@@ -985,3 +985,10 @@ Two nav items shown: `pipeline` and `platform-health`. The `quality` view key re
 - New `src/components/` files larger than ~300 lines
 - Lowering coverage thresholds
 - `// TODO` without owner or linked issue
+
+
+## Declared AI-BOM dependency evidence
+
+`AiBomDeclaredResourceDetailPage` shows current ordered dependency paths, unresolved gaps/remediation, retained uncertain support, and a separate retired-history view. Evidence pages use the additive detail `correlation` field and the paginated `/bom/declared-resources/{resourceId}/correlation` API. Legacy associations awaiting path backfill are explicitly qualified. Active support does not imply an OPEN finding, proven deployment, or exploitability; finding status remains visible separately.
+
+Loading, failed requests, empty results, gaps, pagination, reactivation history, and retired support have distinct states and tests. Empty findings/evidence do not assert absence of risk. Upload success states that ingestion completed and that software assessment/finding creation and later AI-resource linking run asynchronously. No queue-derived assessment COMPLETE claim is rendered. See [release evidence](ai-bom-correlation-release-evidence.md) for browser screenshots and test results.

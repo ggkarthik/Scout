@@ -44,7 +44,7 @@ public class AiBomAffectedResourceSummaryService {
         Map<UUID, List<AffectedAiResourceSummary>> summaries = new LinkedHashMap<>();
         for (AiBomResourceVulnerabilityLink link : links) {
             AiBomDeclaredResource resource = resourcesById.get(link.getDeclaredResourceId());
-            if (resource == null) {
+            if (resource == null || !"ACTIVE".equals(link.getStatus())) {
                 continue;
             }
             summaries.computeIfAbsent(link.getFindingId(), ignored -> new java.util.ArrayList<>())

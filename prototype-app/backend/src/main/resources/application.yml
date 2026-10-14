@@ -296,6 +296,15 @@ app:
     enabled: ${APP_SCHEDULING_ENABLED:true}
   runtime:
     role: ${APP_RUNTIME_ROLE:all}
+  ai-bom:
+    correlation:
+      writes-enabled: ${AI_BOM_CORRELATION_WRITES_ENABLED:true}
+      # Observe, backfill paths, and repair subjects before opting into retirement.
+      retirement-enabled: ${AI_BOM_CORRELATION_RETIREMENT_ENABLED:false}
+      max-depth: ${AI_BOM_CORRELATION_MAX_DEPTH:16}
+      max-nodes: ${AI_BOM_CORRELATION_MAX_NODES:10000}
+      max-edges: ${AI_BOM_CORRELATION_MAX_EDGES:20000}
+      max-paths: ${AI_BOM_CORRELATION_MAX_PATHS:2000}
   performance:
     telemetry-refresh-ms: ${APP_PERFORMANCE_TELEMETRY_REFRESH_MS:30000}
   eol:

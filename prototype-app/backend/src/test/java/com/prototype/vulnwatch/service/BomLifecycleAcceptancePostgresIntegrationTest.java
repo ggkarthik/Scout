@@ -232,7 +232,7 @@ class BomLifecycleAcceptancePostgresIntegrationTest {
     }
 
     /**
-     * A model is not software: it has no CPE and no CVEs, so correlating one produces
+     * A declared model is outside this shared software pipeline; correlating it here produces
      * findings against an artifact that was never a package. Its software dependencies are a
      * different matter -- surfacing a dependency CVE against a declared model is the reason
      * to ingest an AI-BOM at all, so those must still enter inventory.

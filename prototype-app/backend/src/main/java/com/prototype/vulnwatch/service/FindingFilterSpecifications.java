@@ -210,6 +210,7 @@ public final class FindingFilterSpecifications {
             subquery.select(cb.literal(1L));
             subquery.where(
                     cb.equal(linkRoot.get("findingId"), root.get("id")),
+                    cb.equal(linkRoot.get("status"), "ACTIVE"),
                     linkRoot.get("declaredResourceId").in(ids)
             );
             return cb.exists(subquery);
@@ -225,7 +226,7 @@ public final class FindingFilterSpecifications {
             var subquery = query.subquery(Long.class);
             var linkRoot = subquery.from(AiBomResourceVulnerabilityLink.class);
             subquery.select(cb.literal(1L));
-            subquery.where(cb.equal(linkRoot.get("findingId"), root.get("id")));
+            subquery.where(cb.equal(linkRoot.get("findingId"), root.get("id")), cb.equal(linkRoot.get("status"), "ACTIVE"));
             return hasAffectedAiResource ? cb.exists(subquery) : cb.not(cb.exists(subquery));
         };
     }
