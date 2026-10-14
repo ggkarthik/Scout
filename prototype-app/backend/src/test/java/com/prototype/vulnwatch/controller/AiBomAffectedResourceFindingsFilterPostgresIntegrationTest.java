@@ -239,4 +239,27 @@ class AiBomAffectedResourceFindingsFilterPostgresIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.openCount").value(1));
     }
+
+    @Test void retiredAssociationsDisappearFromBothFilterImplementationsAndSummaries() throws Exception {
+        Tenant tenant = tenantService.getDefaultTenant();
+        String suffix = "retired-" + SEQUENCE.incrementAndGet();
+        Asset asset = seedAsset(tenant, suffix);
+        Finding finding = seedOpenFinding(tenant, asset, seedComponent(tenant, asset, suffix), suffix);
+        AiBomDeclaredResource resource = seedDeclaredResource(tenant, suffix);
+        seedLink(tenant, resource, finding);
+        findingListProjectionService.refreshTenant(tenant);
+        var link = linkRepository.findByDeclaredResourceId(resource.getId()).get(0);
+        link.setStatus("RETIRED"); linkRepository.save(link);
+        // No projection refresh after link retirement: affected-resource predicates read live associations.
+        for (String filter : java.util.List.of("affectedAiResourceId", "hasAffectedAiResource")) {
+            String value = filter.equals("affectedAiResourceId") ? resource.getId().toString() : "true";
+            mockMvc.perform(authedGet("/api/findings").param("assetName", asset.getName()).param(filter, value))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.totalItems").value(0));
+            mockMvc.perform(authedGet("/api/findings/summary").param("assetName", asset.getName()).param(filter, value))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.openCount").value(0));
+        }
+        mockMvc.perform(authedGet("/api/findings").param("assetName", asset.getName()).param("hasAffectedAiResource", "false"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalItems").value(1))
+                .andExpect(jsonPath("$.items[0].affectedAiResources").isEmpty());
+    }
 }

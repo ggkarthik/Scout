@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
  * tenant in {@link TenantContext}. A background scheduler tick has no HTTP request to carry
  * one, so this worker sets it explicitly for the duration of each job.
  */
+@lombok.extern.slf4j.Slf4j
 @Service
 public class AiBomProjectionWorker {
 
@@ -54,9 +55,13 @@ public class AiBomProjectionWorker {
     public void poll() {
         if (!enabled) return;
         for (Tenant tenant : tenants.listActiveTenants()) {
-            List<IngestionJobService.ClaimedJobRef> claimed = jobs.claimPendingJobsByType(
-                    tenant, IngestionJobService.JOB_TYPE_AI_GRID_BOM_PROJECTION, 5, 5);
-            claimed.forEach(ref -> processSafely(tenant, ref));
+            try {
+                List<IngestionJobService.ClaimedJobRef> claimed = jobs.claimPendingJobsByType(
+                        tenant, IngestionJobService.JOB_TYPE_AI_GRID_BOM_PROJECTION, 5, 5);
+                claimed.forEach(ref -> processSafely(tenant, ref));
+            } catch (Exception e) {
+                log.warn("AI-BOM tenant poll failed tenant={} failure={}", tenant.getId(), e.getClass().getSimpleName());
+            }
         }
     }
 
@@ -76,8 +81,12 @@ public class AiBomProjectionWorker {
     public void reconcile() {
         if (!enabled) return;
         for (Tenant tenant : tenants.listActiveTenants()) {
-            schedulingService.reconcileHeldAndDeferredSources(tenant);
-            vulnerabilityCorrelationService.reconcileAllForTenant(tenant);
+            try {
+                schedulingService.reconcileHeldAndDeferredSources(tenant);
+                vulnerabilityCorrelationService.reconcileAllForTenant(tenant);
+            } catch (Exception e) {
+                log.warn("AI-BOM tenant sweep failed tenant={} failure={}", tenant.getId(), e.getClass().getSimpleName());
+            }
         }
     }
 

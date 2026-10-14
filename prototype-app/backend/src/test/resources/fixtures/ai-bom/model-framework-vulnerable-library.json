@@ -1,0 +1,17 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:bf3ff536-49a1-4d74-a2d8-d97c9347a7db",
+  "version": 1,
+  "components": [
+    { "type": "machine-learning-model", "bom-ref": "model-1", "name": "example-weights", "version": "1", "purl": "pkg:huggingface/acme/example-weights@1" },
+    { "type": "library", "bom-ref": "framework", "name": "vllm", "version": "0.6.0", "purl": "pkg:pypi/vllm@0.6.0" },
+    { "type": "application", "bom-ref": "wrapper", "name": "runtime-wrapper", "version": "1", "purl": "pkg:generic/runtime-wrapper@1" },
+    { "type": "library", "bom-ref": "lib-1", "name": "log4j-core", "version": "2.14.1", "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1", "cpe": "cpe:2.3:a:apache:log4j:2.14.1:*:*:*:*:*:*:*" }
+  ],
+  "dependencies": [
+    { "ref": "model-1", "dependsOn": ["framework"] },
+    { "ref": "framework", "dependsOn": ["wrapper"] },
+    { "ref": "wrapper", "dependsOn": ["lib-1"] }
+  ]
+}

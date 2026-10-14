@@ -84,6 +84,14 @@ public class AiBomDeclaredResourceController {
         return readService.findingsAffecting(tenant, resourceId);
     }
 
+    @GetMapping("/{resourceId}/correlation")
+    @PreAuthorize("hasAnyRole('SECURITY_ANALYST','INVENTORY_ADMIN','TENANT_ADMIN','CREATOR','OPERATOR')")
+    public com.prototype.vulnwatch.dto.AiBomCorrelationEvidenceResponse getCorrelation(
+            @PathVariable UUID resourceId, @RequestParam(defaultValue="false") boolean history,
+            @RequestParam(defaultValue="0") int page, @RequestParam(defaultValue="50") int size) {
+        return readService.correlation(workspaceService.getWorkspace(), resourceId, history, page, size);
+    }
+
     @PostMapping("/{resourceId}/mapping/propose")
     @PreAuthorize("hasAnyRole('SECURITY_ANALYST','INVENTORY_ADMIN','TENANT_ADMIN','CREATOR')")
     @SensitiveTenantAction("ai_bom.mapping.proposed")
